@@ -148,13 +148,18 @@ Deno.serve(async (req) => {
 
     // Extract text content from the file
     let extractedText = "";
+    let actualPageCount = 0;
     try {
       if (isPptx) {
-        extractedText = await extractPptxText(arrayBuffer);
-        console.log(`Extracted ${extractedText.length} chars from PPTX`);
+        const result = await extractPptxText(arrayBuffer);
+        extractedText = result.text;
+        actualPageCount = result.pageCount;
+        console.log(`Extracted ${extractedText.length} chars, ${actualPageCount} slides from PPTX`);
       } else if (isPdf) {
-        extractedText = extractPdfText(arrayBuffer);
-        console.log(`Extracted ${extractedText.length} chars from PDF`);
+        const result = extractPdfText(arrayBuffer);
+        extractedText = result.text;
+        actualPageCount = result.pageCount;
+        console.log(`Extracted ${extractedText.length} chars, ${actualPageCount} pages from PDF`);
       }
     } catch (e) {
       console.error("Text extraction failed (non-fatal):", e);
