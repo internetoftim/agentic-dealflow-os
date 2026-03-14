@@ -113,6 +113,11 @@ export function useCreateDealWithUpload() {
         console.warn("Drive sync skipped:", e);
       }
 
+      // 5. Trigger AI deck analysis (fire-and-forget)
+      supabase.functions.invoke("process-deck", {
+        body: { dealId: deal.id, storagePath },
+      }).catch((e) => console.warn("Deck processing skipped:", e));
+
       return deal;
     },
     onSuccess: () => {
