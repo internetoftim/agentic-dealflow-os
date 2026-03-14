@@ -16,6 +16,8 @@ export interface Deal {
   pages: number | null;
   website: string | null;
   website_searching: boolean | null;
+  linkedin_url: string | null;
+  deep_research_status: string;
   ask_amount: string | null;
   valuation: string | null;
   revenue: string | null;
