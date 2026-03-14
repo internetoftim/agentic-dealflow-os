@@ -1,10 +1,84 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { BlobReader, ZipReader, TextWriter } from "https://esm.sh/@zip.js/zip.js@2.7.34";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers":
     "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
+
+/** Extract plain text from all slides in a PPTX file (which is a ZIP of XML). */
+async function extractPptxText(arrayBuffer: ArrayBuffer): Promise<string> {
+  const zipReader = new ZipReader(new BlobReader(new Blob([arrayBuffer])));
+  const entries = await zipReader.getEntries();
+
+  // Slide XML files are at ppt/slides/slide1.xml, slide2.xml, etc.
+  const slideEntries = entries
+    .filter((e) => /^ppt\/slides\/slide\d+\.xml$/i.test(e.filename))
+    .sort((a, b) => {
+      const numA = parseInt(a.filename.match(/slide(\d+)/i)?.[1] ?? "0");
+      const numB = parseInt(b.filename.match(/slide(\d+)/i)?.[1] ?? "0");
+      return numA - numB;
+    });
+
+  const slideTexts: string[] = [];
+  for (const entry of slideEntries) {
+    const writer = new TextWriter();
+    const xml = await entry.getData!(writer);
+    // Strip XML tags to get raw text, collapse whitespace
+    const text = xml
+      .replace(/<[^>]+>/g, " ")
+      .replace(/&amp;/g, "&")
+      .replace(/&lt;/g, "<")
+      .replace(/&gt;/g, ">")
+      .replace(/&quot;/g, '"')
+      .replace(/&apos;/g, "'")
+      .replace(/\s+/g, " ")
+      .trim();
+    if (text) {
+      const slideNum = entry.filename.match(/slide(\d+)/i)?.[1] ?? "?";
+      slideTexts.push(`[Slide ${slideNum}] ${text}`);
+    }
+  }
+
+  await zipReader.close();
+  return slideTexts.join("\n\n");
+}
+
+/** Very basic PDF text extraction — pulls text between stream markers. */
+function extractPdfText(arrayBuffer: ArrayBuffer): string {
+  const bytes = new Uint8Array(arrayBuffer);
+  const raw = new TextDecoder("latin1").decode(bytes);
+
+  // Try to extract text from PDF text objects (BT...ET blocks with Tj/TJ operators)
+  const textChunks: string[] = [];
+  const btPattern = /BT\s([\s\S]*?)ET/g;
+  let match;
+  while ((match = btPattern.exec(raw)) !== null) {
+    const block = match[1];
+    // Match parenthesized strings (Tj operator)
+    const tjPattern = /\(([^)]*)\)\s*Tj/g;
+    let tj;
+    while ((tj = tjPattern.exec(block)) !== null) {
+      const text = tj[1].replace(/\\n/g, "\n").replace(/\\\(/g, "(").replace(/\\\)/g, ")");
+      if (text.trim()) textChunks.push(text.trim());
+    }
+    // Match TJ arrays
+    const tjArrayPattern = /\[([^\]]*)\]\s*TJ/g;
+    let tja;
+    while ((tja = tjArrayPattern.exec(block)) !== null) {
+      const inner = tja[1];
+      const strPattern = /\(([^)]*)\)/g;
+      let s;
+      while ((s = strPattern.exec(inner)) !== null) {
+        const text = s[1].replace(/\\n/g, "\n").replace(/\\\(/g, "(").replace(/\\\)/g, ")");
+        if (text.trim()) textChunks.push(text.trim());
+      }
+    }
+  }
+
+  return textChunks.join(" ").replace(/\s+/g, " ").trim();
+}
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
@@ -58,7 +132,7 @@ Deno.serve(async (req) => {
       .single();
     const model = settings?.ai_model ?? "gpt-4o";
 
-    // Download PDF from Supabase storage
+    // Download file from Supabase storage
     const { data: fileData, error: downloadError } = await adminClient.storage
       .from("decks")
       .download(storagePath);
@@ -67,17 +141,43 @@ Deno.serve(async (req) => {
       throw new Error(`Failed to download file: ${downloadError?.message}`);
     }
 
-    // Convert PDF to base64 — OpenAI gpt-4o/gpt-5 can accept PDFs as base64 files
     const arrayBuffer = await fileData.arrayBuffer();
-    const base64 = btoa(
-      new Uint8Array(arrayBuffer).reduce((data, byte) => data + String.fromCharCode(byte), "")
-    );
+    const fileName = storagePath.split("/").pop()?.toLowerCase() ?? "";
+    const isPptx = fileName.endsWith(".pptx") || fileName.endsWith(".ppt");
+    const isPdf = fileName.endsWith(".pdf");
+
+    // Extract text content from the file
+    let extractedText = "";
+    try {
+      if (isPptx) {
+        extractedText = await extractPptxText(arrayBuffer);
+        console.log(`Extracted ${extractedText.length} chars from PPTX`);
+      } else if (isPdf) {
+        extractedText = extractPdfText(arrayBuffer);
+        console.log(`Extracted ${extractedText.length} chars from PDF`);
+      }
+    } catch (e) {
+      console.error("Text extraction failed (non-fatal):", e);
+    }
+
+    // Store extracted text in the sources table
+    if (extractedText) {
+      // Truncate to ~100K chars to avoid DB bloat
+      const truncated = extractedText.slice(0, 100_000);
+      await adminClient
+        .from("sources")
+        .update({ extracted_text: truncated })
+        .eq("deal_id", dealId)
+        .eq("user_id", user.id)
+        .eq("storage_path", storagePath);
+    }
 
     // Route to correct endpoint based on model
     const isSapinsapin = model === "gpt-oss-202b";
     const sapinsapinModel = "/models/gpt-oss-20b-balitanlp-cpt";
     const baseUrl = isSapinsapin ? SAPINSAPIN_BASE : OPENAI_BASE;
-    const apiKey = isSapinsapin ? sapinsapinApiKey : openaiApiKey;
+    const rawApiKey = isSapinsapin ? sapinsapinApiKey : openaiApiKey;
+    const apiKey = rawApiKey?.trim().replace(/[\r\n]/g, "");
 
     if (!apiKey) {
       throw new Error(isSapinsapin ? "APOLLO_API_KEY is not configured" : "OPENAI_API_KEY is not configured");
@@ -85,9 +185,39 @@ Deno.serve(async (req) => {
 
     const aiHeaders: Record<string, string> = { "Content-Type": "application/json" };
     if (isSapinsapin) {
-      aiHeaders["X-API-Key"] = apiKey!;
+      aiHeaders["X-API-Key"] = apiKey;
     } else {
       aiHeaders["Authorization"] = `Bearer ${apiKey}`;
+    }
+
+    // Build messages — for Sapinsapin (text-only), use extracted text; for OpenAI, use file attachment
+    const userContent: unknown[] = [];
+
+    if (isSapinsapin) {
+      // Sapinsapin: send extracted text as context
+      const deckText = extractedText
+        ? `Here is the full text content of the pitch deck:\n\n${extractedText.slice(0, 50_000)}`
+        : "No text could be extracted from the deck file.";
+      userContent.push({
+        type: "text",
+        text: `${deckText}\n\nAnalyze this pitch deck and extract metadata using the extract_deck_metadata tool.`,
+      });
+    } else {
+      // OpenAI: send as base64 file attachment
+      const base64 = btoa(
+        new Uint8Array(arrayBuffer).reduce((data, byte) => data + String.fromCharCode(byte), "")
+      );
+      userContent.push({
+        type: "file",
+        file: {
+          filename: isPptx ? "deck.pptx" : "deck.pdf",
+          file_data: `data:${isPptx ? "application/vnd.openxmlformats-officedocument.presentationml.presentation" : "application/pdf"};base64,${base64}`,
+        },
+      });
+      userContent.push({
+        type: "text",
+        text: "Analyze this pitch deck and extract metadata using the extract_deck_metadata tool.",
+      });
     }
 
     const aiResponse = await fetch(`${baseUrl}/v1/chat/completions`, {
@@ -102,19 +232,7 @@ Deno.serve(async (req) => {
           },
           {
             role: "user",
-            content: [
-              {
-                type: "file",
-                file: {
-                  filename: "deck.pdf",
-                  file_data: `data:application/pdf;base64,${base64}`,
-                },
-              },
-              {
-                type: "text",
-                text: "Analyze this pitch deck and extract metadata using the extract_deck_metadata tool.",
-              },
-            ],
+            content: userContent,
           },
         ],
         tools: [
@@ -122,7 +240,7 @@ Deno.serve(async (req) => {
             type: "function",
             function: {
               name: "extract_deck_metadata",
-              description: "Extract structured metadata from a startup pitch deck PDF.",
+              description: "Extract structured metadata from a startup pitch deck.",
               parameters: {
                 type: "object",
                 properties: {
@@ -180,8 +298,8 @@ Deno.serve(async (req) => {
 
     if (!aiResponse.ok) {
       const errText = await aiResponse.text();
-      console.error("OpenAI API error:", aiResponse.status, errText);
-      throw new Error(`OpenAI API error [${aiResponse.status}]: ${errText}`);
+      console.error("AI API error:", aiResponse.status, errText);
+      throw new Error(`AI API error [${aiResponse.status}]: ${errText}`);
     }
 
     const aiResult = await aiResponse.json();
@@ -189,7 +307,7 @@ Deno.serve(async (req) => {
     // Extract tool call arguments
     const toolCall = aiResult.choices?.[0]?.message?.tool_calls?.[0];
     if (!toolCall) {
-      throw new Error("No structured output returned from OpenAI");
+      throw new Error("No structured output returned from AI");
     }
 
     const metadata = JSON.parse(toolCall.function.arguments);
