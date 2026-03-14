@@ -8,7 +8,7 @@ const corsHeaders = {
 };
 
 /** Extract plain text from all slides in a PPTX file (which is a ZIP of XML). */
-async function extractPptxText(arrayBuffer: ArrayBuffer): Promise<string> {
+async function extractPptxText(arrayBuffer: ArrayBuffer): Promise<{ text: string; pageCount: number }> {
   const zipReader = new ZipReader(new BlobReader(new Blob([arrayBuffer])));
   const entries = await zipReader.getEntries();
 
@@ -25,7 +25,6 @@ async function extractPptxText(arrayBuffer: ArrayBuffer): Promise<string> {
   for (const entry of slideEntries) {
     const writer = new TextWriter();
     const xml = await entry.getData!(writer);
-    // Strip XML tags to get raw text, collapse whitespace
     const text = xml
       .replace(/<[^>]+>/g, " ")
       .replace(/&amp;/g, "&")
@@ -42,13 +41,16 @@ async function extractPptxText(arrayBuffer: ArrayBuffer): Promise<string> {
   }
 
   await zipReader.close();
-  return slideTexts.join("\n\n");
+  return { text: slideTexts.join("\n\n"), pageCount: slideEntries.length };
 }
 
 /** Very basic PDF text extraction — pulls text between stream markers. */
-function extractPdfText(arrayBuffer: ArrayBuffer): string {
+function extractPdfText(arrayBuffer: ArrayBuffer): { text: string; pageCount: number } {
   const bytes = new Uint8Array(arrayBuffer);
   const raw = new TextDecoder("latin1").decode(bytes);
+
+  // Count pages via /Type /Page entries (excluding /Type /Pages)
+  const pageCount = (raw.match(/\/Type\s*\/Page(?!\s*s)/g) || []).length;
 
   // Try to extract text from PDF text objects (BT...ET blocks with Tj/TJ operators)
   const textChunks: string[] = [];
@@ -56,14 +58,12 @@ function extractPdfText(arrayBuffer: ArrayBuffer): string {
   let match;
   while ((match = btPattern.exec(raw)) !== null) {
     const block = match[1];
-    // Match parenthesized strings (Tj operator)
     const tjPattern = /\(([^)]*)\)\s*Tj/g;
     let tj;
     while ((tj = tjPattern.exec(block)) !== null) {
       const text = tj[1].replace(/\\n/g, "\n").replace(/\\\(/g, "(").replace(/\\\)/g, ")");
       if (text.trim()) textChunks.push(text.trim());
     }
-    // Match TJ arrays
     const tjArrayPattern = /\[([^\]]*)\]\s*TJ/g;
     let tja;
     while ((tja = tjArrayPattern.exec(block)) !== null) {
@@ -77,7 +77,7 @@ function extractPdfText(arrayBuffer: ArrayBuffer): string {
     }
   }
 
-  return textChunks.join(" ").replace(/\s+/g, " ").trim();
+  return { text: textChunks.join(" ").replace(/\s+/g, " ").trim(), pageCount };
 }
 
 Deno.serve(async (req) => {
@@ -148,13 +148,18 @@ Deno.serve(async (req) => {
 
     // Extract text content from the file
     let extractedText = "";
+    let actualPageCount = 0;
     try {
       if (isPptx) {
-        extractedText = await extractPptxText(arrayBuffer);
-        console.log(`Extracted ${extractedText.length} chars from PPTX`);
+        const result = await extractPptxText(arrayBuffer);
+        extractedText = result.text;
+        actualPageCount = result.pageCount;
+        console.log(`Extracted ${extractedText.length} chars, ${actualPageCount} slides from PPTX`);
       } else if (isPdf) {
-        extractedText = extractPdfText(arrayBuffer);
-        console.log(`Extracted ${extractedText.length} chars from PDF`);
+        const result = extractPdfText(arrayBuffer);
+        extractedText = result.text;
+        actualPageCount = result.pageCount;
+        console.log(`Extracted ${extractedText.length} chars, ${actualPageCount} pages from PDF`);
       }
     } catch (e) {
       console.error("Text extraction failed (non-fatal):", e);
@@ -331,7 +336,8 @@ Deno.serve(async (req) => {
     if (metadata.revenue) updatePayload.revenue = metadata.revenue;
     if (metadata.growth) updatePayload.growth = metadata.growth;
     if (metadata.team_size) updatePayload.team_size = metadata.team_size;
-    if (metadata.page_count) updatePayload.pages = metadata.page_count;
+    // Use actual page count from file parsing; fall back to LLM's estimate
+    updatePayload.pages = actualPageCount > 0 ? actualPageCount : (metadata.page_count ?? null);
 
     const { error: updateError } = await adminClient
       .from("deals")
