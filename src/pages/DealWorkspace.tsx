@@ -175,6 +175,21 @@ export default function DealWorkspace() {
               <Search className="h-3 w-3 animate-pulse" /> Deep searching web…
             </span>
           ) : null}
+          {(activeDeal as any)?.linkedin_url && (
+            <a
+              href={(activeDeal as any).linkedin_url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1.5 rounded-full bg-info-muted px-2.5 py-1 text-xs font-medium text-info hover:underline"
+            >
+              <Linkedin className="h-3 w-3" /> LinkedIn
+            </a>
+          )}
+          {(activeDeal as any)?.deep_research_status === "researching" && (
+            <span className="inline-flex items-center gap-1.5 rounded-full bg-warning-muted px-2.5 py-1 text-xs font-medium text-warning">
+              <Search className="h-3 w-3 animate-pulse" /> Deep researching…
+            </span>
+          )}
           {activeDeal?.gdrive_file_id && (
             <a
               href={`https://drive.google.com/file/d/${activeDeal.gdrive_file_id}/view`}
