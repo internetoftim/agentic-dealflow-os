@@ -3,6 +3,7 @@ import { Navigate } from "react-router-dom";
 
 export default function LoginPage() {
   const { user, loading, signInWithGoogle } = useAuth();
+  const [email, setEmail] = useState("");
 
   if (loading) {
     return (
