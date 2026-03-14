@@ -23,10 +23,10 @@ Deno.serve(async (req) => {
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const supabaseAnonKey = Deno.env.get("SUPABASE_ANON_KEY")!;
-    const lovableApiKey = Deno.env.get("LOVABLE_API_KEY");
+    const openaiApiKey = Deno.env.get("OPENAI_API_KEY");
 
-    if (!lovableApiKey) {
-      throw new Error("LOVABLE_API_KEY is not configured");
+    if (!openaiApiKey) {
+      throw new Error("OPENAI_API_KEY is not configured");
     }
 
     const adminClient = createClient(supabaseUrl, supabaseServiceKey);
@@ -59,33 +59,34 @@ Deno.serve(async (req) => {
       throw new Error(`Failed to download file: ${downloadError?.message}`);
     }
 
-    // Convert PDF to base64 for Gemini multimodal
+    // Convert PDF to base64 — OpenAI gpt-4o/gpt-5 can accept PDFs as base64 files
     const arrayBuffer = await fileData.arrayBuffer();
     const base64 = btoa(
       new Uint8Array(arrayBuffer).reduce((data, byte) => data + String.fromCharCode(byte), "")
     );
 
-    // Call Gemini via Lovable AI Gateway with tool calling for structured output
-    const aiResponse = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+    // Call OpenAI directly with tool calling for structured output
+    const aiResponse = await fetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
       headers: {
-        Authorization: `Bearer ${lovableApiKey}`,
+        Authorization: `Bearer ${openaiApiKey}`,
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        model: "google/gemini-2.5-flash",
+        model: "gpt-4o",
         messages: [
           {
             role: "system",
-            content: `You are a VC analyst assistant. You analyze startup pitch decks (PDFs) and extract structured metadata. Be precise and concise. If information is not found, return null for that field.`,
+            content: `You are a VC analyst assistant. You analyze startup pitch decks and extract structured metadata. Be precise and concise. If information is not found, return null for that field.`,
           },
           {
             role: "user",
             content: [
               {
-                type: "image_url",
-                image_url: {
-                  url: `data:application/pdf;base64,${base64}`,
+                type: "file",
+                file: {
+                  filename: "deck.pdf",
+                  file_data: `data:application/pdf;base64,${base64}`,
                 },
               },
               {
@@ -109,7 +110,7 @@ Deno.serve(async (req) => {
                     description: "Name of the startup/company",
                   },
                   website: {
-                    type: "string",
+                    type: ["string", "null"],
                     description: "Company website URL if found (e.g. https://example.com)",
                   },
                   stage: {
@@ -122,23 +123,23 @@ Deno.serve(async (req) => {
                     description: "Primary sector/industry (e.g. Fintech, SaaS, AI/ML, Healthcare, Climate)",
                   },
                   ask_amount: {
-                    type: "string",
+                    type: ["string", "null"],
                     description: "Amount being raised (e.g. '$5M')",
                   },
                   valuation: {
-                    type: "string",
+                    type: ["string", "null"],
                     description: "Valuation if mentioned (e.g. '$25M pre-money')",
                   },
                   revenue: {
-                    type: "string",
+                    type: ["string", "null"],
                     description: "Current revenue/ARR if mentioned (e.g. '$1.2M ARR')",
                   },
                   growth: {
-                    type: "string",
+                    type: ["string", "null"],
                     description: "Growth rate if mentioned (e.g. '3x YoY')",
                   },
                   team_size: {
-                    type: "string",
+                    type: ["string", "null"],
                     description: "Team size if mentioned (e.g. '15')",
                   },
                   page_count: {
@@ -146,7 +147,7 @@ Deno.serve(async (req) => {
                     description: "Approximate number of pages/slides in the deck",
                   },
                 },
-                required: ["startup_name", "stage", "sector"],
+                required: ["startup_name", "stage", "sector", "page_count"],
                 additionalProperties: false,
               },
             },
@@ -157,21 +158,9 @@ Deno.serve(async (req) => {
     });
 
     if (!aiResponse.ok) {
-      if (aiResponse.status === 429) {
-        return new Response(JSON.stringify({ error: "Rate limited, please try again later." }), {
-          status: 429,
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        });
-      }
-      if (aiResponse.status === 402) {
-        return new Response(JSON.stringify({ error: "AI credits exhausted. Please add funds." }), {
-          status: 402,
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        });
-      }
       const errText = await aiResponse.text();
-      console.error("AI gateway error:", aiResponse.status, errText);
-      throw new Error(`AI gateway error [${aiResponse.status}]: ${errText}`);
+      console.error("OpenAI API error:", aiResponse.status, errText);
+      throw new Error(`OpenAI API error [${aiResponse.status}]: ${errText}`);
     }
 
     const aiResult = await aiResponse.json();
@@ -179,7 +168,7 @@ Deno.serve(async (req) => {
     // Extract tool call arguments
     const toolCall = aiResult.choices?.[0]?.message?.tool_calls?.[0];
     if (!toolCall) {
-      throw new Error("No structured output returned from AI");
+      throw new Error("No structured output returned from OpenAI");
     }
 
     const metadata = JSON.parse(toolCall.function.arguments);
