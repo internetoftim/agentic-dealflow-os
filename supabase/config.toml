@@ -2,3 +2,6 @@ project_id = "fbiigltzcxkqjjadqzgl"
 
 [functions.sync-to-drive]
 verify_jwt = false
+
+[functions.process-deck]
+verify_jwt = false
