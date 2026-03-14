@@ -107,6 +107,47 @@ export default function SettingsPage() {
         </div>
       </section>
 
+      {/* Deep Research Provider */}
+      <section className="mb-8">
+        <h2 className="text-sm font-semibold text-foreground mb-4 flex items-center gap-2">
+          <Search className="h-4 w-4 text-muted-foreground" />
+          Deep Research Agent
+        </h2>
+        <div className="rounded-lg border border-border bg-card p-5">
+          <p className="text-xs text-muted-foreground mb-3">Choose which engine powers company deep research after deck extraction.</p>
+          <div className="grid grid-cols-2 gap-2">
+            {([
+              { value: "custom" as const, label: "Custom Agent", description: "Uses your selected AI model + Firecrawl search" },
+              { value: "firecrawl" as const, label: "Firecrawl Only", description: "Firecrawl search + scrape, no LLM extraction" },
+            ]).map((opt) => (
+              <button
+                key={opt.value}
+                onClick={async () => {
+                  if (!user) return;
+                  setDeepResearchProvider(opt.value);
+                  const { error } = await supabase
+                    .from("user_settings")
+                    .upsert({ user_id: user.id, deep_research_provider: opt.value } as any, { onConflict: "user_id" });
+                  if (error) toast.error("Failed to save preference");
+                  else toast.success(`Deep research set to ${opt.label}`);
+                }}
+                className={`text-left rounded-lg border p-3 transition-colors ${
+                  deepResearchProvider === opt.value
+                    ? "border-primary bg-primary/5"
+                    : "border-border hover:border-primary/40 hover:bg-accent"
+                }`}
+              >
+                <div className="flex items-center gap-2">
+                  <span className="text-sm font-medium text-foreground">{opt.label}</span>
+                  {deepResearchProvider === opt.value && <Check className="h-3.5 w-3.5 text-primary ml-auto" />}
+                </div>
+                <p className="text-xs text-muted-foreground mt-0.5">{opt.description}</p>
+              </button>
+            ))}
+          </div>
+        </div>
+      </section>
+
       {/* Workspace Auth */}
       <section className="mb-8">
         <h2 className="text-sm font-semibold text-foreground mb-4 flex items-center gap-2">
