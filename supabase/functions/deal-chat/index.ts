@@ -97,11 +97,19 @@ Be concise, data-driven, and opinionated when asked for your take. Use markdown 
 
 ${dealContext}`;
 
-    // Stream from OpenAI
-    const aiResponse = await fetch("https://api.openai.com/v1/chat/completions", {
+    // Route to correct endpoint based on model
+    const isApollo = model === "gpt-oss-202b";
+    const baseUrl = isApollo ? APOLLO_BASE : OPENAI_BASE;
+    const apiKey = isApollo ? apolloApiKey : openaiApiKey;
+
+    if (!apiKey) {
+      throw new Error(isApollo ? "APOLLO_API_KEY is not configured" : "OPENAI_API_KEY is not configured");
+    }
+
+    const aiResponse = await fetch(`${baseUrl}/v1/chat/completions`, {
       method: "POST",
       headers: {
-        Authorization: `Bearer ${openaiApiKey}`,
+        Authorization: `Bearer ${apiKey}`,
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
