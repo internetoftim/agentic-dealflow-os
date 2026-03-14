@@ -72,6 +72,9 @@ export function useCreateDealWithUpload() {
     mutationFn: async ({ file, name }: { file: File; name: string }) => {
       if (!user) throw new Error("Not authenticated");
 
+      // 0. Compress the PDF client-side
+      const { compressed, pages } = await compressPdf(file);
+
       // 1. Create the deal
       const { data: deal, error: dealError } = await supabase
         .from("deals")
@@ -81,16 +84,18 @@ export function useCreateDealWithUpload() {
           source: "manual",
           status: "extracting",
           deck_size: `${(file.size / (1024 * 1024)).toFixed(1)}MB`,
+          compressed_size: `${(compressed.size / (1024 * 1024)).toFixed(1)}MB`,
+          pages,
         })
         .select()
         .single();
       if (dealError) throw dealError;
 
-      // 2. Upload file to storage
+      // 2. Upload compressed file to storage
       const storagePath = `${user.id}/${deal.id}/${file.name}`;
       const { error: uploadError } = await supabase.storage
         .from("decks")
-        .upload(storagePath, file);
+        .upload(storagePath, compressed);
       if (uploadError) throw uploadError;
 
       // 3. Create source record
