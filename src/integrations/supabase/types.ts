@@ -97,6 +97,7 @@ export type Database = {
           compressed_size: string | null
           created_at: string
           deal_id: string
+          extracted_text: string | null
           file_name: string
           id: string
           original_size: string | null
@@ -109,6 +110,7 @@ export type Database = {
           compressed_size?: string | null
           created_at?: string
           deal_id: string
+          extracted_text?: string | null
           file_name: string
           id?: string
           original_size?: string | null
@@ -121,6 +123,7 @@ export type Database = {
           compressed_size?: string | null
           created_at?: string
           deal_id?: string
+          extracted_text?: string | null
           file_name?: string
           id?: string
           original_size?: string | null
