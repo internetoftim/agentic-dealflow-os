@@ -236,7 +236,7 @@ export default function SettingsPage() {
                 <input
                   type="text"
                   placeholder="Paste a recent filename example"
-                  defaultValue="2024-01-15 - NovaStar AI - Series A - AI_ML.pdf"
+                  defaultValue="novastar.ai deck Mar2026 p24.pdf"
                   className="flex-1 rounded-md border border-input bg-card px-3 py-2 text-sm outline-none placeholder:text-muted-foreground focus:ring-1 focus:ring-ring"
                 />
                 <button
