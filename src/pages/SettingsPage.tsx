@@ -59,6 +59,7 @@ export default function SettingsPage() {
           setDriveSync(data.drive_sync_enabled ?? true);
           setSpamFilter(data.spam_filter_enabled ?? true);
           setDeepResearchProvider((data as any).deep_research_provider ?? "custom");
+          setDriveFolder((data as any).drive_folder ?? "WAITING ROOM");
           if (data.naming_pattern) {
             setNamingPattern(data.naming_pattern);
           }
