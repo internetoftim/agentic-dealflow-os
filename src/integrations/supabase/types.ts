@@ -14,7 +14,173 @@ export type Database = {
   }
   public: {
     Tables: {
-      [_ in never]: never
+      deals: {
+        Row: {
+          ask_amount: string | null
+          auto_ingested: boolean
+          compressed_size: string | null
+          created_at: string
+          deck_size: string | null
+          gdrive_file_id: string | null
+          growth: string | null
+          id: string
+          memo_draft: string | null
+          name: string
+          nrr: string | null
+          pages: number | null
+          revenue: string | null
+          sector: string
+          source: string
+          stage: string
+          status: string
+          team_size: string | null
+          updated_at: string
+          user_id: string
+          valuation: string | null
+          website: string | null
+          website_searching: boolean | null
+        }
+        Insert: {
+          ask_amount?: string | null
+          auto_ingested?: boolean
+          compressed_size?: string | null
+          created_at?: string
+          deck_size?: string | null
+          gdrive_file_id?: string | null
+          growth?: string | null
+          id?: string
+          memo_draft?: string | null
+          name: string
+          nrr?: string | null
+          pages?: number | null
+          revenue?: string | null
+          sector?: string
+          source?: string
+          stage?: string
+          status?: string
+          team_size?: string | null
+          updated_at?: string
+          user_id: string
+          valuation?: string | null
+          website?: string | null
+          website_searching?: boolean | null
+        }
+        Update: {
+          ask_amount?: string | null
+          auto_ingested?: boolean
+          compressed_size?: string | null
+          created_at?: string
+          deck_size?: string | null
+          gdrive_file_id?: string | null
+          growth?: string | null
+          id?: string
+          memo_draft?: string | null
+          name?: string
+          nrr?: string | null
+          pages?: number | null
+          revenue?: string | null
+          sector?: string
+          source?: string
+          stage?: string
+          status?: string
+          team_size?: string | null
+          updated_at?: string
+          user_id?: string
+          valuation?: string | null
+          website?: string | null
+          website_searching?: boolean | null
+        }
+        Relationships: []
+      }
+      sources: {
+        Row: {
+          compressed_size: string | null
+          created_at: string
+          deal_id: string
+          file_name: string
+          id: string
+          original_size: string | null
+          processing_status: string
+          source_type: string
+          storage_path: string | null
+          user_id: string
+        }
+        Insert: {
+          compressed_size?: string | null
+          created_at?: string
+          deal_id: string
+          file_name: string
+          id?: string
+          original_size?: string | null
+          processing_status?: string
+          source_type?: string
+          storage_path?: string | null
+          user_id: string
+        }
+        Update: {
+          compressed_size?: string | null
+          created_at?: string
+          deal_id?: string
+          file_name?: string
+          id?: string
+          original_size?: string | null
+          processing_status?: string
+          source_type?: string
+          storage_path?: string | null
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "sources_deal_id_fkey"
+            columns: ["deal_id"]
+            isOneToOne: false
+            referencedRelation: "deals"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      user_settings: {
+        Row: {
+          created_at: string
+          drive_sync_enabled: boolean | null
+          gmail_label_enabled: boolean | null
+          google_provider_refresh_token: string | null
+          google_provider_token: string | null
+          id: string
+          naming_mode: string | null
+          naming_pattern: string | null
+          spam_filter_enabled: boolean | null
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          drive_sync_enabled?: boolean | null
+          gmail_label_enabled?: boolean | null
+          google_provider_refresh_token?: string | null
+          google_provider_token?: string | null
+          id?: string
+          naming_mode?: string | null
+          naming_pattern?: string | null
+          spam_filter_enabled?: boolean | null
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          drive_sync_enabled?: boolean | null
+          gmail_label_enabled?: boolean | null
+          google_provider_refresh_token?: string | null
+          google_provider_token?: string | null
+          id?: string
+          naming_mode?: string | null
+          naming_pattern?: string | null
+          spam_filter_enabled?: boolean | null
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never
