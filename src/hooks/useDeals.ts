@@ -16,6 +16,8 @@ export interface Deal {
   pages: number | null;
   website: string | null;
   website_searching: boolean | null;
+  linkedin_url: string | null;
+  deep_research_status: string;
   ask_amount: string | null;
   valuation: string | null;
   revenue: string | null;
@@ -116,6 +118,11 @@ export function useCreateDealWithUpload() {
       // 5. Trigger AI deck analysis (fire-and-forget)
       supabase.functions.invoke("process-deck", {
         body: { dealId: deal.id, storagePath },
+      }).then(() => {
+        // After deck processing, trigger deep research
+        supabase.functions.invoke("deep-research", {
+          body: { dealId: deal.id },
+        }).catch((e) => console.warn("Deep research skipped:", e));
       }).catch((e) => console.warn("Deck processing skipped:", e));
 
       return deal;

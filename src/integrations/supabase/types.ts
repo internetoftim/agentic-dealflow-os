@@ -21,9 +21,11 @@ export type Database = {
           compressed_size: string | null
           created_at: string
           deck_size: string | null
+          deep_research_status: string
           gdrive_file_id: string | null
           growth: string | null
           id: string
+          linkedin_url: string | null
           memo_draft: string | null
           name: string
           nrr: string | null
@@ -46,9 +48,11 @@ export type Database = {
           compressed_size?: string | null
           created_at?: string
           deck_size?: string | null
+          deep_research_status?: string
           gdrive_file_id?: string | null
           growth?: string | null
           id?: string
+          linkedin_url?: string | null
           memo_draft?: string | null
           name: string
           nrr?: string | null
@@ -71,9 +75,11 @@ export type Database = {
           compressed_size?: string | null
           created_at?: string
           deck_size?: string | null
+          deep_research_status?: string
           gdrive_file_id?: string | null
           growth?: string | null
           id?: string
+          linkedin_url?: string | null
           memo_draft?: string | null
           name?: string
           nrr?: string | null

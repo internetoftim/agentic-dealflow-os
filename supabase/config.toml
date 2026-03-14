@@ -8,3 +8,6 @@ verify_jwt = false
 
 [functions.deal-chat]
 verify_jwt = false
+
+[functions.deep-research]
+verify_jwt = false
