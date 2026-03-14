@@ -21,7 +21,7 @@ export default function DealWorkspace() {
   const activeDeal = deals?.find((d) => d.id === selectedDealId) ?? deals?.[0];
 
   const handleFileDrop = useCallback(
-    async (e: React.DragEvent<HTMLDivElement>) => {
+    async (e: React.DragEvent<HTMLLabelElement>) => {
       e.preventDefault();
       const file = e.dataTransfer.files[0];
       if (!file) return;
