@@ -61,14 +61,23 @@ Deno.serve(async (req) => {
 
     // Fetch deal context if dealId provided
     let dealContext = "";
+    let deckContent = "";
     if (dealId) {
-      const { data: deal } = await adminClient
-        .from("deals")
-        .select("*")
-        .eq("id", dealId)
-        .eq("user_id", user.id)
-        .single();
+      const [dealResult, sourcesResult] = await Promise.all([
+        adminClient
+          .from("deals")
+          .select("*")
+          .eq("id", dealId)
+          .eq("user_id", user.id)
+          .single(),
+        adminClient
+          .from("sources")
+          .select("file_name, extracted_text")
+          .eq("deal_id", dealId)
+          .eq("user_id", user.id),
+      ]);
 
+      const deal = dealResult.data;
       if (deal) {
         dealContext = `
 CURRENT DEAL CONTEXT:
@@ -87,15 +96,26 @@ CURRENT DEAL CONTEXT:
 - Memo Draft: ${deal.memo_draft ?? "None yet"}
 `;
       }
+
+      // Include extracted slide/page text from uploaded sources
+      const sources = sourcesResult.data ?? [];
+      const sourceTexts = sources
+        .filter((s: any) => s.extracted_text)
+        .map((s: any) => `=== Source: ${s.file_name} ===\n${s.extracted_text}`)
+        .join("\n\n");
+      if (sourceTexts) {
+        // Truncate to ~50K chars to stay within context limits
+        deckContent = `\n\nFULL DECK CONTENT:\n${sourceTexts.slice(0, 50_000)}`;
+      }
     }
 
     const systemPrompt = `You are a senior VC analyst assistant called AgenticVC. You help venture capital investors analyze startup pitch decks and deals.
 
-You have access to the deal data extracted from pitch decks. Answer questions about the deal, provide analysis, and help draft investment memos.
+You have access to the deal data extracted from pitch decks AND the full text content of uploaded deck slides/pages. Use this content to answer detailed questions about the deal, provide analysis, and help draft investment memos.
 
 Be concise, data-driven, and opinionated when asked for your take. Use markdown formatting for structured responses.
 
-${dealContext}`;
+${dealContext}${deckContent}`;
 
     // Route to correct endpoint based on model
     const isSapinsapin = model === "gpt-oss-202b";
