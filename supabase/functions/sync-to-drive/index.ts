@@ -6,6 +6,45 @@ const corsHeaders = {
     "authorization, x-client-info, apikey, content-type",
 };
 
+/**
+ * Apply a naming pattern to generate a Drive filename.
+ * Supported tokens: <WEBSITE>, <MonthYYYY>, <pages>, <NAME>, <SECTOR>, <STAGE>
+ */
+function applyNamingPattern(
+  pattern: string,
+  deal: { name: string; website?: string | null; pages?: number | null; sector?: string; stage?: string }
+): string {
+  const now = new Date();
+  const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  const monthYYYY = `${monthNames[now.getMonth()]}${now.getFullYear()}`;
+
+  // Extract domain from website URL or fall back to deal name
+  let websiteName = deal.name;
+  if (deal.website) {
+    try {
+      const url = new URL(deal.website.startsWith("http") ? deal.website : `https://${deal.website}`);
+      websiteName = url.hostname.replace(/^www\./, "");
+    } catch {
+      websiteName = deal.website;
+    }
+  }
+
+  let result = pattern
+    .replace(/<WEBSITE>/gi, websiteName)
+    .replace(/<MonthYYYY>/gi, monthYYYY)
+    .replace(/<pages>/gi, String(deal.pages ?? 0))
+    .replace(/<NAME>/gi, deal.name)
+    .replace(/<SECTOR>/gi, deal.sector ?? "Unknown")
+    .replace(/<STAGE>/gi, deal.stage ?? "Unknown");
+
+  // Ensure .pdf extension
+  if (!result.toLowerCase().endsWith(".pdf")) {
+    result += ".pdf";
+  }
+
+  return result;
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
@@ -23,9 +62,7 @@ Deno.serve(async (req) => {
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 
-    // Admin client to read storage & settings
     const adminClient = createClient(supabaseUrl, supabaseServiceKey);
-    // User client for auth context
     const userClient = createClient(supabaseUrl, Deno.env.get("SUPABASE_ANON_KEY")!, {
       global: { headers: { Authorization: authHeader } },
     });
@@ -46,10 +83,10 @@ Deno.serve(async (req) => {
       });
     }
 
-    // Get user's Google token
+    // Get user's Google token and naming settings
     const { data: settings } = await adminClient
       .from("user_settings")
-      .select("google_provider_token, drive_sync_enabled")
+      .select("google_provider_token, drive_sync_enabled, naming_pattern, naming_mode")
       .eq("user_id", user.id)
       .single();
 
@@ -60,6 +97,19 @@ Deno.serve(async (req) => {
       );
     }
 
+    // Get deal details for naming pattern
+    const { data: deal } = await adminClient
+      .from("deals")
+      .select("name, website, pages, sector, stage")
+      .eq("id", dealId)
+      .single();
+
+    // Determine the file name for Drive
+    const namingPattern = settings.naming_pattern || "<WEBSITE> deck <MonthYYYY> p<pages>";
+    const driveFileName = deal
+      ? applyNamingPattern(namingPattern, deal)
+      : fileName;
+
     // Download file from Supabase storage
     const { data: fileData, error: downloadError } = await adminClient.storage
       .from("decks")
@@ -68,9 +118,9 @@ Deno.serve(async (req) => {
       throw new Error(`Failed to download file: ${downloadError?.message}`);
     }
 
-    // Upload to Google Drive
+    // Upload to Google Drive with the formatted name
     const metadata = {
-      name: fileName,
+      name: driveFileName,
       mimeType: "application/pdf",
     };
 
@@ -99,14 +149,13 @@ Deno.serve(async (req) => {
 
     const driveFile = await driveRes.json();
 
-    // Update deal with Drive file ID
     await adminClient
       .from("deals")
       .update({ gdrive_file_id: driveFile.id, status: "memo-ready" })
       .eq("id", dealId);
 
     return new Response(
-      JSON.stringify({ success: true, driveFileId: driveFile.id }),
+      JSON.stringify({ success: true, driveFileId: driveFile.id, driveFileName }),
       { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
   } catch (error) {

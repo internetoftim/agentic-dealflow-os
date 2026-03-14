@@ -11,3 +11,6 @@ verify_jwt = false
 
 [functions.deep-research]
 verify_jwt = false
+
+[functions.detect-pattern]
+verify_jwt = false
