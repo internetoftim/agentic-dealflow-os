@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Sparkles, Check, Mail, HardDrive, Shield, Bot } from "lucide-react";
+import { Sparkles, Check, Mail, HardDrive, Shield, Bot, Search } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { toast } from "sonner";
