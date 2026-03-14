@@ -1,0 +1,1 @@
+ALTER TABLE public.user_settings ADD COLUMN IF NOT EXISTS ai_model text NOT NULL DEFAULT 'gpt-4o';
