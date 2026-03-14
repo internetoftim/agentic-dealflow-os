@@ -5,6 +5,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { toast } from "sonner";
 
 const AI_MODELS = [
+  { value: "gpt-oss-202b", label: "GPT-OSS 202B", description: "Apollo inference bridge — default" },
   { value: "gpt-4o", label: "GPT-4o", description: "Best multimodal, strong reasoning" },
   { value: "gpt-5-mini", label: "GPT-5 Mini", description: "Fast & cost-effective" },
   { value: "gpt-5", label: "GPT-5", description: "Most capable, complex tasks" },
