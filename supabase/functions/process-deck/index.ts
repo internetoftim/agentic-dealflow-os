@@ -336,7 +336,8 @@ Deno.serve(async (req) => {
     if (metadata.revenue) updatePayload.revenue = metadata.revenue;
     if (metadata.growth) updatePayload.growth = metadata.growth;
     if (metadata.team_size) updatePayload.team_size = metadata.team_size;
-    if (metadata.page_count) updatePayload.pages = metadata.page_count;
+    // Use actual page count from file parsing; fall back to LLM's estimate
+    updatePayload.pages = actualPageCount > 0 ? actualPageCount : (metadata.page_count ?? null);
 
     const { error: updateError } = await adminClient
       .from("deals")
