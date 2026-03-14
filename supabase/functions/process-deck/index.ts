@@ -24,9 +24,9 @@ Deno.serve(async (req) => {
     const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const supabaseAnonKey = Deno.env.get("SUPABASE_ANON_KEY")!;
     const openaiApiKey = Deno.env.get("OPENAI_API_KEY");
-    const apolloApiKey = Deno.env.get("APOLLO_API_KEY");
+    const sapinsapinApiKey = Deno.env.get("APOLLO_API_KEY");
 
-    const APOLLO_BASE = "https://apollo-inference-bridge.am1-aks.apolloglobal.net";
+    const SAPINSAPIN_BASE = "https://apollo-inference-bridge.am1-aks.apolloglobal.net";
     const OPENAI_BASE = "https://api.openai.com";
 
     const adminClient = createClient(supabaseUrl, supabaseServiceKey);
