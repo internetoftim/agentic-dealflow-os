@@ -50,6 +50,14 @@ Deno.serve(async (req) => {
       });
     }
 
+    // Fetch user's model preference
+    const { data: settings } = await adminClient
+      .from("user_settings")
+      .select("ai_model")
+      .eq("user_id", user.id)
+      .single();
+    const model = settings?.ai_model ?? "gpt-4o";
+
     // Download PDF from Supabase storage
     const { data: fileData, error: downloadError } = await adminClient.storage
       .from("decks")
@@ -73,7 +81,7 @@ Deno.serve(async (req) => {
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        model: "gpt-5-mini",
+        model,
         messages: [
           {
             role: "system",

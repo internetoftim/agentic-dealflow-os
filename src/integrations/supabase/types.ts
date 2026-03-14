@@ -141,6 +141,7 @@ export type Database = {
       }
       user_settings: {
         Row: {
+          ai_model: string
           created_at: string
           drive_sync_enabled: boolean | null
           gmail_label_enabled: boolean | null
@@ -154,6 +155,7 @@ export type Database = {
           user_id: string
         }
         Insert: {
+          ai_model?: string
           created_at?: string
           drive_sync_enabled?: boolean | null
           gmail_label_enabled?: boolean | null
@@ -167,6 +169,7 @@ export type Database = {
           user_id: string
         }
         Update: {
+          ai_model?: string
           created_at?: string
           drive_sync_enabled?: boolean | null
           gmail_label_enabled?: boolean | null

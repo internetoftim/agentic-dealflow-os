@@ -1,5 +1,15 @@
-import { useState } from "react";
-import { Sparkles, Check, Mail, HardDrive, Shield } from "lucide-react";
+import { useState, useEffect } from "react";
+import { Sparkles, Check, Mail, HardDrive, Shield, Bot } from "lucide-react";
+import { supabase } from "@/integrations/supabase/client";
+import { useAuth } from "@/contexts/AuthContext";
+import { toast } from "sonner";
+
+const AI_MODELS = [
+  { value: "gpt-4o", label: "GPT-4o", description: "Best multimodal, strong reasoning" },
+  { value: "gpt-5-mini", label: "GPT-5 Mini", description: "Fast & cost-effective" },
+  { value: "gpt-5", label: "GPT-5", description: "Most capable, complex tasks" },
+  { value: "o3-mini", label: "o3-mini", description: "Reasoning model, math & code" },
+] as const;
 
 function Toggle({ checked, onChange }: { checked: boolean; onChange: (v: boolean) => void }) {
   return (
@@ -17,17 +27,84 @@ function Toggle({ checked, onChange }: { checked: boolean; onChange: (v: boolean
 }
 
 export default function SettingsPage() {
+  const { user } = useAuth();
   const [gmailLabel, setGmailLabel] = useState(true);
   const [driveSync, setDriveSync] = useState(true);
   const [spamFilter, setSpamFilter] = useState(true);
   const [namingTab, setNamingTab] = useState<"auto" | "manual">("auto");
   const [patternDetected, setPatternDetected] = useState(false);
+  const [aiModel, setAiModel] = useState("gpt-4o");
+  const [savingModel, setSavingModel] = useState(false);
+
+  // Load settings from DB
+  useEffect(() => {
+    if (!user) return;
+    supabase
+      .from("user_settings")
+      .select("ai_model, gmail_label_enabled, drive_sync_enabled, spam_filter_enabled")
+      .eq("user_id", user.id)
+      .single()
+      .then(({ data }) => {
+        if (data) {
+          setAiModel(data.ai_model ?? "gpt-4o");
+          setGmailLabel(data.gmail_label_enabled ?? true);
+          setDriveSync(data.drive_sync_enabled ?? true);
+          setSpamFilter(data.spam_filter_enabled ?? true);
+        }
+      });
+  }, [user]);
+
+  const handleModelChange = async (model: string) => {
+    if (!user) return;
+    setAiModel(model);
+    setSavingModel(true);
+    const { error } = await supabase
+      .from("user_settings")
+      .upsert({ user_id: user.id, ai_model: model }, { onConflict: "user_id" });
+    setSavingModel(false);
+    if (error) {
+      toast.error("Failed to save model preference");
+    } else {
+      toast.success(`Model set to ${AI_MODELS.find((m) => m.value === model)?.label}`);
+    }
+  };
 
   return (
     <div className="p-6 max-w-3xl">
       <h1 className="text-xl font-semibold text-foreground mb-6">Settings</h1>
 
-      {/* Section A */}
+      {/* AI Model Selection */}
+      <section className="mb-8">
+        <h2 className="text-sm font-semibold text-foreground mb-4 flex items-center gap-2">
+          <Bot className="h-4 w-4 text-muted-foreground" />
+          AI Model
+        </h2>
+        <div className="rounded-lg border border-border bg-card p-5">
+          <p className="text-xs text-muted-foreground mb-3">Select the OpenAI model used for deck analysis, chat, and memo generation.</p>
+          <div className="grid grid-cols-2 gap-2">
+            {AI_MODELS.map((model) => (
+              <button
+                key={model.value}
+                onClick={() => handleModelChange(model.value)}
+                disabled={savingModel}
+                className={`text-left rounded-lg border p-3 transition-colors ${
+                  aiModel === model.value
+                    ? "border-primary bg-primary/5"
+                    : "border-border hover:border-primary/40 hover:bg-accent"
+                }`}
+              >
+                <div className="flex items-center gap-2">
+                  <span className="text-sm font-medium text-foreground">{model.label}</span>
+                  {aiModel === model.value && <Check className="h-3.5 w-3.5 text-primary ml-auto" />}
+                </div>
+                <p className="text-xs text-muted-foreground mt-0.5">{model.description}</p>
+              </button>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      {/* Workspace Auth */}
       <section className="mb-8">
         <h2 className="text-sm font-semibold text-foreground mb-4 flex items-center gap-2">
           <Mail className="h-4 w-4 text-muted-foreground" />
@@ -55,7 +132,7 @@ export default function SettingsPage() {
         </div>
       </section>
 
-      {/* Section B */}
+      {/* Firm Deal Desk */}
       <section className="mb-8">
         <h2 className="text-sm font-semibold text-foreground mb-4 flex items-center gap-2">
           <Shield className="h-4 w-4 text-muted-foreground" />
@@ -86,7 +163,7 @@ export default function SettingsPage() {
         </div>
       </section>
 
-      {/* Section C */}
+      {/* Naming Conventions */}
       <section>
         <h2 className="text-sm font-semibold text-foreground mb-4 flex items-center gap-2">
           <Sparkles className="h-4 w-4 text-muted-foreground" />
