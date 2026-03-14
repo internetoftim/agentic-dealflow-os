@@ -9,6 +9,10 @@ const MAX_SIZE_BYTES = 20 * 1024 * 1024; // 20 MB
  * Returns the compressed File (or original if already under limit).
  */
 export async function compressPdf(file: File): Promise<{ compressed: File; pages: number }> {
+  if (file.type !== "application/pdf" && !file.name.toLowerCase().endsWith(".pdf")) {
+    throw new Error("Please upload a PDF file. Other formats (PPTX, DOCX, etc.) are not supported yet.");
+  }
+
   const arrayBuffer = await file.arrayBuffer();
   const pdfDoc = await PDFDocument.load(arrayBuffer, { ignoreEncryption: true });
 
