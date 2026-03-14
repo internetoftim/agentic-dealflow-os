@@ -6,11 +6,19 @@ interface AuthContextType {
   user: User | null;
   session: Session | null;
   loading: boolean;
-  signInWithGoogle: (loginHint?: string) => Promise<void>;
+  signInWithGoogle: () => Promise<void>;
   signOut: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
+
+function isInIframe(): boolean {
+  try {
+    return window.self !== window.top;
+  } catch {
+    return true;
+  }
+}
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
@@ -30,7 +38,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setUser(session?.user ?? null);
         setLoading(false);
 
-        // Store Google provider token for Drive access
         if (session?.provider_token) {
           await supabase.from("user_settings").upsert({
             user_id: session.user.id,
@@ -44,18 +51,57 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return () => subscription.unsubscribe();
   }, []);
 
-  const signInWithGoogle = async (loginHint?: string) => {
-    await supabase.auth.signInWithOAuth({
-      provider: "google",
-      options: {
-        scopes: "https://www.googleapis.com/auth/drive.file",
-        queryParams: {
-          access_type: "offline",
-          prompt: "consent",
-          ...(loginHint ? { login_hint: loginHint } : {}),
+  const signInWithGoogle = async () => {
+    if (isInIframe()) {
+      // In iframe (preview): use skipBrowserRedirect + popup to avoid cookie issues
+      const { data, error } = await supabase.auth.signInWithOAuth({
+        provider: "google",
+        options: {
+          scopes: "https://www.googleapis.com/auth/drive.file",
+          queryParams: {
+            access_type: "offline",
+            prompt: "consent",
+          },
+          skipBrowserRedirect: true,
         },
-      },
-    });
+      });
+
+      if (error) throw error;
+
+      if (data?.url) {
+        const popup = window.open(data.url, "oauth", "width=500,height=600");
+
+        if (!popup) {
+          // Popup blocked — fall back to opening in new tab
+          window.open(data.url, "_blank");
+          return;
+        }
+
+        // Poll for popup close and refresh session
+        const timer = setInterval(async () => {
+          if (popup.closed) {
+            clearInterval(timer);
+            const { data: { session } } = await supabase.auth.getSession();
+            if (session) {
+              setSession(session);
+              setUser(session.user);
+            }
+          }
+        }, 500);
+      }
+    } else {
+      // Normal flow for published app
+      await supabase.auth.signInWithOAuth({
+        provider: "google",
+        options: {
+          scopes: "https://www.googleapis.com/auth/drive.file",
+          queryParams: {
+            access_type: "offline",
+            prompt: "consent",
+          },
+        },
+      });
+    }
   };
 
   const signOut = async () => {
