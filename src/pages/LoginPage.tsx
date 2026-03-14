@@ -23,13 +23,17 @@ export default function LoginPage() {
         <p className="text-sm text-muted-foreground mb-6">
           Sign in to access your deal pipeline
         </p>
-        <input
-          type="email"
-          placeholder="you@example.com"
-          value={email}
-          onChange={(e) => setEmail(e.target.value)}
-          className="w-full rounded-lg border border-border bg-background px-4 py-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary mb-4"
-        />
+        <button
+          onClick={() => signInWithGoogle()}
+          className="flex items-center justify-center gap-3 w-full rounded-lg border border-border px-4 py-3 text-sm font-medium text-foreground hover:bg-accent transition-colors"
+        >
+          <img
+            src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg"
+            alt="Google"
+            className="h-5 w-5"
+          />
+          Sign in with Google
+        </button>
         <button
           onClick={() => signInWithGoogle(email || undefined)}
           className="flex items-center justify-center gap-3 w-full rounded-lg border border-border px-4 py-3 text-sm font-medium text-foreground hover:bg-accent transition-colors"
