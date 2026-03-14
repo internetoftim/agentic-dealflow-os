@@ -35,6 +35,7 @@ export default function SettingsPage() {
   const [namingTab, setNamingTab] = useState<"auto" | "manual">("auto");
   const [patternDetected, setPatternDetected] = useState(false);
   const [aiModel, setAiModel] = useState("gpt-oss-202b");
+  const [deepResearchProvider, setDeepResearchProvider] = useState<"custom" | "firecrawl">("custom");
   const [savingModel, setSavingModel] = useState(false);
 
   // Load settings from DB
