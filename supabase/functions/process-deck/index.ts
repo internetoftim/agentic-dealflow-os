@@ -45,9 +45,12 @@ async function extractPptxText(arrayBuffer: ArrayBuffer): Promise<{ text: string
 }
 
 /** Very basic PDF text extraction — pulls text between stream markers. */
-function extractPdfText(arrayBuffer: ArrayBuffer): string {
+function extractPdfText(arrayBuffer: ArrayBuffer): { text: string; pageCount: number } {
   const bytes = new Uint8Array(arrayBuffer);
   const raw = new TextDecoder("latin1").decode(bytes);
+
+  // Count pages via /Type /Page entries (excluding /Type /Pages)
+  const pageCount = (raw.match(/\/Type\s*\/Page(?!\s*s)/g) || []).length;
 
   // Try to extract text from PDF text objects (BT...ET blocks with Tj/TJ operators)
   const textChunks: string[] = [];
@@ -55,14 +58,12 @@ function extractPdfText(arrayBuffer: ArrayBuffer): string {
   let match;
   while ((match = btPattern.exec(raw)) !== null) {
     const block = match[1];
-    // Match parenthesized strings (Tj operator)
     const tjPattern = /\(([^)]*)\)\s*Tj/g;
     let tj;
     while ((tj = tjPattern.exec(block)) !== null) {
       const text = tj[1].replace(/\\n/g, "\n").replace(/\\\(/g, "(").replace(/\\\)/g, ")");
       if (text.trim()) textChunks.push(text.trim());
     }
-    // Match TJ arrays
     const tjArrayPattern = /\[([^\]]*)\]\s*TJ/g;
     let tja;
     while ((tja = tjArrayPattern.exec(block)) !== null) {
@@ -76,7 +77,7 @@ function extractPdfText(arrayBuffer: ArrayBuffer): string {
     }
   }
 
-  return textChunks.join(" ").replace(/\s+/g, " ").trim();
+  return { text: textChunks.join(" ").replace(/\s+/g, " ").trim(), pageCount };
 }
 
 Deno.serve(async (req) => {
