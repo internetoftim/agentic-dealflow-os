@@ -106,12 +106,16 @@ ${dealContext}`;
       throw new Error(isApollo ? "APOLLO_API_KEY is not configured" : "OPENAI_API_KEY is not configured");
     }
 
+    const aiHeaders: Record<string, string> = { "Content-Type": "application/json" };
+    if (isApollo) {
+      aiHeaders["X-API-Key"] = apiKey!;
+    } else {
+      aiHeaders["Authorization"] = `Bearer ${apiKey}`;
+    }
+
     const aiResponse = await fetch(`${baseUrl}/v1/chat/completions`, {
       method: "POST",
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        "Content-Type": "application/json",
-      },
+      headers: aiHeaders,
       body: JSON.stringify({
         model,
         messages: [
