@@ -307,6 +307,8 @@ export default function DealWorkspace() {
                     {[
                       ["Company", activeDeal.name],
                       ["Stage", activeDeal.stage],
+                      ["Sector", activeDeal.sector],
+                      ["Pages", activeDeal.pages ? String(activeDeal.pages) : "—"],
                       ["Ask", activeDeal.ask_amount ?? "—"],
                       ["Valuation", activeDeal.valuation ?? "—"],
                       ["Revenue", activeDeal.revenue ?? "—"],
@@ -324,6 +326,44 @@ export default function DealWorkspace() {
                   <p className="text-sm text-muted-foreground">No deal selected.</p>
                 )}
               </div>
+
+              {activeDeal && (
+                <div className="rounded-lg border border-border bg-card p-5 mt-4">
+                  <h3 className="text-sm font-semibold text-foreground mb-4 flex items-center gap-2">
+                    <Search className="h-3.5 w-3.5" />
+                    Deep Research Data
+                    {(activeDeal as any)?.deep_research_status === "researching" && (
+                      <span className="text-[11px] font-normal text-warning animate-pulse">Researching…</span>
+                    )}
+                    {(activeDeal as any)?.deep_research_status === "completed" && (
+                      <span className="text-[11px] font-normal text-success">✓ Complete</span>
+                    )}
+                  </h3>
+                  <div className="grid grid-cols-1 gap-3">
+                    <div className="flex flex-col">
+                      <span className="text-[11px] uppercase tracking-wider text-muted-foreground mb-0.5">Website</span>
+                      {activeDeal.website ? (
+                        <a href={activeDeal.website} target="_blank" rel="noopener noreferrer" className="text-sm font-medium text-info hover:underline">
+                          {activeDeal.website}
+                        </a>
+                      ) : (
+                        <span className="text-sm text-muted-foreground">—</span>
+                      )}
+                    </div>
+                    <div className="flex flex-col">
+                      <span className="text-[11px] uppercase tracking-wider text-muted-foreground mb-0.5">LinkedIn</span>
+                      {(activeDeal as any)?.linkedin_url ? (
+                        <a href={(activeDeal as any).linkedin_url} target="_blank" rel="noopener noreferrer" className="text-sm font-medium text-info hover:underline flex items-center gap-1.5">
+                          <Linkedin className="h-3.5 w-3.5" />
+                          {(activeDeal as any).linkedin_url}
+                        </a>
+                      ) : (
+                        <span className="text-sm text-muted-foreground">—</span>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
           )}
           {activeTab === "memo" && (
