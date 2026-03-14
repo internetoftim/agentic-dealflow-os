@@ -234,6 +234,55 @@ export default function SettingsPage() {
         </div>
       </section>
 
+      {/* Google Drive Folder */}
+      <section className="mb-8">
+        <h2 className="text-sm font-semibold text-foreground mb-4 flex items-center gap-2">
+          <FolderOpen className="h-4 w-4 text-muted-foreground" />
+          Drive Folder
+        </h2>
+        <div className="rounded-lg border border-border bg-card p-5 space-y-3">
+          <p className="text-xs text-muted-foreground">
+            Files synced to Google Drive will be saved inside this folder. It will be created automatically if it doesn't exist.
+          </p>
+          <div className="flex gap-2 items-center">
+            <input
+              type="text"
+              value={driveFolder}
+              onChange={(e) => setDriveFolder(e.target.value)}
+              onBlur={async () => {
+                if (!user) return;
+                const { error } = await supabase
+                  .from("user_settings")
+                  .upsert({ user_id: user.id, drive_folder: driveFolder.trim() || "WAITING ROOM" } as any, { onConflict: "user_id" });
+                if (error) toast.error("Failed to save folder");
+                else toast.success("Drive folder saved");
+              }}
+              placeholder="WAITING ROOM"
+              className="flex-1 rounded-md border border-input bg-card px-3 py-2 text-sm outline-none placeholder:text-muted-foreground focus:ring-1 focus:ring-ring"
+            />
+            {driveFolder !== "WAITING ROOM" && (
+              <button
+                onClick={async () => {
+                  setDriveFolder("WAITING ROOM");
+                  if (!user) return;
+                  await supabase
+                    .from("user_settings")
+                    .upsert({ user_id: user.id, drive_folder: "WAITING ROOM" } as any, { onConflict: "user_id" });
+                  toast.success("Folder reset to default");
+                }}
+                className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
+              >
+                <RotateCcw className="h-3 w-3" />
+                Reset
+              </button>
+            )}
+          </div>
+          <p className="text-xs text-muted-foreground">
+            Default: <code className="bg-muted rounded px-1">WAITING ROOM</code>
+          </p>
+        </div>
+      </section>
+
       {/* Firm Deal Desk */}
       <section className="mb-8">
         <h2 className="text-sm font-semibold text-foreground mb-4 flex items-center gap-2">

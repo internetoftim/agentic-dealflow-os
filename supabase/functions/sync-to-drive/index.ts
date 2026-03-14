@@ -118,11 +118,54 @@ Deno.serve(async (req) => {
       throw new Error(`Failed to download file: ${downloadError?.message}`);
     }
 
+    // Resolve or create the target Drive folder
+    const folderName = settings.drive_folder || "WAITING ROOM";
+    let folderId: string | null = null;
+
+    // Search for existing folder
+    const folderSearchRes = await fetch(
+      `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(
+        `name='${folderName}' and mimeType='application/vnd.google-apps.folder' and trashed=false`
+      )}&fields=files(id)`,
+      { headers: { Authorization: `Bearer ${settings.google_provider_token}` } }
+    );
+    if (folderSearchRes.ok) {
+      const folderData = await folderSearchRes.json();
+      if (folderData.files?.length > 0) {
+        folderId = folderData.files[0].id;
+      }
+    }
+
+    // Create folder if it doesn't exist
+    if (!folderId) {
+      const createFolderRes = await fetch(
+        "https://www.googleapis.com/drive/v3/files",
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${settings.google_provider_token}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            name: folderName,
+            mimeType: "application/vnd.google-apps.folder",
+          }),
+        }
+      );
+      if (createFolderRes.ok) {
+        const created = await createFolderRes.json();
+        folderId = created.id;
+      }
+    }
+
     // Upload to Google Drive with the formatted name
-    const metadata = {
+    const metadata: Record<string, unknown> = {
       name: driveFileName,
       mimeType: "application/pdf",
     };
+    if (folderId) {
+      metadata.parents = [folderId];
+    }
 
     const form = new FormData();
     form.append(
