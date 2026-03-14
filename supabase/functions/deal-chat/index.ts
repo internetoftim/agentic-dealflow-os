@@ -98,16 +98,16 @@ Be concise, data-driven, and opinionated when asked for your take. Use markdown 
 ${dealContext}`;
 
     // Route to correct endpoint based on model
-    const isApollo = model === "gpt-oss-202b";
-    const baseUrl = isApollo ? APOLLO_BASE : OPENAI_BASE;
-    const apiKey = isApollo ? apolloApiKey : openaiApiKey;
+    const isSapinsapin = model === "gpt-oss-202b";
+    const baseUrl = isSapinsapin ? SAPINSAPIN_BASE : OPENAI_BASE;
+    const apiKey = isSapinsapin ? sapinsapinApiKey : openaiApiKey;
 
     if (!apiKey) {
-      throw new Error(isApollo ? "APOLLO_API_KEY is not configured" : "OPENAI_API_KEY is not configured");
+      throw new Error(isSapinsapin ? "APOLLO_API_KEY is not configured" : "OPENAI_API_KEY is not configured");
     }
 
     const aiHeaders: Record<string, string> = { "Content-Type": "application/json" };
-    if (isApollo) {
+    if (isSapinsapin) {
       aiHeaders["X-API-Key"] = apiKey!;
     } else {
       aiHeaders["Authorization"] = `Bearer ${apiKey}`;
