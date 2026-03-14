@@ -1,0 +1,1 @@
+ALTER TABLE public.user_settings ALTER COLUMN ai_model SET DEFAULT 'gpt-oss-202b';
