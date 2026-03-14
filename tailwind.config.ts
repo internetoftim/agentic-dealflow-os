@@ -13,6 +13,9 @@ export default {
       },
     },
     extend: {
+      fontFamily: {
+        sans: ['Inter', 'system-ui', '-apple-system', 'sans-serif'],
+      },
       colors: {
         border: "hsl(var(--border))",
         input: "hsl(var(--input))",
@@ -46,6 +49,37 @@ export default {
         card: {
           DEFAULT: "hsl(var(--card))",
           foreground: "hsl(var(--card-foreground))",
+        },
+        surface: {
+          DEFAULT: "hsl(var(--surface))",
+          foreground: "hsl(var(--surface-foreground))",
+          raised: "hsl(var(--surface-raised))",
+          border: "hsl(var(--surface-border))",
+        },
+        success: {
+          DEFAULT: "hsl(var(--success))",
+          foreground: "hsl(var(--success-foreground))",
+          muted: "hsl(var(--success-muted))",
+        },
+        warning: {
+          DEFAULT: "hsl(var(--warning))",
+          foreground: "hsl(var(--warning-foreground))",
+          muted: "hsl(var(--warning-muted))",
+        },
+        info: {
+          DEFAULT: "hsl(var(--info))",
+          foreground: "hsl(var(--info-foreground))",
+          muted: "hsl(var(--info-muted))",
+        },
+        badge: {
+          purple: "hsl(var(--badge-purple))",
+          "purple-muted": "hsl(var(--badge-purple-muted))",
+          blue: "hsl(var(--badge-blue))",
+          "blue-muted": "hsl(var(--badge-blue-muted))",
+          green: "hsl(var(--badge-green))",
+          "green-muted": "hsl(var(--badge-green-muted))",
+          amber: "hsl(var(--badge-amber))",
+          "amber-muted": "hsl(var(--badge-amber-muted))",
         },
         sidebar: {
           DEFAULT: "hsl(var(--sidebar-background))",
