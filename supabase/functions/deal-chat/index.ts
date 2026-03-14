@@ -24,9 +24,9 @@ Deno.serve(async (req) => {
     const supabaseAnonKey = Deno.env.get("SUPABASE_ANON_KEY")!;
     const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const openaiApiKey = Deno.env.get("OPENAI_API_KEY");
-    const apolloApiKey = Deno.env.get("APOLLO_API_KEY");
+    const sapinsapinApiKey = Deno.env.get("APOLLO_API_KEY");
 
-    const APOLLO_BASE = "https://apollo-inference-bridge.am1-aks.apolloglobal.net";
+    const SAPINSAPIN_BASE = "https://apollo-inference-bridge.am1-aks.apolloglobal.net";
     const OPENAI_BASE = "https://api.openai.com";
 
     // Authenticate user
@@ -98,16 +98,16 @@ Be concise, data-driven, and opinionated when asked for your take. Use markdown 
 ${dealContext}`;
 
     // Route to correct endpoint based on model
-    const isApollo = model === "gpt-oss-202b";
-    const baseUrl = isApollo ? APOLLO_BASE : OPENAI_BASE;
-    const apiKey = isApollo ? apolloApiKey : openaiApiKey;
+    const isSapinsapin = model === "gpt-oss-202b";
+    const baseUrl = isSapinsapin ? SAPINSAPIN_BASE : OPENAI_BASE;
+    const apiKey = isSapinsapin ? sapinsapinApiKey : openaiApiKey;
 
     if (!apiKey) {
-      throw new Error(isApollo ? "APOLLO_API_KEY is not configured" : "OPENAI_API_KEY is not configured");
+      throw new Error(isSapinsapin ? "APOLLO_API_KEY is not configured" : "OPENAI_API_KEY is not configured");
     }
 
     const aiHeaders: Record<string, string> = { "Content-Type": "application/json" };
-    if (isApollo) {
+    if (isSapinsapin) {
       aiHeaders["X-API-Key"] = apiKey!;
     } else {
       aiHeaders["Authorization"] = `Bearer ${apiKey}`;
