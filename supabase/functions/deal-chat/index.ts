@@ -24,10 +24,10 @@ Deno.serve(async (req) => {
     const supabaseAnonKey = Deno.env.get("SUPABASE_ANON_KEY")!;
     const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const openaiApiKey = Deno.env.get("OPENAI_API_KEY");
+    const apolloApiKey = Deno.env.get("APOLLO_API_KEY");
 
-    if (!openaiApiKey) {
-      throw new Error("OPENAI_API_KEY is not configured");
-    }
+    const APOLLO_BASE = "https://apollo-inference-bridge.am1-aks.apolloglobal.net";
+    const OPENAI_BASE = "https://api.openai.com";
 
     // Authenticate user
     const userClient = createClient(supabaseUrl, supabaseAnonKey, {
