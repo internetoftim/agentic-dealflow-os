@@ -32,17 +32,6 @@ export default function LoginPage() {
           />
           Sign in with Google
         </button>
-        <button
-          onClick={() => signInWithGoogle(email || undefined)}
-          className="flex items-center justify-center gap-3 w-full rounded-lg border border-border px-4 py-3 text-sm font-medium text-foreground hover:bg-accent transition-colors"
-        >
-          <img
-            src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg"
-            alt="Google"
-            className="h-5 w-5"
-          />
-          Sign in with Google
-        </button>
         <p className="text-xs text-muted-foreground mt-4">
           Grants access to Google Drive for deck sync
         </p>
