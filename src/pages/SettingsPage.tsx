@@ -43,7 +43,7 @@ export default function SettingsPage() {
     if (!user) return;
     supabase
       .from("user_settings")
-      .select("ai_model, gmail_label_enabled, drive_sync_enabled, spam_filter_enabled")
+      .select("ai_model, gmail_label_enabled, drive_sync_enabled, spam_filter_enabled, deep_research_provider")
       .eq("user_id", user.id)
       .single()
       .then(({ data }) => {
@@ -52,6 +52,7 @@ export default function SettingsPage() {
           setGmailLabel(data.gmail_label_enabled ?? true);
           setDriveSync(data.drive_sync_enabled ?? true);
           setSpamFilter(data.spam_filter_enabled ?? true);
+          setDeepResearchProvider((data as any).deep_research_provider ?? "custom");
         }
       });
   }, [user]);
