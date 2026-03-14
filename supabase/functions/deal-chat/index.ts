@@ -99,6 +99,7 @@ ${dealContext}`;
 
     // Route to correct endpoint based on model
     const isSapinsapin = model === "gpt-oss-202b";
+    const sapinsapinModel = "/models/gpt-oss-20b-balitanlp-cpt";
     const baseUrl = isSapinsapin ? SAPINSAPIN_BASE : OPENAI_BASE;
     const apiKey = isSapinsapin ? sapinsapinApiKey : openaiApiKey;
 
