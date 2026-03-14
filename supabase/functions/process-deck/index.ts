@@ -94,7 +94,7 @@ Deno.serve(async (req) => {
       method: "POST",
       headers: aiHeaders,
       body: JSON.stringify({
-        model,
+        model: isSapinsapin ? sapinsapinModel : model,
         messages: [
           {
             role: "system",
