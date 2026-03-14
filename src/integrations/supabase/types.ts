@@ -152,6 +152,7 @@ export type Database = {
         Row: {
           ai_model: string
           created_at: string
+          deep_research_provider: string
           drive_sync_enabled: boolean | null
           gmail_label_enabled: boolean | null
           google_provider_refresh_token: string | null
@@ -166,6 +167,7 @@ export type Database = {
         Insert: {
           ai_model?: string
           created_at?: string
+          deep_research_provider?: string
           drive_sync_enabled?: boolean | null
           gmail_label_enabled?: boolean | null
           google_provider_refresh_token?: string | null
@@ -180,6 +182,7 @@ export type Database = {
         Update: {
           ai_model?: string
           created_at?: string
+          deep_research_provider?: string
           drive_sync_enabled?: boolean | null
           gmail_label_enabled?: boolean | null
           google_provider_refresh_token?: string | null
