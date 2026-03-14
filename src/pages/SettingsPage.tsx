@@ -5,6 +5,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { toast } from "sonner";
 
 const AI_MODELS = [
+  { value: "gpt-oss-202b", label: "GPT-OSS 202B", description: "Apollo inference bridge — default" },
   { value: "gpt-4o", label: "GPT-4o", description: "Best multimodal, strong reasoning" },
   { value: "gpt-5-mini", label: "GPT-5 Mini", description: "Fast & cost-effective" },
   { value: "gpt-5", label: "GPT-5", description: "Most capable, complex tasks" },
@@ -33,7 +34,7 @@ export default function SettingsPage() {
   const [spamFilter, setSpamFilter] = useState(true);
   const [namingTab, setNamingTab] = useState<"auto" | "manual">("auto");
   const [patternDetected, setPatternDetected] = useState(false);
-  const [aiModel, setAiModel] = useState("gpt-4o");
+  const [aiModel, setAiModel] = useState("gpt-oss-202b");
   const [savingModel, setSavingModel] = useState(false);
 
   // Load settings from DB
@@ -46,7 +47,7 @@ export default function SettingsPage() {
       .single()
       .then(({ data }) => {
         if (data) {
-          setAiModel(data.ai_model ?? "gpt-4o");
+          setAiModel(data.ai_model ?? "gpt-oss-202b");
           setGmailLabel(data.gmail_label_enabled ?? true);
           setDriveSync(data.drive_sync_enabled ?? true);
           setSpamFilter(data.spam_filter_enabled ?? true);

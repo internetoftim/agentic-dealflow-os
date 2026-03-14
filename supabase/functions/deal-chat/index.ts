@@ -24,10 +24,10 @@ Deno.serve(async (req) => {
     const supabaseAnonKey = Deno.env.get("SUPABASE_ANON_KEY")!;
     const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const openaiApiKey = Deno.env.get("OPENAI_API_KEY");
+    const apolloApiKey = Deno.env.get("APOLLO_API_KEY");
 
-    if (!openaiApiKey) {
-      throw new Error("OPENAI_API_KEY is not configured");
-    }
+    const APOLLO_BASE = "https://apollo-inference-bridge.am1-aks.apolloglobal.net";
+    const OPENAI_BASE = "https://api.openai.com";
 
     // Authenticate user
     const userClient = createClient(supabaseUrl, supabaseAnonKey, {
@@ -97,11 +97,19 @@ Be concise, data-driven, and opinionated when asked for your take. Use markdown 
 
 ${dealContext}`;
 
-    // Stream from OpenAI
-    const aiResponse = await fetch("https://api.openai.com/v1/chat/completions", {
+    // Route to correct endpoint based on model
+    const isApollo = model === "gpt-oss-202b";
+    const baseUrl = isApollo ? APOLLO_BASE : OPENAI_BASE;
+    const apiKey = isApollo ? apolloApiKey : openaiApiKey;
+
+    if (!apiKey) {
+      throw new Error(isApollo ? "APOLLO_API_KEY is not configured" : "OPENAI_API_KEY is not configured");
+    }
+
+    const aiResponse = await fetch(`${baseUrl}/v1/chat/completions`, {
       method: "POST",
       headers: {
-        Authorization: `Bearer ${openaiApiKey}`,
+        Authorization: `Bearer ${apiKey}`,
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
