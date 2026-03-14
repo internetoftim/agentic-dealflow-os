@@ -8,7 +8,7 @@ const corsHeaders = {
 };
 
 /** Extract plain text from all slides in a PPTX file (which is a ZIP of XML). */
-async function extractPptxText(arrayBuffer: ArrayBuffer): Promise<string> {
+async function extractPptxText(arrayBuffer: ArrayBuffer): Promise<{ text: string; pageCount: number }> {
   const zipReader = new ZipReader(new BlobReader(new Blob([arrayBuffer])));
   const entries = await zipReader.getEntries();
 
@@ -25,7 +25,6 @@ async function extractPptxText(arrayBuffer: ArrayBuffer): Promise<string> {
   for (const entry of slideEntries) {
     const writer = new TextWriter();
     const xml = await entry.getData!(writer);
-    // Strip XML tags to get raw text, collapse whitespace
     const text = xml
       .replace(/<[^>]+>/g, " ")
       .replace(/&amp;/g, "&")
@@ -42,7 +41,7 @@ async function extractPptxText(arrayBuffer: ArrayBuffer): Promise<string> {
   }
 
   await zipReader.close();
-  return slideTexts.join("\n\n");
+  return { text: slideTexts.join("\n\n"), pageCount: slideEntries.length };
 }
 
 /** Very basic PDF text extraction — pulls text between stream markers. */
