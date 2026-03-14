@@ -26,7 +26,7 @@ Deno.serve(async (req) => {
     // Admin client to read storage & settings
     const adminClient = createClient(supabaseUrl, supabaseServiceKey);
     // User client for auth context
-    const userClient = createClient(supabaseUrl, Deno.env.get("SUPABASE_PUBLISHABLE_KEY")!, {
+    const userClient = createClient(supabaseUrl, Deno.env.get("SUPABASE_ANON_KEY")!, {
       global: { headers: { Authorization: authHeader } },
     });
 
