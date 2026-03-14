@@ -49,10 +49,19 @@ Deno.serve(async (req) => {
       });
     }
 
+    const adminClient = createClient(supabaseUrl, supabaseServiceKey);
+
+    // Fetch user's model preference
+    const { data: settings } = await adminClient
+      .from("user_settings")
+      .select("ai_model")
+      .eq("user_id", user.id)
+      .single();
+    const model = settings?.ai_model ?? "gpt-4o";
+
     // Fetch deal context if dealId provided
     let dealContext = "";
     if (dealId) {
-      const adminClient = createClient(supabaseUrl, supabaseServiceKey);
       const { data: deal } = await adminClient
         .from("deals")
         .select("*")
