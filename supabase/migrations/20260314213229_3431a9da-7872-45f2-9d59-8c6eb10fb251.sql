@@ -1,0 +1,1 @@
+ALTER TABLE public.user_settings ALTER COLUMN naming_pattern SET DEFAULT '<WEBSITE> deck <MonthYYYY> p<pages>';

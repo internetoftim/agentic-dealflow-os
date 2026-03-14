@@ -236,7 +236,7 @@ export default function SettingsPage() {
                 <input
                   type="text"
                   placeholder="Paste a recent filename example"
-                  defaultValue="2024-01-15 - NovaStar AI - Series A - AI_ML.pdf"
+                  defaultValue="novastar.ai deck Mar2026 p24.pdf"
                   className="flex-1 rounded-md border border-input bg-card px-3 py-2 text-sm outline-none placeholder:text-muted-foreground focus:ring-1 focus:ring-ring"
                 />
                 <button
@@ -253,7 +253,7 @@ export default function SettingsPage() {
                   <div>
                     <p className="text-sm font-medium text-foreground">Pattern detected!</p>
                     <p className="text-xs text-muted-foreground mt-0.5">
-                      <code className="bg-muted rounded px-1">[Date]</code> — <code className="bg-muted rounded px-1">[Startup]</code> — <code className="bg-muted rounded px-1">[Stage]</code> — <code className="bg-muted rounded px-1">[Sector]</code>.pdf
+                      <code className="bg-muted rounded px-1">&lt;WEBSITE&gt;</code> deck <code className="bg-muted rounded px-1">&lt;MonthYYYY&gt;</code> p<code className="bg-muted rounded px-1">&lt;pages&gt;</code>.pdf
                     </p>
                   </div>
                 </div>
