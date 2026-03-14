@@ -101,15 +101,18 @@ ${dealContext}`;
     const isSapinsapin = model === "gpt-oss-202b";
     const sapinsapinModel = "/models/gpt-oss-20b-balitanlp-cpt";
     const baseUrl = isSapinsapin ? SAPINSAPIN_BASE : OPENAI_BASE;
-    const apiKey = isSapinsapin ? sapinsapinApiKey : openaiApiKey;
+    const rawApiKey = isSapinsapin ? sapinsapinApiKey : openaiApiKey;
+    const apiKey = rawApiKey?.trim().replace(/[\r\n]/g, "");
 
     if (!apiKey) {
       throw new Error(isSapinsapin ? "APOLLO_API_KEY is not configured" : "OPENAI_API_KEY is not configured");
     }
 
+    console.log("Using model:", isSapinsapin ? sapinsapinModel : model, "API key length:", apiKey.length, "has non-ascii:", /[^\x20-\x7E]/.test(apiKey));
+
     const aiHeaders: Record<string, string> = { "Content-Type": "application/json" };
     if (isSapinsapin) {
-      aiHeaders["X-API-Key"] = apiKey!;
+      aiHeaders["X-API-Key"] = apiKey;
     } else {
       aiHeaders["Authorization"] = `Bearer ${apiKey}`;
     }
