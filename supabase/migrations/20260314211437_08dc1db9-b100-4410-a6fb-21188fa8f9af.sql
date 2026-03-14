@@ -1,0 +1,1 @@
+ALTER TABLE public.user_settings ADD COLUMN deep_research_provider text NOT NULL DEFAULT 'custom';

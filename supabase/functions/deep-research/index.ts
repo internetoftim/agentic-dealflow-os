@@ -8,6 +8,17 @@ const corsHeaders = {
 
 const SAPINSAPIN_BASE = "https://apollo-inference-bridge.am1-aks.apolloglobal.net";
 const SAPINSAPIN_MODEL = "/models/gpt-oss-20b-balitanlp-cpt";
+const OPENAI_BASE = "https://api.openai.com";
+
+function getAiConfig(model: string) {
+  const isSapinsapin = model === "gpt-oss-202b";
+  return {
+    isSapinsapin,
+    baseUrl: isSapinsapin ? SAPINSAPIN_BASE : OPENAI_BASE,
+    modelName: isSapinsapin ? SAPINSAPIN_MODEL : model,
+    envKey: isSapinsapin ? "APOLLO_API_KEY" : "OPENAI_API_KEY",
+  };
+}
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
@@ -27,13 +38,9 @@ Deno.serve(async (req) => {
     const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const supabaseAnonKey = Deno.env.get("SUPABASE_ANON_KEY")!;
     const firecrawlApiKey = Deno.env.get("FIRECRAWL_API_KEY");
-    const sapinsapinApiKey = Deno.env.get("APOLLO_API_KEY")?.trim().replace(/[\r\n]/g, "");
 
     if (!firecrawlApiKey) {
       throw new Error("FIRECRAWL_API_KEY is not configured");
-    }
-    if (!sapinsapinApiKey) {
-      throw new Error("APOLLO_API_KEY is not configured");
     }
 
     const adminClient = createClient(supabaseUrl, supabaseServiceKey);
@@ -69,15 +76,25 @@ Deno.serve(async (req) => {
       throw new Error("Deal not found");
     }
 
+    // Fetch user settings for provider and model preference
+    const { data: settings } = await adminClient
+      .from("user_settings")
+      .select("ai_model, deep_research_provider")
+      .eq("user_id", user.id)
+      .single();
+
+    const provider = (settings as any)?.deep_research_provider ?? "custom";
+    const aiModel = settings?.ai_model ?? "gpt-oss-202b";
+
     // Mark as researching
     await adminClient
       .from("deals")
       .update({ deep_research_status: "researching", updated_at: new Date().toISOString() })
       .eq("id", dealId);
 
-    console.log(`Starting deep research for: ${deal.name}`);
+    console.log(`Deep research for "${deal.name}" — provider: ${provider}, model: ${aiModel}`);
 
-    // Step 1: Use Firecrawl search to find company website and LinkedIn
+    // Step 1: Firecrawl search
     const searchQuery = `${deal.name} company ${deal.sector ? deal.sector : ""} official website LinkedIn`;
     console.log("Firecrawl search query:", searchQuery);
 
@@ -87,10 +104,7 @@ Deno.serve(async (req) => {
         Authorization: `Bearer ${firecrawlApiKey}`,
         "Content-Type": "application/json",
       },
-      body: JSON.stringify({
-        query: searchQuery,
-        limit: 10,
-      }),
+      body: JSON.stringify({ query: searchQuery, limit: 10 }),
     });
 
     if (!searchResponse.ok) {
@@ -103,7 +117,7 @@ Deno.serve(async (req) => {
     const searchResults = searchData.data || searchData.results || [];
     console.log(`Firecrawl returned ${searchResults.length} results`);
 
-    // Step 2: If we found a website, scrape it for more context
+    // Step 2: Scrape candidate website
     let websiteContent = "";
     const candidateWebsite = deal.website || searchResults.find((r: any) =>
       r.url && !r.url.includes("linkedin.com") && !r.url.includes("crunchbase.com") && !r.url.includes("google.com")
@@ -118,11 +132,7 @@ Deno.serve(async (req) => {
             Authorization: `Bearer ${firecrawlApiKey}`,
             "Content-Type": "application/json",
           },
-          body: JSON.stringify({
-            url: candidateWebsite,
-            formats: ["markdown"],
-            onlyMainContent: true,
-          }),
+          body: JSON.stringify({ url: candidateWebsite, formats: ["markdown"], onlyMainContent: true }),
         });
 
         if (scrapeResponse.ok) {
@@ -135,12 +145,32 @@ Deno.serve(async (req) => {
       }
     }
 
-    // Step 3: Send search results + scraped content to Sapinsapin for structured extraction
-    const searchSummary = searchResults
-      .map((r: any, i: number) => `[${i + 1}] ${r.title || ""} - ${r.url || ""}\n${r.description || ""}`)
-      .join("\n\n");
+    let research: { website: string | null; linkedin_url: string | null };
 
-    const researchPrompt = `You are a VC research analyst. Based on the following search results and website content, extract accurate company information.
+    if (provider === "firecrawl") {
+      // Firecrawl-only mode: extract URLs heuristically from search results
+      const websiteUrl = candidateWebsite || null;
+      const linkedinResult = searchResults.find((r: any) =>
+        r.url?.includes("linkedin.com/company")
+      );
+      research = {
+        website: websiteUrl,
+        linkedin_url: linkedinResult?.url || null,
+      };
+      console.log("Firecrawl-only extraction:", JSON.stringify(research));
+    } else {
+      // Custom agent mode: use selected LLM for structured extraction
+      const config = getAiConfig(aiModel);
+      const rawApiKey = Deno.env.get(config.envKey)?.trim().replace(/[\r\n]/g, "");
+      if (!rawApiKey) {
+        throw new Error(`${config.envKey} is not configured`);
+      }
+
+      const searchSummary = searchResults
+        .map((r: any, i: number) => `[${i + 1}] ${r.title || ""} - ${r.url || ""}\n${r.description || ""}`)
+        .join("\n\n");
+
+      const researchPrompt = `You are a VC research analyst. Based on the following search results and website content, extract accurate company information.
 
 COMPANY NAME: ${deal.name}
 SECTOR: ${deal.sector}
@@ -153,64 +183,69 @@ ${websiteContent ? `WEBSITE CONTENT:\n${websiteContent}` : ""}
 
 Extract the company's official website URL and LinkedIn company page URL using the extract_company_research tool. Only return URLs you are confident about. Return null for any field you cannot verify.`;
 
-    const aiResponse = await fetch(`${SAPINSAPIN_BASE}/v1/chat/completions`, {
-      method: "POST",
-      headers: {
-        "X-API-Key": sapinsapinApiKey,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        model: SAPINSAPIN_MODEL,
-        messages: [
-          { role: "system", content: "You are a precise research analyst. Only return verified information." },
-          { role: "user", content: researchPrompt },
-        ],
-        tools: [
-          {
-            type: "function",
-            function: {
-              name: "extract_company_research",
-              description: "Extract verified company research data from search results.",
-              parameters: {
-                type: "object",
-                properties: {
-                  website: {
-                    type: ["string", "null"],
-                    description: "Official company website URL (e.g. https://company.com)",
+      const aiHeaders: Record<string, string> = { "Content-Type": "application/json" };
+      if (config.isSapinsapin) {
+        aiHeaders["X-API-Key"] = rawApiKey;
+      } else {
+        aiHeaders["Authorization"] = `Bearer ${rawApiKey}`;
+      }
+
+      const aiResponse = await fetch(`${config.baseUrl}/v1/chat/completions`, {
+        method: "POST",
+        headers: aiHeaders,
+        body: JSON.stringify({
+          model: config.modelName,
+          messages: [
+            { role: "system", content: "You are a precise research analyst. Only return verified information." },
+            { role: "user", content: researchPrompt },
+          ],
+          tools: [
+            {
+              type: "function",
+              function: {
+                name: "extract_company_research",
+                description: "Extract verified company research data from search results.",
+                parameters: {
+                  type: "object",
+                  properties: {
+                    website: {
+                      type: ["string", "null"],
+                      description: "Official company website URL (e.g. https://company.com)",
+                    },
+                    linkedin_url: {
+                      type: ["string", "null"],
+                      description: "LinkedIn company page URL (e.g. https://linkedin.com/company/company-name)",
+                    },
                   },
-                  linkedin_url: {
-                    type: ["string", "null"],
-                    description: "LinkedIn company page URL (e.g. https://linkedin.com/company/company-name)",
-                  },
+                  required: ["website", "linkedin_url"],
+                  additionalProperties: false,
                 },
-                required: ["website", "linkedin_url"],
-                additionalProperties: false,
               },
             },
-          },
-        ],
-        tool_choice: { type: "function", function: { name: "extract_company_research" } },
-      }),
-    });
+          ],
+          tool_choice: { type: "function", function: { name: "extract_company_research" } },
+        }),
+      });
 
-    if (!aiResponse.ok) {
-      const errText = await aiResponse.text();
-      console.error("Sapinsapin error:", aiResponse.status, errText);
-      throw new Error(`Sapinsapin API error [${aiResponse.status}]`);
+      if (!aiResponse.ok) {
+        const errText = await aiResponse.text();
+        console.error("AI API error:", aiResponse.status, errText);
+        throw new Error(`AI API error [${aiResponse.status}]`);
+      }
+
+      const aiResult = await aiResponse.json();
+      const toolCall = aiResult.choices?.[0]?.message?.tool_calls?.[0];
+
+      if (!toolCall) {
+        console.error("No tool call in response:", JSON.stringify(aiResult));
+        throw new Error("No structured output from AI");
+      }
+
+      research = JSON.parse(toolCall.function.arguments);
+      console.log("Custom agent extraction:", JSON.stringify(research));
     }
 
-    const aiResult = await aiResponse.json();
-    const toolCall = aiResult.choices?.[0]?.message?.tool_calls?.[0];
-
-    if (!toolCall) {
-      console.error("No tool call in response:", JSON.stringify(aiResult));
-      throw new Error("No structured output from Sapinsapin");
-    }
-
-    const research = JSON.parse(toolCall.function.arguments);
-    console.log("Deep research results:", JSON.stringify(research));
-
-    // Step 4: Update deal with research results
+    // Update deal with research results
     const updatePayload: Record<string, unknown> = {
       deep_research_status: "completed",
       updated_at: new Date().toISOString(),
@@ -230,16 +265,11 @@ Extract the company's official website URL and LinkedIn company page URL using t
       .eq("user_id", user.id);
 
     return new Response(
-      JSON.stringify({ success: true, research }),
+      JSON.stringify({ success: true, provider, research }),
       { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
   } catch (error) {
     console.error("deep-research error:", error);
-
-    // Try to mark as failed
-    try {
-      const { dealId } = await (error as any)._req?.json?.() ?? {};
-    } catch {}
 
     const message = error instanceof Error ? error.message : "Unknown error";
     return new Response(JSON.stringify({ error: message }), {

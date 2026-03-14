@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Sparkles, Check, Mail, HardDrive, Shield, Bot } from "lucide-react";
+import { Sparkles, Check, Mail, HardDrive, Shield, Bot, Search } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { toast } from "sonner";
@@ -35,6 +35,7 @@ export default function SettingsPage() {
   const [namingTab, setNamingTab] = useState<"auto" | "manual">("auto");
   const [patternDetected, setPatternDetected] = useState(false);
   const [aiModel, setAiModel] = useState("gpt-oss-202b");
+  const [deepResearchProvider, setDeepResearchProvider] = useState<"custom" | "firecrawl">("custom");
   const [savingModel, setSavingModel] = useState(false);
 
   // Load settings from DB
@@ -42,7 +43,7 @@ export default function SettingsPage() {
     if (!user) return;
     supabase
       .from("user_settings")
-      .select("ai_model, gmail_label_enabled, drive_sync_enabled, spam_filter_enabled")
+      .select("ai_model, gmail_label_enabled, drive_sync_enabled, spam_filter_enabled, deep_research_provider")
       .eq("user_id", user.id)
       .single()
       .then(({ data }) => {
@@ -51,6 +52,7 @@ export default function SettingsPage() {
           setGmailLabel(data.gmail_label_enabled ?? true);
           setDriveSync(data.drive_sync_enabled ?? true);
           setSpamFilter(data.spam_filter_enabled ?? true);
+          setDeepResearchProvider((data as any).deep_research_provider ?? "custom");
         }
       });
   }, [user]);
@@ -99,6 +101,47 @@ export default function SettingsPage() {
                   {aiModel === model.value && <Check className="h-3.5 w-3.5 text-primary ml-auto" />}
                 </div>
                 <p className="text-xs text-muted-foreground mt-0.5">{model.description}</p>
+              </button>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      {/* Deep Research Provider */}
+      <section className="mb-8">
+        <h2 className="text-sm font-semibold text-foreground mb-4 flex items-center gap-2">
+          <Search className="h-4 w-4 text-muted-foreground" />
+          Deep Research Agent
+        </h2>
+        <div className="rounded-lg border border-border bg-card p-5">
+          <p className="text-xs text-muted-foreground mb-3">Choose which engine powers company deep research after deck extraction.</p>
+          <div className="grid grid-cols-2 gap-2">
+            {([
+              { value: "custom" as const, label: "Custom Agent", description: "Uses your selected AI model + Firecrawl search" },
+              { value: "firecrawl" as const, label: "Firecrawl Only", description: "Firecrawl search + scrape, no LLM extraction" },
+            ]).map((opt) => (
+              <button
+                key={opt.value}
+                onClick={async () => {
+                  if (!user) return;
+                  setDeepResearchProvider(opt.value);
+                  const { error } = await supabase
+                    .from("user_settings")
+                    .upsert({ user_id: user.id, deep_research_provider: opt.value } as any, { onConflict: "user_id" });
+                  if (error) toast.error("Failed to save preference");
+                  else toast.success(`Deep research set to ${opt.label}`);
+                }}
+                className={`text-left rounded-lg border p-3 transition-colors ${
+                  deepResearchProvider === opt.value
+                    ? "border-primary bg-primary/5"
+                    : "border-border hover:border-primary/40 hover:bg-accent"
+                }`}
+              >
+                <div className="flex items-center gap-2">
+                  <span className="text-sm font-medium text-foreground">{opt.label}</span>
+                  {deepResearchProvider === opt.value && <Check className="h-3.5 w-3.5 text-primary ml-auto" />}
+                </div>
+                <p className="text-xs text-muted-foreground mt-0.5">{opt.description}</p>
               </button>
             ))}
           </div>
