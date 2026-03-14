@@ -20,7 +20,7 @@ export async function compressPdf(file: File): Promise<{ compressed: File; pages
     addDefaultPage: false,
   });
 
-  const compressedBlob = new Blob([compressedBytes], { type: "application/pdf" });
+  const compressedBlob = new Blob([compressedBytes.buffer as ArrayBuffer], { type: "application/pdf" });
 
   // If still over 20MB after optimization, we can't do more client-side
   // (image downscaling in pdf-lib is limited). Upload as-is and warn.
