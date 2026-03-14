@@ -34,7 +34,7 @@ export default function SettingsPage() {
   const [spamFilter, setSpamFilter] = useState(true);
   const [namingTab, setNamingTab] = useState<"auto" | "manual">("auto");
   const [patternDetected, setPatternDetected] = useState(false);
-  const [aiModel, setAiModel] = useState("gpt-4o");
+  const [aiModel, setAiModel] = useState("gpt-oss-202b");
   const [savingModel, setSavingModel] = useState(false);
 
   // Load settings from DB
