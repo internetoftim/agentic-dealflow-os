@@ -253,7 +253,7 @@ export default function SettingsPage() {
                   <div>
                     <p className="text-sm font-medium text-foreground">Pattern detected!</p>
                     <p className="text-xs text-muted-foreground mt-0.5">
-                      <code className="bg-muted rounded px-1">[Date]</code> — <code className="bg-muted rounded px-1">[Startup]</code> — <code className="bg-muted rounded px-1">[Stage]</code> — <code className="bg-muted rounded px-1">[Sector]</code>.pdf
+                      <code className="bg-muted rounded px-1">&lt;WEBSITE&gt;</code> deck <code className="bg-muted rounded px-1">&lt;MonthYYYY&gt;</code> p<code className="bg-muted rounded px-1">&lt;pages&gt;</code>.pdf
                     </p>
                   </div>
                 </div>
