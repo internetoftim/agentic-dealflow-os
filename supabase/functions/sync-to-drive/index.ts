@@ -86,7 +86,7 @@ Deno.serve(async (req) => {
     // Get user's Google token and naming settings
     const { data: settings } = await adminClient
       .from("user_settings")
-      .select("google_provider_token, drive_sync_enabled, naming_pattern, naming_mode")
+      .select("google_provider_token, drive_sync_enabled, naming_pattern, naming_mode, drive_folder")
       .eq("user_id", user.id)
       .single();
 
