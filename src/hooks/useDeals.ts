@@ -118,6 +118,11 @@ export function useCreateDealWithUpload() {
       // 5. Trigger AI deck analysis (fire-and-forget)
       supabase.functions.invoke("process-deck", {
         body: { dealId: deal.id, storagePath },
+      }).then(() => {
+        // After deck processing, trigger deep research
+        supabase.functions.invoke("deep-research", {
+          body: { dealId: deal.id },
+        }).catch((e) => console.warn("Deep research skipped:", e));
       }).catch((e) => console.warn("Deck processing skipped:", e));
 
       return deal;

@@ -1,5 +1,5 @@
 import { useState, useCallback, useRef, useEffect } from "react";
-import { Upload, Link, Cog, Check, Search, Send, FileText, Globe, Layers, Square } from "lucide-react";
+import { Upload, Link, Cog, Check, Search, Send, FileText, Globe, Layers, Square, Linkedin } from "lucide-react";
 import { useDeals, useSources, useCreateDealWithUpload } from "@/hooks/useDeals";
 import { useDealChat } from "@/hooks/useDealChat";
 import { toast } from "sonner";
