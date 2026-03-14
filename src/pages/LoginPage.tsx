@@ -1,8 +1,10 @@
+import { useState } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import { Navigate } from "react-router-dom";
 
 export default function LoginPage() {
   const { user, loading, signInWithGoogle } = useAuth();
+  const [email, setEmail] = useState("");
 
   if (loading) {
     return (
@@ -16,13 +18,20 @@ export default function LoginPage() {
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-background">
-      <div className="w-full max-w-sm rounded-xl border border-border bg-card p-8 shadow-surface-lg text-center">
+      <div className="w-full max-w-sm rounded-xl border border-border bg-card p-8 text-center">
         <h1 className="text-2xl font-semibold text-foreground mb-2">AgenticVC</h1>
-        <p className="text-sm text-muted-foreground mb-8">
+        <p className="text-sm text-muted-foreground mb-6">
           Sign in to access your deal pipeline
         </p>
+        <input
+          type="email"
+          placeholder="you@example.com"
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+          className="w-full rounded-lg border border-border bg-background px-4 py-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary mb-4"
+        />
         <button
-          onClick={signInWithGoogle}
+          onClick={() => signInWithGoogle(email || undefined)}
           className="flex items-center justify-center gap-3 w-full rounded-lg border border-border px-4 py-3 text-sm font-medium text-foreground hover:bg-accent transition-colors"
         >
           <img

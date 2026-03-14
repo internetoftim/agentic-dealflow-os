@@ -6,7 +6,7 @@ interface AuthContextType {
   user: User | null;
   session: Session | null;
   loading: boolean;
-  signInWithGoogle: () => Promise<void>;
+  signInWithGoogle: (loginHint?: string) => Promise<void>;
   signOut: () => Promise<void>;
 }
 
@@ -44,7 +44,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return () => subscription.unsubscribe();
   }, []);
 
-  const signInWithGoogle = async () => {
+  const signInWithGoogle = async (loginHint?: string) => {
     await supabase.auth.signInWithOAuth({
       provider: "google",
       options: {
@@ -52,6 +52,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         queryParams: {
           access_type: "offline",
           prompt: "consent",
+          ...(loginHint ? { login_hint: loginHint } : {}),
         },
       },
     });
