@@ -1,8 +1,10 @@
 import { useState, useEffect } from "react";
-import { Sparkles, Check, Mail, HardDrive, Shield, Bot, Search } from "lucide-react";
+import { Sparkles, Check, Mail, HardDrive, Shield, Bot, Search, RotateCcw, Loader2 } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { toast } from "sonner";
+
+const DEFAULT_PATTERN = "<WEBSITE> deck <MonthYYYY> p<pages>.pdf";
 
 const AI_MODELS = [
   { value: "gpt-oss-202b", label: "GPT-OSS 202B", description: "Sapinsapin inference bridge — default" },
@@ -33,6 +35,9 @@ export default function SettingsPage() {
   const [driveSync, setDriveSync] = useState(true);
   const [spamFilter, setSpamFilter] = useState(true);
   const [namingTab, setNamingTab] = useState<"auto" | "manual">("auto");
+  const [namingPattern, setNamingPattern] = useState(DEFAULT_PATTERN);
+  const [sampleFilename, setSampleFilename] = useState("novastar.ai deck Mar2026 p24.pdf");
+  const [detectingPattern, setDetectingPattern] = useState(false);
   const [patternDetected, setPatternDetected] = useState(false);
   const [aiModel, setAiModel] = useState("gpt-oss-202b");
   const [deepResearchProvider, setDeepResearchProvider] = useState<"custom" | "firecrawl">("custom");
@@ -43,7 +48,7 @@ export default function SettingsPage() {
     if (!user) return;
     supabase
       .from("user_settings")
-      .select("ai_model, gmail_label_enabled, drive_sync_enabled, spam_filter_enabled, deep_research_provider")
+      .select("ai_model, gmail_label_enabled, drive_sync_enabled, spam_filter_enabled, deep_research_provider, naming_pattern, naming_mode")
       .eq("user_id", user.id)
       .single()
       .then(({ data }) => {
@@ -53,6 +58,12 @@ export default function SettingsPage() {
           setDriveSync(data.drive_sync_enabled ?? true);
           setSpamFilter(data.spam_filter_enabled ?? true);
           setDeepResearchProvider((data as any).deep_research_provider ?? "custom");
+          if (data.naming_pattern) {
+            setNamingPattern(data.naming_pattern);
+          }
+          if (data.naming_mode) {
+            setNamingTab(data.naming_mode as "auto" | "manual");
+          }
         }
       });
   }, [user]);
@@ -70,6 +81,51 @@ export default function SettingsPage() {
     } else {
       toast.success(`Model set to ${AI_MODELS.find((m) => m.value === model)?.label}`);
     }
+  };
+
+  const saveNamingPattern = async (pattern: string) => {
+    if (!user) return;
+    const { error } = await supabase
+      .from("user_settings")
+      .upsert({ user_id: user.id, naming_pattern: pattern, naming_mode: namingTab }, { onConflict: "user_id" });
+    if (error) {
+      toast.error("Failed to save naming pattern");
+    }
+  };
+
+  const handleDetectPattern = async () => {
+    if (!sampleFilename.trim()) {
+      toast.error("Please enter a sample filename");
+      return;
+    }
+    setDetectingPattern(true);
+    setPatternDetected(false);
+    try {
+      const { data, error } = await supabase.functions.invoke("detect-pattern", {
+        body: { sampleFilename: sampleFilename.trim() },
+      });
+      if (error) throw error;
+      if (data?.pattern) {
+        setNamingPattern(data.pattern);
+        setPatternDetected(true);
+        await saveNamingPattern(data.pattern);
+        toast.success("Pattern detected and saved!");
+      } else {
+        toast.error("Could not detect a pattern");
+      }
+    } catch (e) {
+      console.error("Pattern detection failed:", e);
+      toast.error("Pattern detection failed");
+    } finally {
+      setDetectingPattern(false);
+    }
+  };
+
+  const handleResetPattern = async () => {
+    setNamingPattern(DEFAULT_PATTERN);
+    setPatternDetected(false);
+    await saveNamingPattern(DEFAULT_PATTERN);
+    toast.success("Pattern reset to default");
   };
 
   return (
@@ -236,31 +292,94 @@ export default function SettingsPage() {
                 <input
                   type="text"
                   placeholder="Paste a recent filename example"
-                  defaultValue="novastar.ai deck Mar2026 p24.pdf"
+                  value={sampleFilename}
+                  onChange={(e) => setSampleFilename(e.target.value)}
                   className="flex-1 rounded-md border border-input bg-card px-3 py-2 text-sm outline-none placeholder:text-muted-foreground focus:ring-1 focus:ring-ring"
                 />
                 <button
-                  onClick={() => setPatternDetected(true)}
-                  className="flex items-center gap-1.5 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:opacity-90 transition-opacity"
+                  onClick={handleDetectPattern}
+                  disabled={detectingPattern}
+                  className="flex items-center gap-1.5 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:opacity-90 transition-opacity disabled:opacity-50"
                 >
-                  <Sparkles className="h-3.5 w-3.5" />
-                  Detect Pattern
+                  {detectingPattern ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  ) : (
+                    <Sparkles className="h-3.5 w-3.5" />
+                  )}
+                  {detectingPattern ? "Detecting…" : "Detect Pattern"}
                 </button>
               </div>
+
+              {/* Current pattern display */}
+              <div className="rounded-md bg-muted/50 p-3">
+                <div className="flex items-center justify-between mb-1">
+                  <p className="text-xs font-medium text-muted-foreground">Current Pattern</p>
+                  {namingPattern !== DEFAULT_PATTERN && (
+                    <button
+                      onClick={handleResetPattern}
+                      className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
+                    >
+                      <RotateCcw className="h-3 w-3" />
+                      Reset to default
+                    </button>
+                  )}
+                </div>
+                <code className="text-sm text-foreground">{namingPattern}</code>
+                <p className="text-xs text-muted-foreground mt-1.5">
+                  Default: <code className="bg-muted rounded px-1">{DEFAULT_PATTERN}</code>
+                </p>
+              </div>
+
               {patternDetected && (
                 <div className="rounded-md bg-success-muted p-3 flex items-start gap-2">
                   <Check className="h-4 w-4 text-success mt-0.5 shrink-0" />
                   <div>
-                    <p className="text-sm font-medium text-foreground">Pattern detected!</p>
+                    <p className="text-sm font-medium text-foreground">Pattern detected & saved!</p>
                     <p className="text-xs text-muted-foreground mt-0.5">
-                      <code className="bg-muted rounded px-1">&lt;WEBSITE&gt;</code> deck <code className="bg-muted rounded px-1">&lt;MonthYYYY&gt;</code> p<code className="bg-muted rounded px-1">&lt;pages&gt;</code>.pdf
+                      This pattern will be used when syncing files to Google Drive.
                     </p>
                   </div>
                 </div>
               )}
             </div>
           ) : (
-            <p className="text-sm text-muted-foreground">Drag and arrange naming variables to build your convention.</p>
+            <div className="space-y-3">
+              <p className="text-sm text-muted-foreground">Edit the naming pattern directly using tokens.</p>
+              <input
+                type="text"
+                value={namingPattern}
+                onChange={(e) => setNamingPattern(e.target.value)}
+                onBlur={() => saveNamingPattern(namingPattern)}
+                className="w-full rounded-md border border-input bg-card px-3 py-2 text-sm font-mono outline-none placeholder:text-muted-foreground focus:ring-1 focus:ring-ring"
+              />
+              <div className="flex items-center justify-between">
+                <div className="flex flex-wrap gap-1.5">
+                  {["<WEBSITE>", "<NAME>", "<MonthYYYY>", "<pages>", "<SECTOR>", "<STAGE>"].map((token) => (
+                    <button
+                      key={token}
+                      onClick={() => {
+                        setNamingPattern((p) => p + " " + token);
+                      }}
+                      className="rounded bg-muted px-2 py-0.5 text-xs font-mono text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
+                    >
+                      {token}
+                    </button>
+                  ))}
+                </div>
+                {namingPattern !== DEFAULT_PATTERN && (
+                  <button
+                    onClick={handleResetPattern}
+                    className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
+                  >
+                    <RotateCcw className="h-3 w-3" />
+                    Reset
+                  </button>
+                )}
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Default: <code className="bg-muted rounded px-1">{DEFAULT_PATTERN}</code>
+              </p>
+            </div>
           )}
         </div>
       </section>
