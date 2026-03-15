@@ -491,53 +491,73 @@ Deno.serve(async (req) => {
 
       const userContent: unknown[] = [];
 
-      if (isSapinsapin) {
-        // Sapinsapin is text-only — always use extracted text
-        const textToSend = extractedText.length > 0 ? extractedText.slice(0, 50_000) : "No text could be extracted from the deck file.";
-        userContent.push({ type: "text", text: `Here is the full text content of the pitch deck:\n\n${textToSend}\n\nAnalyze this pitch deck and extract metadata using the extract_deck_metadata tool. Return null for fields you cannot determine.` });
-      } else {
-        // OpenAI path: send PDF directly
+      // Determine if the model supports file/image input
+      const supportsFileInput = !isSapinsapin && (model === "gpt-4o" || model === "gpt-5" || model === "gpt-5-mini");
+
+      if (supportsFileInput) {
+        // Models with vision/file support: send PDF directly
         const base64 = btoa(new Uint8Array(compressedPdf).reduce((data, byte) => data + String.fromCharCode(byte), ""));
         userContent.push({ type: "file", file: { filename: "deck.pdf", file_data: `data:application/pdf;base64,${base64}` } });
         userContent.push({ type: "text", text: "Analyze this pitch deck and extract metadata using the extract_deck_metadata tool." });
+      } else {
+        // Text-only models: send extracted text
+        const textToSend = extractedText.length > 0 ? extractedText.slice(0, 50_000) : "No text could be extracted from the deck file.";
+        userContent.push({ type: "text", text: `Here is the full text content of the pitch deck:\n\n${textToSend}\n\nAnalyze this pitch deck and extract metadata using the extract_deck_metadata tool. Return null for fields you cannot determine.` });
       }
 
-      const aiResponse = await fetch(`${baseUrl}/v1/chat/completions`, {
+      const aiPayload = {
+        model: isSapinsapin ? sapinsapinModel : model,
+        messages: [
+          { role: "system", content: "You are a VC analyst assistant. Analyze startup pitch decks and extract structured metadata. Be precise. Return null for missing fields." },
+          { role: "user", content: userContent },
+        ],
+        tools: [{
+          type: "function",
+          function: {
+            name: "extract_deck_metadata",
+            description: "Extract structured metadata from a startup pitch deck.",
+            parameters: {
+              type: "object",
+              properties: {
+                startup_name: { type: "string", description: "Name of the startup/company" },
+                website: { type: ["string", "null"], description: "Company website URL if found" },
+                stage: { type: "string", enum: ["Pre-Seed", "Seed", "Series A", "Series B", "Series C", "Growth", "Unknown"] },
+                sector: { type: "string", description: "Primary sector/industry" },
+                ask_amount: { type: ["string", "null"], description: "Amount being raised" },
+                valuation: { type: ["string", "null"], description: "Valuation if mentioned" },
+                revenue: { type: ["string", "null"], description: "Current revenue/ARR" },
+                growth: { type: ["string", "null"], description: "Growth rate" },
+                team_size: { type: ["string", "null"], description: "Team size" },
+                page_count: { type: "number", description: "Number of pages/slides" },
+              },
+              required: ["startup_name", "stage", "sector", "page_count"],
+              additionalProperties: false,
+            },
+          },
+        }],
+        tool_choice: { type: "function", function: { name: "extract_deck_metadata" } },
+      };
+
+      let aiResponse = await fetch(`${baseUrl}/v1/chat/completions`, {
         method: "POST",
         headers: aiHeaders,
-        body: JSON.stringify({
-          model: isSapinsapin ? sapinsapinModel : model,
-          messages: [
-            { role: "system", content: "You are a VC analyst assistant. Analyze startup pitch decks and extract structured metadata. Be precise. Return null for missing fields." },
-            { role: "user", content: userContent },
-          ],
-          tools: [{
-            type: "function",
-            function: {
-              name: "extract_deck_metadata",
-              description: "Extract structured metadata from a startup pitch deck.",
-              parameters: {
-                type: "object",
-                properties: {
-                  startup_name: { type: "string", description: "Name of the startup/company" },
-                  website: { type: ["string", "null"], description: "Company website URL if found" },
-                  stage: { type: "string", enum: ["Pre-Seed", "Seed", "Series A", "Series B", "Series C", "Growth", "Unknown"] },
-                  sector: { type: "string", description: "Primary sector/industry" },
-                  ask_amount: { type: ["string", "null"], description: "Amount being raised" },
-                  valuation: { type: ["string", "null"], description: "Valuation if mentioned" },
-                  revenue: { type: ["string", "null"], description: "Current revenue/ARR" },
-                  growth: { type: ["string", "null"], description: "Growth rate" },
-                  team_size: { type: ["string", "null"], description: "Team size" },
-                  page_count: { type: "number", description: "Number of pages/slides" },
-                },
-                required: ["startup_name", "stage", "sector", "page_count"],
-                additionalProperties: false,
-              },
-            },
-          }],
-          tool_choice: { type: "function", function: { name: "extract_deck_metadata" } },
-        }),
+        body: JSON.stringify(aiPayload),
       });
+
+      // Fallback: if file-based request fails, retry with text-only
+      if (!aiResponse.ok && supportsFileInput && extractedText.length > 0) {
+        console.warn(`File-based AI call failed (${aiResponse.status}), falling back to text-only extraction`);
+        const textToSend = extractedText.slice(0, 50_000);
+        aiPayload.messages = [
+          { role: "system", content: "You are a VC analyst assistant. Analyze startup pitch decks and extract structured metadata. Be precise. Return null for missing fields." },
+          { role: "user", content: [{ type: "text", text: `Here is the full text content of the pitch deck:\n\n${textToSend}\n\nAnalyze this pitch deck and extract metadata using the extract_deck_metadata tool. Return null for fields you cannot determine.` }] },
+        ];
+        aiResponse = await fetch(`${baseUrl}/v1/chat/completions`, {
+          method: "POST",
+          headers: aiHeaders,
+          body: JSON.stringify(aiPayload),
+        });
+      }
 
       if (!aiResponse.ok) {
         const errText = await aiResponse.text();
