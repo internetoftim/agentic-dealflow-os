@@ -37,9 +37,14 @@ function applyNamingPattern(
     .replace(/<SECTOR>/gi, deal.sector ?? "Unknown")
     .replace(/<STAGE>/gi, deal.stage ?? "Unknown");
 
-  // Ensure .pdf extension
-  if (!result.toLowerCase().endsWith(".pdf")) {
-    result += ".pdf";
+  // Ensure correct extension
+  const ext = originalFileName?.toLowerCase().endsWith(".pptx") ? ".pptx"
+    : originalFileName?.toLowerCase().endsWith(".ppt") ? ".ppt"
+    : ".pdf";
+  // Remove any existing extension and add the correct one
+  result = result.replace(/\.(pdf|pptx?)\s*$/i, "");
+  if (!result.toLowerCase().endsWith(ext)) {
+    result += ext;
   }
 
   return result;
