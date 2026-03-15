@@ -494,12 +494,7 @@ Deno.serve(async (req) => {
           updated_at: new Date().toISOString(),
           pages: actualPageCount > 0 ? actualPageCount : null,
         };
-        // Try to extract a website URL from the text
-        const urlMatch = extractedText.match(/https?:\/\/(?:www\.)?([a-zA-Z0-9-]+\.[a-zA-Z]{2,})[^\s)"\]<]*/);
-        if (urlMatch) {
-          updatePayload.website = urlMatch[0];
-          updatePayload.website_searching = false;
-        }
+        // Don't blindly set website from text — Step 4 will verify it via search
         await adminClient.from("deals").update(updatePayload).eq("id", dealId);
       } else {
         // LLM metadata extraction (cloud models)
