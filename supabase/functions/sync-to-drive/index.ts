@@ -120,45 +120,62 @@ Deno.serve(async (req) => {
       throw new Error(`Failed to download file: ${downloadError?.message}`);
     }
 
-    // Resolve or create the target Drive folder
-    const folderName = settings.drive_folder || "WAITING ROOM";
+    // Resolve or create the target Drive folder (supports nested paths like "Folder/Sub Folder")
+    const folderPath = settings.drive_folder || "WAITING ROOM";
+    const folderSegments = folderPath.split("/").map((s: string) => s.trim()).filter(Boolean);
     let folderId: string | null = null;
 
-    // Search for existing folder
-    const folderSearchRes = await fetch(
-      `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(
-        `name='${folderName}' and mimeType='application/vnd.google-apps.folder' and trashed=false`
-      )}&fields=files(id)`,
-      { headers: { Authorization: `Bearer ${settings.google_provider_token}` } }
-    );
-    if (folderSearchRes.ok) {
-      const folderData = await folderSearchRes.json();
-      if (folderData.files?.length > 0) {
-        folderId = folderData.files[0].id;
-      }
-    }
-
-    // Create folder if it doesn't exist
-    if (!folderId) {
-      const createFolderRes = await fetch(
-        "https://www.googleapis.com/drive/v3/files",
-        {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${settings.google_provider_token}`,
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            name: folderName,
-            mimeType: "application/vnd.google-apps.folder",
-          }),
-        }
+    // Walk each segment, creating folders as needed
+    let parentId: string | null = null;
+    for (const segment of folderSegments) {
+      // Search for existing folder (properly escape single quotes in folder names)
+      const escapedName = segment.replace(/'/g, "\\'");
+      const parentQuery = parentId
+        ? ` and '${parentId}' in parents`
+        : "";
+      const q = `name='${escapedName}' and mimeType='application/vnd.google-apps.folder' and trashed=false${parentQuery}`;
+      const folderSearchRes = await fetch(
+        `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(q)}&fields=files(id)`,
+        { headers: { Authorization: `Bearer ${settings.google_provider_token}` } }
       );
-      if (createFolderRes.ok) {
-        const created = await createFolderRes.json();
-        folderId = created.id;
+
+      let segmentId: string | null = null;
+      if (folderSearchRes.ok) {
+        const folderData = await folderSearchRes.json();
+        if (folderData.files?.length > 0) {
+          segmentId = folderData.files[0].id;
+        }
       }
+
+      // Create folder if it doesn't exist
+      if (!segmentId) {
+        const createBody: Record<string, unknown> = {
+          name: segment,
+          mimeType: "application/vnd.google-apps.folder",
+        };
+        if (parentId) {
+          createBody.parents = [parentId];
+        }
+        const createFolderRes = await fetch(
+          "https://www.googleapis.com/drive/v3/files",
+          {
+            method: "POST",
+            headers: {
+              Authorization: `Bearer ${settings.google_provider_token}`,
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify(createBody),
+          }
+        );
+        if (createFolderRes.ok) {
+          const created = await createFolderRes.json();
+          segmentId = created.id;
+        }
+      }
+
+      parentId = segmentId;
     }
+    folderId = parentId;
 
     // Upload to Google Drive with the formatted name
     // Files are always PDF at this point (PPTX converted upstream)
