@@ -96,16 +96,67 @@ async function checkPaused(adminClient: any, dealId: string, currentStep: string
   return false;
 }
 
+/** Extract text from a Google Slides presentation via the Slides API. */
+function extractTextFromSlidesApi(presentation: any): string {
+  const slides = presentation.slides || [];
+  const slideTexts: string[] = [];
+
+  for (let i = 0; i < slides.length; i++) {
+    const slide = slides[i];
+    const texts: string[] = [];
+
+    const extractFromElements = (elements: any[]) => {
+      for (const el of elements || []) {
+        // Text from shapes
+        if (el.shape?.text?.textElements) {
+          for (const te of el.shape.text.textElements) {
+            if (te.textRun?.content) {
+              const t = te.textRun.content.trim();
+              if (t) texts.push(t);
+            }
+          }
+        }
+        // Text from tables
+        if (el.table) {
+          for (const row of el.table.tableRows || []) {
+            for (const cell of row.tableCells || []) {
+              if (cell.text?.textElements) {
+                for (const te of cell.text.textElements) {
+                  if (te.textRun?.content) {
+                    const t = te.textRun.content.trim();
+                    if (t) texts.push(t);
+                  }
+                }
+              }
+            }
+          }
+        }
+        // Recurse into groups
+        if (el.elementGroup?.children) {
+          extractFromElements(el.elementGroup.children);
+        }
+      }
+    };
+
+    extractFromElements(slide.pageElements);
+    if (texts.length > 0) {
+      slideTexts.push(`[Slide ${i + 1}] ${texts.join(" ")}`);
+    }
+  }
+
+  return slideTexts.join("\n\n");
+}
+
 /**
  * Convert PPTX to PDF using Google Drive API.
  * Upload as Google Slides (with convert), then export as PDF.
- * Also captures slide thumbnails for vision-based extraction.
+ * Also extracts text via the Google Slides API for accurate content extraction.
  */
 async function convertPptxToPdfViaDrive(
   pptxBytes: ArrayBuffer,
   googleToken: string,
   fileName: string
-): Promise<{ pdfBytes: Uint8Array; slideImages: string[] }> {
+): Promise<{ pdfBytes: Uint8Array; slidesText: string }> {
   // 1. Upload PPTX to Google Drive, converting to Google Slides
   const metadata = {
     name: `_temp_convert_${fileName}`,
