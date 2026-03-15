@@ -494,12 +494,7 @@ Deno.serve(async (req) => {
           updated_at: new Date().toISOString(),
           pages: actualPageCount > 0 ? actualPageCount : null,
         };
-        // Try to extract a website URL from the text
-        const urlMatch = extractedText.match(/https?:\/\/(?:www\.)?([a-zA-Z0-9-]+\.[a-zA-Z]{2,})[^\s)"\]<]*/);
-        if (urlMatch) {
-          updatePayload.website = urlMatch[0];
-          updatePayload.website_searching = false;
-        }
+        // Don't blindly set website from text — Step 4 will verify it via search
         await adminClient.from("deals").update(updatePayload).eq("id", dealId);
       } else {
         // LLM metadata extraction (cloud models)
@@ -602,7 +597,7 @@ Deno.serve(async (req) => {
 
         const updatePayload: Record<string, unknown> = { updated_at: new Date().toISOString() };
         if (metadata.startup_name) updatePayload.name = metadata.startup_name;
-        if (metadata.website) { updatePayload.website = metadata.website; updatePayload.website_searching = false; }
+        // Don't set website from LLM extraction — Step 4 will verify via search + scrape
         if (metadata.stage) updatePayload.stage = metadata.stage;
         if (metadata.sector) updatePayload.sector = metadata.sector;
         if (metadata.ask_amount) updatePayload.ask_amount = metadata.ask_amount;
