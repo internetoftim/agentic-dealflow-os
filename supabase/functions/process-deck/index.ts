@@ -1,6 +1,6 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { BlobReader, ZipReader, TextWriter } from "https://esm.sh/@zip.js/zip.js@2.7.34";
-import { PDFDocument } from "https://esm.sh/pdf-lib@1.17.1";
+import { PDFDocument } from "https://esm.sh/pdf-lib@1.17.1?bundle-deps";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -96,16 +96,67 @@ async function checkPaused(adminClient: any, dealId: string, currentStep: string
   return false;
 }
 
+/** Extract text from a Google Slides presentation via the Slides API. */
+function extractTextFromSlidesApi(presentation: any): string {
+  const slides = presentation.slides || [];
+  const slideTexts: string[] = [];
+
+  for (let i = 0; i < slides.length; i++) {
+    const slide = slides[i];
+    const texts: string[] = [];
+
+    const extractFromElements = (elements: any[]) => {
+      for (const el of elements || []) {
+        // Text from shapes
+        if (el.shape?.text?.textElements) {
+          for (const te of el.shape.text.textElements) {
+            if (te.textRun?.content) {
+              const t = te.textRun.content.trim();
+              if (t) texts.push(t);
+            }
+          }
+        }
+        // Text from tables
+        if (el.table) {
+          for (const row of el.table.tableRows || []) {
+            for (const cell of row.tableCells || []) {
+              if (cell.text?.textElements) {
+                for (const te of cell.text.textElements) {
+                  if (te.textRun?.content) {
+                    const t = te.textRun.content.trim();
+                    if (t) texts.push(t);
+                  }
+                }
+              }
+            }
+          }
+        }
+        // Recurse into groups
+        if (el.elementGroup?.children) {
+          extractFromElements(el.elementGroup.children);
+        }
+      }
+    };
+
+    extractFromElements(slide.pageElements);
+    if (texts.length > 0) {
+      slideTexts.push(`[Slide ${i + 1}] ${texts.join(" ")}`);
+    }
+  }
+
+  return slideTexts.join("\n\n");
+}
+
 /**
  * Convert PPTX to PDF using Google Drive API.
  * Upload as Google Slides (with convert), then export as PDF.
- * Also captures slide thumbnails for vision-based extraction.
+ * Also extracts text via the Google Slides API for accurate content extraction.
  */
 async function convertPptxToPdfViaDrive(
   pptxBytes: ArrayBuffer,
   googleToken: string,
   fileName: string
-): Promise<{ pdfBytes: Uint8Array; slideImages: string[] }> {
+): Promise<{ pdfBytes: Uint8Array; slidesText: string }> {
   // 1. Upload PPTX to Google Drive, converting to Google Slides
   const metadata = {
     name: `_temp_convert_${fileName}`,
@@ -157,8 +208,8 @@ async function convertPptxToPdfViaDrive(
 
     const pdfBuffer = await exportRes.arrayBuffer();
 
-    // 3. Capture slide thumbnails via Google Slides API
-    const slideImages: string[] = [];
+    // 3. Extract text via Google Slides API (much more accurate than PDF text extraction)
+    let slidesText = "";
     try {
       const presRes = await fetch(
         `https://slides.googleapis.com/v1/presentations/${tempFileId}`,
@@ -167,45 +218,16 @@ async function convertPptxToPdfViaDrive(
 
       if (presRes.ok) {
         const presentation = await presRes.json();
-        const pages = presentation.slides || [];
-        // Limit to first 30 slides to avoid excessive API calls
-        const pagesToCapture = pages.slice(0, 30);
-        console.log(`Capturing ${pagesToCapture.length} slide thumbnails...`);
-
-        for (const page of pagesToCapture) {
-          try {
-            const thumbRes = await fetch(
-              `https://slides.googleapis.com/v1/presentations/${tempFileId}/pages/${page.objectId}/thumbnail?thumbnailProperties.mimeType=PNG&thumbnailProperties.thumbnailSize=LARGE`,
-              { headers: { Authorization: `Bearer ${googleToken}` } }
-            );
-            if (thumbRes.ok) {
-              const thumbData = await thumbRes.json();
-              if (thumbData.contentUrl) {
-                // Download the thumbnail image and convert to base64
-                const imgRes = await fetch(thumbData.contentUrl);
-                if (imgRes.ok) {
-                  const imgBuffer = await imgRes.arrayBuffer();
-                  const base64 = btoa(
-                    new Uint8Array(imgBuffer).reduce(
-                      (data, byte) => data + String.fromCharCode(byte),
-                      ""
-                    )
-                  );
-                  slideImages.push(base64);
-                }
-              }
-            }
-          } catch (e) {
-            console.warn(`Failed to capture thumbnail for slide ${page.objectId}:`, e);
-          }
-        }
-        console.log(`Captured ${slideImages.length} slide images`);
+        slidesText = extractTextFromSlidesApi(presentation);
+        console.log(`Extracted ${slidesText.length} chars from ${(presentation.slides || []).length} slides via Slides API`);
+      } else {
+        console.warn(`Slides API returned ${presRes.status}`);
       }
     } catch (e) {
-      console.warn("Slide thumbnail capture failed (non-fatal):", e);
+      console.warn("Slides API text extraction failed (non-fatal):", e);
     }
 
-    return { pdfBytes: new Uint8Array(pdfBuffer), slideImages };
+    return { pdfBytes: new Uint8Array(pdfBuffer), slidesText };
   } finally {
     // 4. Delete the temp Google Slides file
     await fetch(`https://www.googleapis.com/drive/v3/files/${tempFileId}`, {
@@ -325,7 +347,7 @@ Deno.serve(async (req) => {
 
     // --- STEP 1: Convert PPTX to PDF (if applicable) ---
     let pdfStoragePath = storagePath;
-    let slideImages: string[] = []; // base64 PNG thumbnails from conversion
+    let slidesApiText = ""; // text extracted via Google Slides API during conversion
     if (isPptx && !shouldSkip("converting")) {
       if (await checkPaused(adminClient, dealId, "converting")) {
         return new Response(JSON.stringify({ success: true, paused: true, at: "converting" }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
@@ -343,7 +365,7 @@ Deno.serve(async (req) => {
         fileName
       );
       arrayBuffer = conversionResult.pdfBytes.buffer as ArrayBuffer;
-      slideImages = conversionResult.slideImages;
+      slidesApiText = conversionResult.slidesText;
 
       const pdfFileName = fileName.replace(/\.(pptx|ppt)$/i, ".pdf");
       pdfStoragePath = storagePath.replace(/\.(pptx|ppt)$/i, ".pdf");
@@ -404,28 +426,43 @@ Deno.serve(async (req) => {
 
       let extractedText = "";
       let actualPageCount = pageCount;
-      try {
-        const result = extractPdfText(compressedPdf.buffer as ArrayBuffer);
-        extractedText = result.text;
-        if (result.pageCount > 0) actualPageCount = result.pageCount;
-        console.log(`Extracted ${extractedText.length} chars, ${actualPageCount} pages`);
-      } catch (e) {
-        console.error("Text extraction failed (non-fatal):", e);
-      }
 
-      if (isPptx && extractedText.length < 200) {
+      // For PPTX: prefer Slides API text (most accurate), then PPTX XML, then PDF text
+      if (isPptx && slidesApiText.length >= 200) {
+        extractedText = slidesApiText;
+        console.log(`Using Slides API text: ${extractedText.length} chars`);
+      } else {
+        // Try PDF text extraction
         try {
-          const { data: origFile } = await adminClient.storage.from("decks").download(storagePath);
-          if (origFile) {
-            const origBuffer = await origFile.arrayBuffer();
-            const pptxResult = await extractPptxText(origBuffer);
-            if (pptxResult.text.length > extractedText.length) {
-              extractedText = pptxResult.text;
-              actualPageCount = pptxResult.pageCount;
+          const result = extractPdfText(compressedPdf.buffer as ArrayBuffer);
+          extractedText = result.text;
+          if (result.pageCount > 0) actualPageCount = result.pageCount;
+          console.log(`Extracted ${extractedText.length} chars from PDF, ${actualPageCount} pages`);
+        } catch (e) {
+          console.error("Text extraction failed (non-fatal):", e);
+        }
+
+        // For PPTX: fallback to XML extraction if PDF text is insufficient
+        if (isPptx && extractedText.length < 200) {
+          // Try Slides API text even if short
+          if (slidesApiText.length > extractedText.length) {
+            extractedText = slidesApiText;
+            console.log(`Using Slides API text (short but best available): ${extractedText.length} chars`);
+          } else {
+            try {
+              const { data: origFile } = await adminClient.storage.from("decks").download(storagePath);
+              if (origFile) {
+                const origBuffer = await origFile.arrayBuffer();
+                const pptxResult = await extractPptxText(origBuffer);
+                if (pptxResult.text.length > extractedText.length) {
+                  extractedText = pptxResult.text;
+                  actualPageCount = pptxResult.pageCount;
+                }
+              }
+            } catch (e) {
+              console.warn("PPTX fallback text extraction failed:", e);
             }
           }
-        } catch (e) {
-          console.warn("PPTX fallback text extraction failed:", e);
         }
       }
 
@@ -453,24 +490,11 @@ Deno.serve(async (req) => {
       }
 
       const userContent: unknown[] = [];
-      const hasUsableText = extractedText.length >= 200;
 
-      if (isSapinsapin && hasUsableText) {
-        // Text-based extraction for Sapinsapin when we have good text
-        userContent.push({ type: "text", text: `Here is the full text content of the pitch deck:\n\n${extractedText.slice(0, 50_000)}\n\nAnalyze this pitch deck and extract metadata using the extract_deck_metadata tool.` });
-      } else if (isSapinsapin && slideImages.length > 0) {
-        // Vision-based extraction: send slide images when text extraction failed
-        console.log(`Using vision mode: sending ${slideImages.length} slide images to model`);
-        userContent.push({ type: "text", text: "I'm sending you images of each slide from a startup pitch deck. Analyze all slides and extract metadata using the extract_deck_metadata tool." });
-        for (let i = 0; i < slideImages.length; i++) {
-          userContent.push({
-            type: "image_url",
-            image_url: { url: `data:image/png;base64,${slideImages[i]}` },
-          });
-        }
-      } else if (isSapinsapin) {
-        // Fallback: no text and no images
-        userContent.push({ type: "text", text: "No text or images could be extracted from the deck file. Please return null for all optional fields.\n\nAnalyze this pitch deck and extract metadata using the extract_deck_metadata tool." });
+      if (isSapinsapin) {
+        // Sapinsapin is text-only — always use extracted text
+        const textToSend = extractedText.length > 0 ? extractedText.slice(0, 50_000) : "No text could be extracted from the deck file.";
+        userContent.push({ type: "text", text: `Here is the full text content of the pitch deck:\n\n${textToSend}\n\nAnalyze this pitch deck and extract metadata using the extract_deck_metadata tool. Return null for fields you cannot determine.` });
       } else {
         // OpenAI path: send PDF directly
         const base64 = btoa(new Uint8Array(compressedPdf).reduce((data, byte) => data + String.fromCharCode(byte), ""));
