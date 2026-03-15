@@ -208,8 +208,8 @@ async function convertPptxToPdfViaDrive(
 
     const pdfBuffer = await exportRes.arrayBuffer();
 
-    // 3. Capture slide thumbnails via Google Slides API
-    const slideImages: string[] = [];
+    // 3. Extract text via Google Slides API (much more accurate than PDF text extraction)
+    let slidesText = "";
     try {
       const presRes = await fetch(
         `https://slides.googleapis.com/v1/presentations/${tempFileId}`,
@@ -218,45 +218,16 @@ async function convertPptxToPdfViaDrive(
 
       if (presRes.ok) {
         const presentation = await presRes.json();
-        const pages = presentation.slides || [];
-        // Limit to first 30 slides to avoid excessive API calls
-        const pagesToCapture = pages.slice(0, 30);
-        console.log(`Capturing ${pagesToCapture.length} slide thumbnails...`);
-
-        for (const page of pagesToCapture) {
-          try {
-            const thumbRes = await fetch(
-              `https://slides.googleapis.com/v1/presentations/${tempFileId}/pages/${page.objectId}/thumbnail?thumbnailProperties.mimeType=PNG&thumbnailProperties.thumbnailSize=LARGE`,
-              { headers: { Authorization: `Bearer ${googleToken}` } }
-            );
-            if (thumbRes.ok) {
-              const thumbData = await thumbRes.json();
-              if (thumbData.contentUrl) {
-                // Download the thumbnail image and convert to base64
-                const imgRes = await fetch(thumbData.contentUrl);
-                if (imgRes.ok) {
-                  const imgBuffer = await imgRes.arrayBuffer();
-                  const base64 = btoa(
-                    new Uint8Array(imgBuffer).reduce(
-                      (data, byte) => data + String.fromCharCode(byte),
-                      ""
-                    )
-                  );
-                  slideImages.push(base64);
-                }
-              }
-            }
-          } catch (e) {
-            console.warn(`Failed to capture thumbnail for slide ${page.objectId}:`, e);
-          }
-        }
-        console.log(`Captured ${slideImages.length} slide images`);
+        slidesText = extractTextFromSlidesApi(presentation);
+        console.log(`Extracted ${slidesText.length} chars from ${(presentation.slides || []).length} slides via Slides API`);
+      } else {
+        console.warn(`Slides API returned ${presRes.status}`);
       }
     } catch (e) {
-      console.warn("Slide thumbnail capture failed (non-fatal):", e);
+      console.warn("Slides API text extraction failed (non-fatal):", e);
     }
 
-    return { pdfBytes: new Uint8Array(pdfBuffer), slideImages };
+    return { pdfBytes: new Uint8Array(pdfBuffer), slidesText };
   } finally {
     // 4. Delete the temp Google Slides file
     await fetch(`https://www.googleapis.com/drive/v3/files/${tempFileId}`, {
