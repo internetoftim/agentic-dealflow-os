@@ -3,6 +3,7 @@ import { useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { compressDeck } from "@/lib/compressPdf";
+import { extractTextFromPdf, type VisionProgress } from "@/lib/localVision";
 
 export interface Deal {
   id: string;
@@ -152,8 +153,24 @@ export function useCreateDealWithUpload() {
   const { user } = useAuth();
 
   return useMutation({
-    mutationFn: async ({ file, name }: { file: File; name: string }) => {
+    mutationFn: async ({
+      file,
+      name,
+      onVisionProgress,
+    }: {
+      file: File;
+      name: string;
+      onVisionProgress?: (p: VisionProgress) => void;
+    }) => {
       if (!user) throw new Error("Not authenticated");
+
+      // Check user's model preference
+      const { data: settings } = await supabase
+        .from("user_settings")
+        .select("ai_model")
+        .eq("user_id", user.id)
+        .single();
+      const isLocalModel = settings?.ai_model === "local-florence2";
 
       // 1. Create the deal with "uploading" status
       const { data: deal, error: dealError } = await supabase
@@ -190,7 +207,19 @@ export function useCreateDealWithUpload() {
         .upload(storagePath, compressed);
       if (uploadError) throw uploadError;
 
-      // 4. Create source record
+      // 4. Local vision extraction (if local model selected & file is PDF)
+      let localExtractedText = "";
+      if (isLocalModel && !isPptx) {
+        try {
+          const pdfBuffer = await compressed.arrayBuffer();
+          const result = await extractTextFromPdf(pdfBuffer, onVisionProgress);
+          localExtractedText = result.text;
+        } catch (e) {
+          console.warn("Local vision extraction failed, will fall back to server:", e);
+        }
+      }
+
+      // 5. Create source record (include local extracted text if available)
       const { error: sourceError } = await supabase
         .from("sources")
         .insert({
@@ -200,14 +229,20 @@ export function useCreateDealWithUpload() {
           original_size: `${(file.size / (1024 * 1024)).toFixed(1)}MB`,
           storage_path: storagePath,
           source_type: "upload",
-          processing_status: "uploaded",
+          processing_status: localExtractedText ? "extracted" : "uploaded",
+          ...(localExtractedText ? { extracted_text: localExtractedText } : {}),
         });
       if (sourceError) throw sourceError;
 
-      // 5. Trigger processing pipeline (fire-and-forget)
+      // 6. Trigger processing pipeline (fire-and-forget)
+      // Pass flag so edge function knows text was already extracted locally
       supabase.functions
         .invoke("process-deck", {
-          body: { dealId: deal.id, storagePath },
+          body: {
+            dealId: deal.id,
+            storagePath,
+            localExtracted: !!localExtractedText,
+          },
         })
         .catch((e) => console.warn("Deck processing skipped:", e));
 
