@@ -275,7 +275,10 @@ Deno.serve(async (req) => {
 
     // --- STEP 1: Convert PPTX to PDF (if applicable) ---
     let pdfStoragePath = storagePath;
-    if (isPptx) {
+    if (isPptx && !shouldSkip("converting")) {
+      if (await checkPaused(adminClient, dealId, "converting")) {
+        return new Response(JSON.stringify({ success: true, paused: true, at: "converting" }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      }
       await setDealStatus(adminClient, dealId, "converting");
 
       if (!settings?.google_provider_token) {
@@ -283,27 +286,28 @@ Deno.serve(async (req) => {
       }
 
       console.log("Converting PPTX to PDF via Google Drive API...");
-      const pdfBytes = await convertPptxToPdfViaDrive(
+      const pdfBytesConverted = await convertPptxToPdfViaDrive(
         arrayBuffer,
         settings.google_provider_token,
         fileName
       );
-      arrayBuffer = pdfBytes.buffer as ArrayBuffer;
+      arrayBuffer = pdfBytesConverted.buffer as ArrayBuffer;
 
-      // Upload the converted PDF to storage (replacing the original path concept)
       const pdfFileName = fileName.replace(/\.(pptx|ppt)$/i, ".pdf");
       pdfStoragePath = storagePath.replace(/\.(pptx|ppt)$/i, ".pdf");
 
       const { error: pdfUploadError } = await adminClient.storage
         .from("decks")
-        .upload(pdfStoragePath, new Blob([pdfBytes], { type: "application/pdf" }), {
+        .upload(pdfStoragePath, new Blob([pdfBytesConverted], { type: "application/pdf" }), {
           upsert: true,
         });
       if (pdfUploadError) {
         console.warn("Failed to upload converted PDF:", pdfUploadError.message);
       }
 
-      console.log(`PPTX converted to PDF: ${(pdfBytes.length / (1024 * 1024)).toFixed(1)}MB`);
+      console.log(`PPTX converted to PDF: ${(pdfBytesConverted.length / (1024 * 1024)).toFixed(1)}MB`);
+    } else if (isPptx) {
+      pdfStoragePath = storagePath.replace(/\.(pptx|ppt)$/i, ".pdf");
     }
 
     // --- STEP 2: Compress PDF ---
