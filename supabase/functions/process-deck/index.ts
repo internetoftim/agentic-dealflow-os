@@ -418,6 +418,10 @@ Deno.serve(async (req) => {
     }
 
     // --- STEP 3: Extracting metadata ---
+    // If text was extracted locally (e.g. Florence-2 in-browser), skip server-side extraction
+    // but still run LLM metadata extraction if a cloud model is configured
+    const isLocalModel = model === "local-florence2";
+
     if (!shouldSkip("extracting")) {
       if (await checkPaused(adminClient, dealId, "extracting")) {
         return new Response(JSON.stringify({ success: true, paused: true, at: "extracting" }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
