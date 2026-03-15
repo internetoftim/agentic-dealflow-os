@@ -1,0 +1,1 @@
+ALTER TABLE public.deals ADD COLUMN paused_at_step text DEFAULT NULL;
