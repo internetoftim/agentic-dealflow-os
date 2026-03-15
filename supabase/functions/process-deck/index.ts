@@ -347,7 +347,7 @@ Deno.serve(async (req) => {
 
     // --- STEP 1: Convert PPTX to PDF (if applicable) ---
     let pdfStoragePath = storagePath;
-    let slideImages: string[] = []; // base64 PNG thumbnails from conversion
+    let slidesApiText = ""; // text extracted via Google Slides API during conversion
     if (isPptx && !shouldSkip("converting")) {
       if (await checkPaused(adminClient, dealId, "converting")) {
         return new Response(JSON.stringify({ success: true, paused: true, at: "converting" }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
@@ -365,7 +365,7 @@ Deno.serve(async (req) => {
         fileName
       );
       arrayBuffer = conversionResult.pdfBytes.buffer as ArrayBuffer;
-      slideImages = conversionResult.slideImages;
+      slidesApiText = conversionResult.slidesText;
 
       const pdfFileName = fileName.replace(/\.(pptx|ppt)$/i, ".pdf");
       pdfStoragePath = storagePath.replace(/\.(pptx|ppt)$/i, ".pdf");
