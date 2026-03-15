@@ -56,7 +56,7 @@ export function useDeals() {
       .on(
         "postgres_changes",
         { event: "*", schema: "public", table: "deals", filter: `user_id=eq.${user.id}` },
-        () => {
+        (_payload) => {
           queryClient.invalidateQueries({ queryKey: ["deals", user.id] });
         }
       )
