@@ -2,7 +2,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
-import { compressPdf } from "@/lib/compressPdf";
+import { compressDeck } from "@/lib/compressPdf";
 
 export interface Deal {
   id: string;
@@ -48,7 +48,6 @@ export function useDeals() {
   const { user } = useAuth();
   const queryClient = useQueryClient();
 
-  // Subscribe to realtime updates on deals table
   useEffect(() => {
     if (!user) return;
     const channel = supabase
@@ -61,10 +60,7 @@ export function useDeals() {
         }
       )
       .subscribe();
-
-    return () => {
-      supabase.removeChannel(channel);
-    };
+    return () => { supabase.removeChannel(channel); };
   }, [user, queryClient]);
 
   return useQuery({
@@ -120,21 +116,21 @@ export function useCreateDealWithUpload() {
         .single();
       if (dealError) throw dealError;
 
-      // 2. Compress → update status
+      // 2. Compress (PDF) or pass-through (PPTX)
       await supabase.from("deals").update({ status: "compressing" }).eq("id", deal.id);
 
-      const { compressed, pages } = await compressPdf(file);
+      const { compressed, pages, isPptx } = await compressDeck(file);
 
       await supabase
         .from("deals")
         .update({
           compressed_size: `${(compressed.size / (1024 * 1024)).toFixed(1)}MB`,
-          pages,
+          pages: pages || null,
           status: "extracting",
         })
         .eq("id", deal.id);
 
-      // 3. Upload compressed file to storage
+      // 3. Upload file to storage
       const storagePath = `${user.id}/${deal.id}/${file.name}`;
       const { error: uploadError } = await supabase.storage
         .from("decks")
@@ -155,8 +151,7 @@ export function useCreateDealWithUpload() {
         });
       if (sourceError) throw sourceError;
 
-      // 5. Trigger AI deck analysis + lite website search (fire-and-forget)
-      // The edge function will update status through: extracting → searching-website → syncing → memo-ready
+      // 5. Trigger processing pipeline (fire-and-forget)
       supabase.functions
         .invoke("process-deck", {
           body: { dealId: deal.id, storagePath },
