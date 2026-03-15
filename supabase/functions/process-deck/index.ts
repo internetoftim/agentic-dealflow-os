@@ -70,6 +70,15 @@ function extractPdfText(arrayBuffer: ArrayBuffer): { text: string; pageCount: nu
   return { text: textChunks.join(" ").replace(/\s+/g, " ").trim(), pageCount };
 }
 
+/** Sanitize a company name: remove slashes, colons, emojis, and other illegal filename chars. */
+function sanitizeCompanyName(name: string): string {
+  return name
+    .replace(/[\u{1F600}-\u{1F64F}\u{1F300}-\u{1F5FF}\u{1F680}-\u{1F6FF}\u{1F1E0}-\u{1F1FF}\u{2600}-\u{27BF}\u{FE00}-\u{FEFF}\u{200D}\u{20E3}]/gu, "") // emojis
+    .replace(/[\/\\:*?"<>|]/g, "") // filesystem-illegal chars
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 /** Helper to update deal status */
 async function setDealStatus(adminClient: any, dealId: string, status: string) {
   await adminClient
