@@ -1,4 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { compressPdf } from "@/lib/compressPdf";
@@ -31,8 +32,41 @@ export interface Deal {
   updated_at: string;
 }
 
+/** Workflow steps in order */
+export const WORKFLOW_STEPS = [
+  { key: "uploading", label: "Uploading" },
+  { key: "compressing", label: "Compressing" },
+  { key: "extracting", label: "Extracting" },
+  { key: "searching-website", label: "Finding Website" },
+  { key: "syncing", label: "Syncing to Drive" },
+  { key: "memo-ready", label: "Ready" },
+] as const;
+
+export type WorkflowStatus = (typeof WORKFLOW_STEPS)[number]["key"];
+
 export function useDeals() {
   const { user } = useAuth();
+  const queryClient = useQueryClient();
+
+  // Subscribe to realtime updates on deals table
+  useEffect(() => {
+    if (!user) return;
+    const channel = supabase
+      .channel("deals-realtime")
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "deals", filter: `user_id=eq.${user.id}` },
+        () => {
+          queryClient.invalidateQueries({ queryKey: ["deals", user.id] });
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [user, queryClient]);
+
   return useQuery({
     queryKey: ["deals", user?.id],
     queryFn: async () => {
@@ -72,33 +106,42 @@ export function useCreateDealWithUpload() {
     mutationFn: async ({ file, name }: { file: File; name: string }) => {
       if (!user) throw new Error("Not authenticated");
 
-      // 0. Compress the PDF client-side
-      const { compressed, pages } = await compressPdf(file);
-
-      // 1. Create the deal
+      // 1. Create the deal with "uploading" status
       const { data: deal, error: dealError } = await supabase
         .from("deals")
         .insert({
           user_id: user.id,
           name,
           source: "manual",
-          status: "extracting",
+          status: "uploading",
           deck_size: `${(file.size / (1024 * 1024)).toFixed(1)}MB`,
-          compressed_size: `${(compressed.size / (1024 * 1024)).toFixed(1)}MB`,
-          pages,
         })
         .select()
         .single();
       if (dealError) throw dealError;
 
-      // 2. Upload compressed file to storage
+      // 2. Compress → update status
+      await supabase.from("deals").update({ status: "compressing" }).eq("id", deal.id);
+
+      const { compressed, pages } = await compressPdf(file);
+
+      await supabase
+        .from("deals")
+        .update({
+          compressed_size: `${(compressed.size / (1024 * 1024)).toFixed(1)}MB`,
+          pages,
+          status: "extracting",
+        })
+        .eq("id", deal.id);
+
+      // 3. Upload compressed file to storage
       const storagePath = `${user.id}/${deal.id}/${file.name}`;
       const { error: uploadError } = await supabase.storage
         .from("decks")
         .upload(storagePath, compressed);
       if (uploadError) throw uploadError;
 
-      // 3. Create source record
+      // 4. Create source record
       const { error: sourceError } = await supabase
         .from("sources")
         .insert({
@@ -112,24 +155,13 @@ export function useCreateDealWithUpload() {
         });
       if (sourceError) throw sourceError;
 
-      // 4. Trigger Google Drive sync
-      try {
-        await supabase.functions.invoke("sync-to-drive", {
-          body: { dealId: deal.id, storagePath, fileName: file.name },
-        });
-      } catch (e) {
-        console.warn("Drive sync skipped:", e);
-      }
-
-      // 5. Trigger AI deck analysis (fire-and-forget)
-      supabase.functions.invoke("process-deck", {
-        body: { dealId: deal.id, storagePath },
-      }).then(() => {
-        // After deck processing, trigger deep research
-        supabase.functions.invoke("deep-research", {
-          body: { dealId: deal.id },
-        }).catch((e) => console.warn("Deep research skipped:", e));
-      }).catch((e) => console.warn("Deck processing skipped:", e));
+      // 5. Trigger AI deck analysis + lite website search (fire-and-forget)
+      // The edge function will update status through: extracting → searching-website → syncing → memo-ready
+      supabase.functions
+        .invoke("process-deck", {
+          body: { dealId: deal.id, storagePath },
+        })
+        .catch((e) => console.warn("Deck processing skipped:", e));
 
       return deal;
     },
