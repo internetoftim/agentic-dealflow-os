@@ -70,6 +70,15 @@ function extractPdfText(arrayBuffer: ArrayBuffer): { text: string; pageCount: nu
   return { text: textChunks.join(" ").replace(/\s+/g, " ").trim(), pageCount };
 }
 
+/** Sanitize a company name: remove slashes, colons, emojis, and other illegal filename chars. */
+function sanitizeCompanyName(name: string): string {
+  return name
+    .replace(/[\u{1F600}-\u{1F64F}\u{1F300}-\u{1F5FF}\u{1F680}-\u{1F6FF}\u{1F1E0}-\u{1F1FF}\u{2600}-\u{27BF}\u{FE00}-\u{FEFF}\u{200D}\u{20E3}]/gu, "") // emojis
+    .replace(/[\/\\:*?"<>|]/g, "") // filesystem-illegal chars
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 /** Helper to update deal status */
 async function setDealStatus(adminClient: any, dealId: string, status: string) {
   await adminClient
@@ -531,7 +540,7 @@ Deno.serve(async (req) => {
         const aiPayload = {
           model: isSapinsapin ? sapinsapinModel : model,
           messages: [
-            { role: "system", content: "You are a VC analyst assistant. Analyze startup pitch decks and extract structured metadata. Be precise. Return null for missing fields." },
+            { role: "system", content: "You are the Deep Research & Identity Agent for a VC Deal OS. Your primary job is to accurately identify the startup's name, their core sector, and extract key deal metadata from a pitch deck. The Company Name is usually the most prominent proper noun on the first page. Be precise — return null for fields you cannot verify." },
             { role: "user", content: userContent },
           ],
           tools: [{
@@ -552,8 +561,9 @@ Deno.serve(async (req) => {
                   growth: { type: ["string", "null"], description: "Growth rate" },
                   team_size: { type: ["string", "null"], description: "Team size" },
                   page_count: { type: "number", description: "Number of pages/slides" },
+                  confidence_score: { type: "number", description: "Confidence score 0-100 for the identity extraction accuracy" },
                 },
-                required: ["startup_name", "stage", "sector", "page_count"],
+                required: ["startup_name", "stage", "sector", "page_count", "confidence_score"],
                 additionalProperties: false,
               },
             },
@@ -596,7 +606,8 @@ Deno.serve(async (req) => {
         console.log("Extracted metadata:", JSON.stringify(metadata));
 
         const updatePayload: Record<string, unknown> = { updated_at: new Date().toISOString() };
-        if (metadata.startup_name) updatePayload.name = metadata.startup_name;
+        if (metadata.startup_name) updatePayload.name = sanitizeCompanyName(metadata.startup_name);
+        console.log(`Identity confidence: ${metadata.confidence_score ?? "N/A"}/100`);
         // Don't set website from LLM extraction — Step 4 will verify via search + scrape
         if (metadata.stage) updatePayload.stage = metadata.stage;
         if (metadata.sector) updatePayload.sector = metadata.sector;
