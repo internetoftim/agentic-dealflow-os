@@ -35,6 +35,7 @@ export interface Deal {
 /** Workflow steps in order */
 export const WORKFLOW_STEPS = [
   { key: "uploading", label: "Uploading" },
+  { key: "converting", label: "Converting to PDF" },
   { key: "compressing", label: "Compressing" },
   { key: "extracting", label: "Extracting" },
   { key: "searching-website", label: "Finding Website" },
