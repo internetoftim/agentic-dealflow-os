@@ -616,7 +616,7 @@ Deno.serve(async (req) => {
       }
     }
 
-    // --- STEP 4: Smart website search using extracted text context ---
+    // --- STEP 4: Smart website search — extract company name, search, verify URL ---
     if (!shouldSkip("searching-website")) {
       if (await checkPaused(adminClient, dealId, "searching-website")) {
         return new Response(JSON.stringify({ success: true, paused: true, at: "searching-website" }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
@@ -637,71 +637,96 @@ Deno.serve(async (req) => {
         await adminClient.from("deals").update({ website_searching: true }).eq("id", dealId);
 
         try {
-          // Step A: Use extracted text to identify the company name more precisely
-          // Build a richer search query from extracted text context
-          let companyName = currentDeal.name;
-          let searchHints = "";
+          const companyName = currentDeal.name;
+          const sectorHint = currentDeal.sector && currentDeal.sector !== "Unknown" ? currentDeal.sector : "";
 
-          // Extract potential company identifiers from deck text (first 2000 chars usually has the company name/tagline)
-          const textSnippet = extractedContext.slice(0, 3000);
-          // Look for domain-like strings in the text that could be the company website
-          const domainMatches = textSnippet.match(/(?:www\.)?([a-zA-Z0-9][-a-zA-Z0-9]*\.(com|io|co|ai|xyz|org|net|app|dev|tech))/gi) || [];
-          if (domainMatches.length > 0) {
-            searchHints = domainMatches.slice(0, 3).join(" ");
-          }
-
-          // Step B: Search for the company using context from the deck
-          const searchQuery = `${companyName} ${searchHints} company official website`.trim();
-          console.log("Smart website search query:", searchQuery);
+          // Step A: Search for the company by name
+          const searchQuery = `"${companyName}" ${sectorHint} company official website`.trim();
+          console.log("Website search query:", searchQuery);
 
           const searchResponse = await fetch("https://api.firecrawl.dev/v1/search", {
             method: "POST",
             headers: { Authorization: `Bearer ${firecrawlApiKey}`, "Content-Type": "application/json" },
-            body: JSON.stringify({ query: searchQuery, limit: 5 }),
+            body: JSON.stringify({ query: searchQuery, limit: 8 }),
           });
 
           if (searchResponse.ok) {
             const searchData = await searchResponse.json();
             const results = searchData.data || searchData.results || [];
+            console.log(`Search returned ${results.length} results`);
 
-            // Step C: Deduce the website URL from search results
-            const candidateUrl = results.find((r: any) =>
-              r.url && !r.url.includes("linkedin.com") && !r.url.includes("crunchbase.com") &&
-              !r.url.includes("google.com") && !r.url.includes("wikipedia.org") &&
-              !r.url.includes("facebook.com") && !r.url.includes("twitter.com")
-            )?.url;
+            // Excluded domains — aggregators, social, not company websites
+            const excludedDomains = [
+              "linkedin.com", "crunchbase.com", "google.com", "wikipedia.org",
+              "facebook.com", "twitter.com", "x.com", "instagram.com", "youtube.com",
+              "glassdoor.com", "indeed.com", "pitchbook.com", "bloomberg.com",
+              "techcrunch.com", "ycombinator.com", "reddit.com", "github.com",
+            ];
+            const isExcluded = (url: string) => excludedDomains.some((d) => url.includes(d));
 
+            // Step B: Collect candidate URLs (non-aggregator results)
+            const candidateResults = results.filter((r: any) => r.url && !isExcluded(r.url));
             const linkedinUrl = results.find((r: any) => r.url?.includes("linkedin.com/company"))?.url;
 
-            // If we found a domain in the deck text, verify it matches a search result
-            let verifiedWebsite = candidateUrl;
-            if (domainMatches.length > 0 && candidateUrl) {
-              // Prefer the domain found in the deck if it appears in search results
-              for (const domain of domainMatches) {
-                const cleanDomain = domain.replace(/^www\./i, "").toLowerCase();
-                const matchingResult = results.find((r: any) =>
-                  r.url?.toLowerCase().includes(cleanDomain)
-                );
-                if (matchingResult) {
-                  // Normalize to root URL
-                  try {
-                    const u = new URL(matchingResult.url.startsWith("http") ? matchingResult.url : `https://${matchingResult.url}`);
-                    verifiedWebsite = `${u.protocol}//${u.hostname}`;
-                  } catch {
-                    verifiedWebsite = matchingResult.url;
-                  }
-                  break;
+            // Step C: Verify each candidate — scrape and check if the content is about this company
+            let verifiedWebsite: string | null = null;
+            const companyNameLower = companyName.toLowerCase();
+
+            for (const candidate of candidateResults.slice(0, 3)) {
+              try {
+                console.log(`Verifying candidate: ${candidate.url}`);
+
+                // First check: does the search result title/description mention the company?
+                const titleDesc = `${candidate.title || ""} ${candidate.description || ""}`.toLowerCase();
+                const titleMentionsCompany = titleDesc.includes(companyNameLower) ||
+                  companyNameLower.split(/\s+/).filter((w: string) => w.length > 2).every((w: string) => titleDesc.includes(w));
+
+                if (!titleMentionsCompany) {
+                  console.log(`  Skipped — title/description doesn't mention "${companyName}"`);
+                  continue;
                 }
+
+                // Second check: scrape the page and verify company name appears in content
+                const scrapeResponse = await fetch("https://api.firecrawl.dev/v1/scrape", {
+                  method: "POST",
+                  headers: { Authorization: `Bearer ${firecrawlApiKey}`, "Content-Type": "application/json" },
+                  body: JSON.stringify({ url: candidate.url, formats: ["markdown"], onlyMainContent: true }),
+                });
+
+                if (scrapeResponse.ok) {
+                  const scrapeData = await scrapeResponse.json();
+                  const pageContent = (scrapeData.data?.markdown || scrapeData.markdown || "").toLowerCase().slice(0, 5000);
+
+                  // The page content must mention the company name
+                  const contentMentionsCompany = pageContent.includes(companyNameLower) ||
+                    companyNameLower.split(/\s+/).filter((w: string) => w.length > 2).every((w: string) => pageContent.includes(w));
+
+                  if (contentMentionsCompany) {
+                    // Normalize to root domain
+                    try {
+                      const u = new URL(candidate.url.startsWith("http") ? candidate.url : `https://${candidate.url}`);
+                      verifiedWebsite = `${u.protocol}//${u.hostname}`;
+                    } catch {
+                      verifiedWebsite = candidate.url;
+                    }
+                    console.log(`  ✓ Verified website: ${verifiedWebsite}`);
+                    break;
+                  } else {
+                    console.log(`  ✗ Page content doesn't mention "${companyName}"`);
+                  }
+                }
+              } catch (e) {
+                console.warn(`  Verification failed for ${candidate.url}:`, e);
               }
             }
 
-            // Step D: Update deal metadata — this data feeds into the Drive naming pattern
+            // Step D: Update deal metadata
             const webUpdate: Record<string, unknown> = { website_searching: false, updated_at: new Date().toISOString() };
             if (verifiedWebsite && !currentDeal.website) webUpdate.website = verifiedWebsite;
             if (linkedinUrl) webUpdate.linkedin_url = linkedinUrl;
             await adminClient.from("deals").update(webUpdate).eq("id", dealId);
 
-            console.log(`Website search result: website=${verifiedWebsite || "none"}, linkedin=${linkedinUrl || "none"}`);
+            console.log(`Website search complete: website=${verifiedWebsite || "none"}, linkedin=${linkedinUrl || "none"}`);
           }
         } catch (e) {
           console.warn("Smart website search failed (non-fatal):", e);
