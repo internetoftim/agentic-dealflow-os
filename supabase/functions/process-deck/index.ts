@@ -597,7 +597,7 @@ Deno.serve(async (req) => {
 
         const updatePayload: Record<string, unknown> = { updated_at: new Date().toISOString() };
         if (metadata.startup_name) updatePayload.name = metadata.startup_name;
-        if (metadata.website) { updatePayload.website = metadata.website; updatePayload.website_searching = false; }
+        // Don't set website from LLM extraction — Step 4 will verify via search + scrape
         if (metadata.stage) updatePayload.stage = metadata.stage;
         if (metadata.sector) updatePayload.sector = metadata.sector;
         if (metadata.ask_amount) updatePayload.ask_amount = metadata.ask_amount;
