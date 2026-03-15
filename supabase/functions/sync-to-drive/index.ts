@@ -113,7 +113,7 @@ Deno.serve(async (req) => {
     // Determine the file name for Drive
     const namingPattern = settings.naming_pattern || "<WEBSITE> deck <MonthYYYY> p<pages>";
     const driveFileName = deal
-      ? applyNamingPattern(namingPattern, deal)
+      ? applyNamingPattern(namingPattern, deal, fileName)
       : fileName;
 
     // Download file from Supabase storage
