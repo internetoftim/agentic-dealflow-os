@@ -606,7 +606,8 @@ Deno.serve(async (req) => {
         console.log("Extracted metadata:", JSON.stringify(metadata));
 
         const updatePayload: Record<string, unknown> = { updated_at: new Date().toISOString() };
-        if (metadata.startup_name) updatePayload.name = metadata.startup_name;
+        if (metadata.startup_name) updatePayload.name = sanitizeCompanyName(metadata.startup_name);
+        console.log(`Identity confidence: ${metadata.confidence_score ?? "N/A"}/100`);
         // Don't set website from LLM extraction — Step 4 will verify via search + scrape
         if (metadata.stage) updatePayload.stage = metadata.stage;
         if (metadata.sector) updatePayload.sector = metadata.sector;
