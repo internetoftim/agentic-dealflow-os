@@ -30,6 +30,7 @@ export type Database = {
           name: string
           nrr: string | null
           pages: number | null
+          paused_at_step: string | null
           revenue: string | null
           sector: string
           source: string
@@ -57,6 +58,7 @@ export type Database = {
           name: string
           nrr?: string | null
           pages?: number | null
+          paused_at_step?: string | null
           revenue?: string | null
           sector?: string
           source?: string
@@ -84,6 +86,7 @@ export type Database = {
           name?: string
           nrr?: string | null
           pages?: number | null
+          paused_at_step?: string | null
           revenue?: string | null
           sector?: string
           source?: string

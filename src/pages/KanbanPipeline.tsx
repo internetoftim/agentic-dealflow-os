@@ -1,10 +1,11 @@
-import { useDeals, type Deal, WORKFLOW_STEPS, type WorkflowStatus } from "@/hooks/useDeals";
+import { useDeals, usePauseDeal, useResumeDeal, type Deal, WORKFLOW_STEPS } from "@/hooks/useDeals";
 import { sourceConfig as mockSourceConfig } from "@/data/mockDeals";
-import { Loader2, Check, Globe, Upload, FileArchive, FileSearch, CloudUpload, FileType, ArrowRightLeft } from "lucide-react";
+import { Loader2, Check, Globe, Upload, FileArchive, FileSearch, CloudUpload, ArrowRightLeft, Pause, Play } from "lucide-react";
+import { Button } from "@/components/ui/button";
 
 const columns = [
   { key: "inbox", title: "Inbox" },
-  { key: "processing", title: "Processing", matchFn: (s: string) => ["uploading", "converting", "compressing", "extracting", "searching-website", "syncing"].includes(s) },
+  { key: "processing", title: "Processing", matchFn: (s: string) => ["uploading", "converting", "compressing", "extracting", "searching-website", "syncing", "paused"].includes(s) },
   { key: "memo-ready", title: "Memo Ready" },
 ];
 
@@ -26,57 +27,104 @@ const stepIcons: Record<string, React.ElementType> = {
   "memo-ready": Check,
 };
 
-function WorkflowProgress({ status }: { status: string }) {
-  const activeSteps = WORKFLOW_STEPS.filter((s) => s.key !== "memo-ready");
-  const currentIdx = activeSteps.findIndex((s) => s.key === status);
+const PROCESSING_STATUSES = ["uploading", "converting", "compressing", "extracting", "searching-website", "syncing"];
 
-  if (currentIdx === -1) return null;
+function WorkflowProgress({ deal, onPause, onResume, isPausing, isResuming }: {
+  deal: Deal;
+  onPause: () => void;
+  onResume: () => void;
+  isPausing: boolean;
+  isResuming: boolean;
+}) {
+  const isPaused = deal.status === "paused";
+  const activeStatus = isPaused ? deal.paused_at_step : deal.status;
+  const activeSteps = WORKFLOW_STEPS.filter((s) => s.key !== "memo-ready");
+  const currentIdx = activeSteps.findIndex((s) => s.key === activeStatus);
+
+  if (currentIdx === -1 && !isPaused) return null;
 
   return (
-    <div className="mt-3 space-y-1.5">
-      {activeSteps.map((step, idx) => {
-        const Icon = stepIcons[step.key] || Loader2;
-        const isActive = idx === currentIdx;
-        const isDone = idx < currentIdx;
-        const isFuture = idx > currentIdx;
+    <div className="mt-3">
+      <div className="space-y-1.5">
+        {activeSteps.map((step, idx) => {
+          const Icon = stepIcons[step.key] || Loader2;
+          const isActive = idx === currentIdx;
+          const isDone = idx < currentIdx;
 
-        return (
-          <div key={step.key} className="flex items-center gap-2">
-            <div className="flex items-center justify-center w-4 h-4">
-              {isDone ? (
-                <Check className="h-3.5 w-3.5 text-success shrink-0" />
-              ) : isActive ? (
-                <Loader2 className="h-3.5 w-3.5 text-primary animate-spin shrink-0" />
-              ) : (
-                <Icon className="h-3.5 w-3.5 text-muted-foreground/30 shrink-0" />
+          return (
+            <div key={step.key} className="flex items-center gap-2">
+              <div className="flex items-center justify-center w-4 h-4">
+                {isDone ? (
+                  <Check className="h-3.5 w-3.5 text-success shrink-0" />
+                ) : isActive && !isPaused ? (
+                  <Loader2 className="h-3.5 w-3.5 text-primary animate-spin shrink-0" />
+                ) : isActive && isPaused ? (
+                  <Pause className="h-3.5 w-3.5 text-warning shrink-0" />
+                ) : (
+                  <Icon className="h-3.5 w-3.5 text-muted-foreground/30 shrink-0" />
+                )}
+              </div>
+              <span
+                className={`text-[11px] leading-none ${
+                  isActive && isPaused
+                    ? "text-warning font-semibold"
+                    : isActive
+                    ? "text-primary font-semibold"
+                    : isDone
+                    ? "text-success font-medium"
+                    : "text-muted-foreground/30"
+                }`}
+              >
+                {step.label}
+                {isActive && isPaused && " (paused)"}
+              </span>
+              {isActive && !isPaused && (
+                <div className="flex-1 h-1 rounded-full bg-muted overflow-hidden ml-1">
+                  <div className="h-full bg-primary/60 rounded-full animate-pulse w-2/3" />
+                </div>
               )}
             </div>
-            <span
-              className={`text-[11px] leading-none ${
-                isActive
-                  ? "text-primary font-semibold"
-                  : isDone
-                  ? "text-success font-medium"
-                  : "text-muted-foreground/30"
-              }`}
-            >
-              {step.label}
-            </span>
-            {isActive && (
-              <div className="flex-1 h-1 rounded-full bg-muted overflow-hidden ml-1">
-                <div className="h-full bg-primary/60 rounded-full animate-pulse w-2/3" />
-              </div>
-            )}
-          </div>
-        );
-      })}
+          );
+        })}
+      </div>
+
+      <div className="mt-2.5 flex gap-1.5">
+        {!isPaused ? (
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-7 text-[11px] gap-1 px-2"
+            onClick={(e) => { e.stopPropagation(); onPause(); }}
+            disabled={isPausing}
+          >
+            {isPausing ? <Loader2 className="h-3 w-3 animate-spin" /> : <Pause className="h-3 w-3" />}
+            Pause
+          </Button>
+        ) : (
+          <Button
+            variant="default"
+            size="sm"
+            className="h-7 text-[11px] gap-1 px-2"
+            onClick={(e) => { e.stopPropagation(); onResume(); }}
+            disabled={isResuming}
+          >
+            {isResuming ? <Loader2 className="h-3 w-3 animate-spin" /> : <Play className="h-3 w-3" />}
+            Resume
+          </Button>
+        )}
+      </div>
     </div>
   );
 }
 
 function DealCard({ deal }: { deal: Deal }) {
   const source = sourceConfig[deal.source] ?? sourceConfig.manual;
-  const isProcessing = ["uploading", "converting", "compressing", "extracting", "searching-website", "syncing"].includes(deal.status);
+  const isProcessing = PROCESSING_STATUSES.includes(deal.status);
+  const isPaused = deal.status === "paused";
+  const showWorkflow = isProcessing || isPaused;
+
+  const pauseMutation = usePauseDeal();
+  const resumeMutation = useResumeDeal();
 
   return (
     <div className="rounded-lg border border-border bg-card p-3.5 shadow-surface hover:shadow-surface-md transition-shadow cursor-pointer group">
@@ -90,12 +138,25 @@ function DealCard({ deal }: { deal: Deal }) {
             <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-success" />
           </span>
         )}
+        {isPaused && (
+          <span className="relative flex h-2.5 w-2.5 shrink-0 mt-1">
+            <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-warning" />
+          </span>
+        )}
       </div>
       <p className="text-xs text-muted-foreground mb-2.5">{deal.stage} · {deal.sector}</p>
       <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium ${source.bgClass} ${source.colorClass}`}>
         {source.label}
       </span>
-      {isProcessing && <WorkflowProgress status={deal.status} />}
+      {showWorkflow && (
+        <WorkflowProgress
+          deal={deal}
+          onPause={() => pauseMutation.mutate(deal.id)}
+          onResume={() => resumeMutation.mutate({ dealId: deal.id, pausedAtStep: deal.paused_at_step! })}
+          isPausing={pauseMutation.isPending}
+          isResuming={resumeMutation.isPending}
+        />
+      )}
     </div>
   );
 }

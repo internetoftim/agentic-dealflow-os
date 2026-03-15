@@ -28,6 +28,7 @@ export interface Deal {
   team_size: string | null;
   memo_draft: string | null;
   gdrive_file_id: string | null;
+  paused_at_step: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -92,6 +93,57 @@ export function useSources(dealId?: string) {
       return data;
     },
     enabled: !!user && !!dealId,
+  });
+}
+
+export function usePauseDeal() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (dealId: string) => {
+      const { error } = await supabase
+        .from("deals")
+        .update({ status: "paused" })
+        .eq("id", dealId);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["deals"] });
+    },
+  });
+}
+
+export function useResumeDeal() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ dealId, pausedAtStep, storagePath }: { dealId: string; pausedAtStep: string; storagePath?: string }) => {
+      // First get the source to find the storage path
+      let path = storagePath;
+      if (!path) {
+        const { data: sources } = await supabase
+          .from("sources")
+          .select("storage_path")
+          .eq("deal_id", dealId)
+          .limit(1);
+        path = sources?.[0]?.storage_path ?? undefined;
+      }
+      if (!path) throw new Error("No storage path found for this deal");
+
+      // Set status back to the paused step so the edge function picks up
+      await supabase
+        .from("deals")
+        .update({ status: pausedAtStep, paused_at_step: null })
+        .eq("id", dealId);
+
+      // Re-invoke process-deck with resumeFrom
+      supabase.functions
+        .invoke("process-deck", {
+          body: { dealId, storagePath: path, resumeFrom: pausedAtStep },
+        })
+        .catch((e) => console.warn("Resume processing failed:", e));
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["deals"] });
+    },
   });
 }
 
