@@ -1,10 +1,10 @@
 import { useDeals, type Deal, WORKFLOW_STEPS, type WorkflowStatus } from "@/hooks/useDeals";
 import { sourceConfig as mockSourceConfig } from "@/data/mockDeals";
-import { Loader2, Check, Globe, Upload, FileArchive, FileSearch, CloudUpload } from "lucide-react";
+import { Loader2, Check, Globe, Upload, FileArchive, FileSearch, CloudUpload, FileType, ArrowRightLeft } from "lucide-react";
 
 const columns = [
   { key: "inbox", title: "Inbox" },
-  { key: "processing", title: "Processing", matchFn: (s: string) => ["uploading", "compressing", "extracting", "searching-website", "syncing"].includes(s) },
+  { key: "processing", title: "Processing", matchFn: (s: string) => ["uploading", "converting", "compressing", "extracting", "searching-website", "syncing"].includes(s) },
   { key: "memo-ready", title: "Memo Ready" },
 ];
 
@@ -18,6 +18,7 @@ const sourceConfig: Record<string, { label: string; colorClass: string; bgClass:
 
 const stepIcons: Record<string, React.ElementType> = {
   uploading: Upload,
+  converting: ArrowRightLeft,
   compressing: FileArchive,
   extracting: FileSearch,
   "searching-website": Globe,
@@ -32,24 +33,40 @@ function WorkflowProgress({ status }: { status: string }) {
   if (currentIdx === -1) return null;
 
   return (
-    <div className="mt-2.5 space-y-1">
+    <div className="mt-3 space-y-1.5">
       {activeSteps.map((step, idx) => {
         const Icon = stepIcons[step.key] || Loader2;
         const isActive = idx === currentIdx;
         const isDone = idx < currentIdx;
+        const isFuture = idx > currentIdx;
 
         return (
-          <div key={step.key} className="flex items-center gap-1.5">
-            {isDone ? (
-              <Check className="h-3 w-3 text-success shrink-0" />
-            ) : isActive ? (
-              <Loader2 className="h-3 w-3 text-primary animate-spin shrink-0" />
-            ) : (
-              <Icon className="h-3 w-3 text-muted-foreground/40 shrink-0" />
-            )}
-            <span className={`text-[10px] ${isActive ? "text-primary font-medium" : isDone ? "text-success" : "text-muted-foreground/40"}`}>
+          <div key={step.key} className="flex items-center gap-2">
+            <div className="flex items-center justify-center w-4 h-4">
+              {isDone ? (
+                <Check className="h-3.5 w-3.5 text-success shrink-0" />
+              ) : isActive ? (
+                <Loader2 className="h-3.5 w-3.5 text-primary animate-spin shrink-0" />
+              ) : (
+                <Icon className="h-3.5 w-3.5 text-muted-foreground/30 shrink-0" />
+              )}
+            </div>
+            <span
+              className={`text-[11px] leading-none ${
+                isActive
+                  ? "text-primary font-semibold"
+                  : isDone
+                  ? "text-success font-medium"
+                  : "text-muted-foreground/30"
+              }`}
+            >
               {step.label}
             </span>
+            {isActive && (
+              <div className="flex-1 h-1 rounded-full bg-muted overflow-hidden ml-1">
+                <div className="h-full bg-primary/60 rounded-full animate-pulse w-2/3" />
+              </div>
+            )}
           </div>
         );
       })}
@@ -59,7 +76,7 @@ function WorkflowProgress({ status }: { status: string }) {
 
 function DealCard({ deal }: { deal: Deal }) {
   const source = sourceConfig[deal.source] ?? sourceConfig.manual;
-  const isProcessing = ["uploading", "compressing", "extracting", "searching-website", "syncing"].includes(deal.status);
+  const isProcessing = ["uploading", "converting", "compressing", "extracting", "searching-website", "syncing"].includes(deal.status);
 
   return (
     <div className="rounded-lg border border-border bg-card p-3.5 shadow-surface hover:shadow-surface-md transition-shadow cursor-pointer group">

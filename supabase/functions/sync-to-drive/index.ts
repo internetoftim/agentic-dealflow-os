@@ -38,14 +38,10 @@ function applyNamingPattern(
     .replace(/<SECTOR>/gi, deal.sector ?? "Unknown")
     .replace(/<STAGE>/gi, deal.stage ?? "Unknown");
 
-  // Ensure correct extension
-  const ext = originalFileName?.toLowerCase().endsWith(".pptx") ? ".pptx"
-    : originalFileName?.toLowerCase().endsWith(".ppt") ? ".ppt"
-    : ".pdf";
-  // Remove any existing extension and add the correct one
+  // Always use .pdf extension since PPTX files are now converted to PDF before syncing
   result = result.replace(/\.(pdf|pptx?)\s*$/i, "");
-  if (!result.toLowerCase().endsWith(ext)) {
-    result += ext;
+  if (!result.toLowerCase().endsWith(".pdf")) {
+    result += ".pdf";
   }
 
   return result;
@@ -165,10 +161,8 @@ Deno.serve(async (req) => {
     }
 
     // Upload to Google Drive with the formatted name
-    const isPptx = fileName.toLowerCase().endsWith(".pptx") || fileName.toLowerCase().endsWith(".ppt");
-    const mimeType = isPptx
-      ? "application/vnd.openxmlformats-officedocument.presentationml.presentation"
-      : "application/pdf";
+    // Files are always PDF at this point (PPTX converted upstream)
+    const mimeType = "application/pdf";
     const metadata: Record<string, unknown> = {
       name: driveFileName,
       mimeType,

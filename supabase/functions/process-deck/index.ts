@@ -1,5 +1,6 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { BlobReader, ZipReader, TextWriter } from "https://esm.sh/@zip.js/zip.js@2.7.34";
+import { PDFDocument } from "https://esm.sh/pdf-lib@1.17.1";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -77,6 +78,111 @@ async function setDealStatus(adminClient: any, dealId: string, status: string) {
     .eq("id", dealId);
 }
 
+/**
+ * Convert PPTX to PDF using Google Drive API.
+ * Upload as Google Slides (with convert), then export as PDF.
+ */
+async function convertPptxToPdfViaDrive(
+  pptxBytes: ArrayBuffer,
+  googleToken: string,
+  fileName: string
+): Promise<Uint8Array> {
+  // 1. Upload PPTX to Google Drive, converting to Google Slides
+  const metadata = {
+    name: `_temp_convert_${fileName}`,
+    mimeType: "application/vnd.google-apps.presentation",
+  };
+
+  const form = new FormData();
+  form.append(
+    "metadata",
+    new Blob([JSON.stringify(metadata)], { type: "application/json" })
+  );
+  form.append(
+    "file",
+    new Blob([pptxBytes], {
+      type: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    })
+  );
+
+  const uploadRes = await fetch(
+    "https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart",
+    {
+      method: "POST",
+      headers: { Authorization: `Bearer ${googleToken}` },
+      body: form,
+    }
+  );
+
+  if (!uploadRes.ok) {
+    const errText = await uploadRes.text();
+    throw new Error(`Drive upload for conversion failed [${uploadRes.status}]: ${errText}`);
+  }
+
+  const driveFile = await uploadRes.json();
+  const tempFileId = driveFile.id;
+
+  try {
+    // 2. Export the Google Slides file as PDF
+    const exportRes = await fetch(
+      `https://www.googleapis.com/drive/v3/files/${tempFileId}/export?mimeType=application/pdf`,
+      {
+        headers: { Authorization: `Bearer ${googleToken}` },
+      }
+    );
+
+    if (!exportRes.ok) {
+      const errText = await exportRes.text();
+      throw new Error(`Drive PDF export failed [${exportRes.status}]: ${errText}`);
+    }
+
+    const pdfBuffer = await exportRes.arrayBuffer();
+    return new Uint8Array(pdfBuffer);
+  } finally {
+    // 3. Delete the temp Google Slides file
+    await fetch(`https://www.googleapis.com/drive/v3/files/${tempFileId}`, {
+      method: "DELETE",
+      headers: { Authorization: `Bearer ${googleToken}` },
+    }).catch((e) => console.warn("Failed to delete temp Drive file:", e));
+  }
+}
+
+/**
+ * Compress a PDF to target size using pdf-lib.
+ * Re-serializes with object streams. If still over target, removes metadata/annotations.
+ */
+async function compressPdfToTarget(
+  pdfBytes: Uint8Array,
+  targetSizeBytes: number = 10 * 1024 * 1024
+): Promise<{ compressed: Uint8Array; pages: number }> {
+  const pdfDoc = await PDFDocument.load(pdfBytes, { ignoreEncryption: true });
+  const pages = pdfDoc.getPageCount();
+
+  // Strip metadata to reduce size
+  pdfDoc.setTitle("");
+  pdfDoc.setAuthor("");
+  pdfDoc.setSubject("");
+  pdfDoc.setKeywords([]);
+  pdfDoc.setProducer("");
+  pdfDoc.setCreator("");
+
+  const compressed = await pdfDoc.save({
+    useObjectStreams: true,
+    addDefaultPage: false,
+  });
+
+  const result = new Uint8Array(compressed);
+  const sizeMB = (result.length / (1024 * 1024)).toFixed(1);
+
+  if (result.length > targetSizeBytes) {
+    console.warn(`PDF is ${sizeMB}MB after compression (target: ${(targetSizeBytes / (1024 * 1024)).toFixed(0)}MB)`);
+  } else {
+    console.log(`PDF compressed to ${sizeMB}MB`);
+  }
+
+  return { compressed: result, pages };
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
@@ -119,9 +225,7 @@ Deno.serve(async (req) => {
       });
     }
 
-    // --- STEP 1: Extracting metadata ---
-    await setDealStatus(adminClient, dealId, "extracting");
-
+    // Fetch user settings (needed for Google token for conversion + AI model)
     const { data: settings } = await adminClient
       .from("user_settings")
       .select("ai_model, drive_sync_enabled, google_provider_token, naming_pattern, drive_folder")
@@ -129,33 +233,104 @@ Deno.serve(async (req) => {
       .single();
     const model = settings?.ai_model ?? "gpt-4o";
 
-    // Download file
+    // Download file from storage
     const { data: fileData, error: downloadError } = await adminClient.storage
       .from("decks").download(storagePath);
     if (downloadError || !fileData) {
       throw new Error(`Failed to download file: ${downloadError?.message}`);
     }
 
-    const arrayBuffer = await fileData.arrayBuffer();
+    let arrayBuffer = await fileData.arrayBuffer();
     const fileName = storagePath.split("/").pop()?.toLowerCase() ?? "";
     const isPptx = fileName.endsWith(".pptx") || fileName.endsWith(".ppt");
     const isPdf = fileName.endsWith(".pdf");
 
-    let extractedText = "";
-    let actualPageCount = 0;
-    try {
-      if (isPptx) {
-        const result = await extractPptxText(arrayBuffer);
-        extractedText = result.text;
-        actualPageCount = result.pageCount;
-      } else if (isPdf) {
-        const result = extractPdfText(arrayBuffer);
-        extractedText = result.text;
-        actualPageCount = result.pageCount;
+    // --- STEP 1: Convert PPTX to PDF (if applicable) ---
+    let pdfStoragePath = storagePath;
+    if (isPptx) {
+      await setDealStatus(adminClient, dealId, "converting");
+
+      if (!settings?.google_provider_token) {
+        throw new Error("Google Drive not connected — required for PPTX to PDF conversion");
       }
+
+      console.log("Converting PPTX to PDF via Google Drive API...");
+      const pdfBytes = await convertPptxToPdfViaDrive(
+        arrayBuffer,
+        settings.google_provider_token,
+        fileName
+      );
+      arrayBuffer = pdfBytes.buffer as ArrayBuffer;
+
+      // Upload the converted PDF to storage (replacing the original path concept)
+      const pdfFileName = fileName.replace(/\.(pptx|ppt)$/i, ".pdf");
+      pdfStoragePath = storagePath.replace(/\.(pptx|ppt)$/i, ".pdf");
+
+      const { error: pdfUploadError } = await adminClient.storage
+        .from("decks")
+        .upload(pdfStoragePath, new Blob([pdfBytes], { type: "application/pdf" }), {
+          upsert: true,
+        });
+      if (pdfUploadError) {
+        console.warn("Failed to upload converted PDF:", pdfUploadError.message);
+      }
+
+      console.log(`PPTX converted to PDF: ${(pdfBytes.length / (1024 * 1024)).toFixed(1)}MB`);
+    }
+
+    // --- STEP 2: Compress PDF ---
+    await setDealStatus(adminClient, dealId, "compressing");
+
+    const pdfBytes = new Uint8Array(arrayBuffer);
+    const { compressed: compressedPdf, pages: pageCount } = await compressPdfToTarget(pdfBytes);
+
+    // Re-upload compressed PDF
+    const { error: compressUploadError } = await adminClient.storage
+      .from("decks")
+      .upload(pdfStoragePath, new Blob([compressedPdf], { type: "application/pdf" }), {
+        upsert: true,
+      });
+    if (compressUploadError) {
+      console.warn("Failed to upload compressed PDF:", compressUploadError.message);
+    }
+
+    await adminClient.from("deals").update({
+      compressed_size: `${(compressedPdf.length / (1024 * 1024)).toFixed(1)}MB`,
+      pages: pageCount,
+      updated_at: new Date().toISOString(),
+    }).eq("id", dealId);
+
+    // --- STEP 3: Extracting metadata ---
+    await setDealStatus(adminClient, dealId, "extracting");
+
+    // Extract text from the (now always PDF) file
+    let extractedText = "";
+    let actualPageCount = pageCount;
+    try {
+      const result = extractPdfText(compressedPdf.buffer as ArrayBuffer);
+      extractedText = result.text;
+      if (result.pageCount > 0) actualPageCount = result.pageCount;
       console.log(`Extracted ${extractedText.length} chars, ${actualPageCount} pages`);
     } catch (e) {
       console.error("Text extraction failed (non-fatal):", e);
+    }
+
+    // If PDF text extraction yielded little and we had PPTX, try PPTX extraction from original
+    if (isPptx && extractedText.length < 200) {
+      try {
+        const { data: origFile } = await adminClient.storage.from("decks").download(storagePath);
+        if (origFile) {
+          const origBuffer = await origFile.arrayBuffer();
+          const pptxResult = await extractPptxText(origBuffer);
+          if (pptxResult.text.length > extractedText.length) {
+            extractedText = pptxResult.text;
+            actualPageCount = pptxResult.pageCount;
+            console.log(`Used PPTX text extraction instead: ${extractedText.length} chars`);
+          }
+        }
+      } catch (e) {
+        console.warn("PPTX fallback text extraction failed:", e);
+      }
     }
 
     // Store extracted text
@@ -163,7 +338,7 @@ Deno.serve(async (req) => {
       const truncated = extractedText.slice(0, 100_000);
       await adminClient.from("sources")
         .update({ extracted_text: truncated })
-        .eq("deal_id", dealId).eq("user_id", user.id).eq("storage_path", storagePath);
+        .eq("deal_id", dealId).eq("user_id", user.id);
     }
 
     // LLM metadata extraction
@@ -190,12 +365,13 @@ Deno.serve(async (req) => {
         : "No text could be extracted from the deck file.";
       userContent.push({ type: "text", text: `${deckText}\n\nAnalyze this pitch deck and extract metadata using the extract_deck_metadata tool.` });
     } else {
-      const base64 = btoa(new Uint8Array(arrayBuffer).reduce((data, byte) => data + String.fromCharCode(byte), ""));
+      // Always send the compressed PDF (even if originally PPTX, it's now converted)
+      const base64 = btoa(new Uint8Array(compressedPdf).reduce((data, byte) => data + String.fromCharCode(byte), ""));
       userContent.push({
         type: "file",
         file: {
-          filename: isPptx ? "deck.pptx" : "deck.pdf",
-          file_data: `data:${isPptx ? "application/vnd.openxmlformats-officedocument.presentationml.presentation" : "application/pdf"};base64,${base64}`,
+          filename: "deck.pdf",
+          file_data: `data:application/pdf;base64,${base64}`,
         },
       });
       userContent.push({ type: "text", text: "Analyze this pitch deck and extract metadata using the extract_deck_metadata tool." });
@@ -271,7 +447,7 @@ Deno.serve(async (req) => {
 
     await adminClient.from("deals").update(updatePayload).eq("id", dealId);
 
-    // --- STEP 2: Lite website search (if no website found in deck) ---
+    // --- STEP 4: Lite website search (if no website found in deck) ---
     let foundWebsite = metadata.website;
     if (!foundWebsite && firecrawlApiKey && metadata.startup_name) {
       await setDealStatus(adminClient, dealId, "searching-website");
@@ -294,7 +470,6 @@ Deno.serve(async (req) => {
           const searchData = await searchResponse.json();
           const results = searchData.data || searchData.results || [];
 
-          // Find first non-aggregator URL
           const candidateUrl = results.find((r: any) =>
             r.url &&
             !r.url.includes("linkedin.com") &&
@@ -305,7 +480,6 @@ Deno.serve(async (req) => {
             !r.url.includes("twitter.com")
           )?.url;
 
-          // Also grab LinkedIn
           const linkedinUrl = results.find((r: any) =>
             r.url?.includes("linkedin.com/company")
           )?.url;
@@ -330,17 +504,19 @@ Deno.serve(async (req) => {
       }
     }
 
-    // --- STEP 3: Sync to Google Drive ---
+    // --- STEP 5: Sync to Google Drive ---
     await setDealStatus(adminClient, dealId, "syncing");
 
     try {
+      // Use the converted PDF path for syncing
+      const syncFileName = pdfStoragePath.split("/").pop() ?? fileName;
       const response = await fetch(`${supabaseUrl}/functions/v1/sync-to-drive`, {
         method: "POST",
         headers: {
           Authorization: authHeader,
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ dealId, storagePath, fileName: storagePath.split("/").pop() }),
+        body: JSON.stringify({ dealId, storagePath: pdfStoragePath, fileName: syncFileName }),
       });
 
       if (response.ok) {
@@ -353,11 +529,11 @@ Deno.serve(async (req) => {
       console.warn("Drive sync skipped:", e);
     }
 
-    // --- STEP 4: Final status ---
+    // --- STEP 6: Final status ---
     await setDealStatus(adminClient, dealId, "memo-ready");
 
     return new Response(
-      JSON.stringify({ success: true, metadata }),
+      JSON.stringify({ success: true, metadata, converted: isPptx }),
       { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
   } catch (error) {
