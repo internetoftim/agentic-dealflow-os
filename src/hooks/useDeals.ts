@@ -3,6 +3,7 @@ import { useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { compressDeck } from "@/lib/compressPdf";
+import { extractTextFromPdf, type VisionProgress } from "@/lib/localVision";
 
 export interface Deal {
   id: string;
