@@ -28,6 +28,7 @@ export interface Deal {
   team_size: string | null;
   memo_draft: string | null;
   gdrive_file_id: string | null;
+  paused_at_step: string | null;
   created_at: string;
   updated_at: string;
 }
