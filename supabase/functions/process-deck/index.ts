@@ -453,12 +453,26 @@ Deno.serve(async (req) => {
       }
 
       const userContent: unknown[] = [];
-      if (isSapinsapin) {
-        const deckText = extractedText
-          ? `Here is the full text content of the pitch deck:\n\n${extractedText.slice(0, 50_000)}`
-          : "No text could be extracted from the deck file.";
-        userContent.push({ type: "text", text: `${deckText}\n\nAnalyze this pitch deck and extract metadata using the extract_deck_metadata tool.` });
+      const hasUsableText = extractedText.length >= 200;
+
+      if (isSapinsapin && hasUsableText) {
+        // Text-based extraction for Sapinsapin when we have good text
+        userContent.push({ type: "text", text: `Here is the full text content of the pitch deck:\n\n${extractedText.slice(0, 50_000)}\n\nAnalyze this pitch deck and extract metadata using the extract_deck_metadata tool.` });
+      } else if (isSapinsapin && slideImages.length > 0) {
+        // Vision-based extraction: send slide images when text extraction failed
+        console.log(`Using vision mode: sending ${slideImages.length} slide images to model`);
+        userContent.push({ type: "text", text: "I'm sending you images of each slide from a startup pitch deck. Analyze all slides and extract metadata using the extract_deck_metadata tool." });
+        for (let i = 0; i < slideImages.length; i++) {
+          userContent.push({
+            type: "image_url",
+            image_url: { url: `data:image/png;base64,${slideImages[i]}` },
+          });
+        }
+      } else if (isSapinsapin) {
+        // Fallback: no text and no images
+        userContent.push({ type: "text", text: "No text or images could be extracted from the deck file. Please return null for all optional fields.\n\nAnalyze this pitch deck and extract metadata using the extract_deck_metadata tool." });
       } else {
+        // OpenAI path: send PDF directly
         const base64 = btoa(new Uint8Array(compressedPdf).reduce((data, byte) => data + String.fromCharCode(byte), ""));
         userContent.push({ type: "file", file: { filename: "deck.pdf", file_data: `data:application/pdf;base64,${base64}` } });
         userContent.push({ type: "text", text: "Analyze this pitch deck and extract metadata using the extract_deck_metadata tool." });
