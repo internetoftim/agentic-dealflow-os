@@ -426,28 +426,43 @@ Deno.serve(async (req) => {
 
       let extractedText = "";
       let actualPageCount = pageCount;
-      try {
-        const result = extractPdfText(compressedPdf.buffer as ArrayBuffer);
-        extractedText = result.text;
-        if (result.pageCount > 0) actualPageCount = result.pageCount;
-        console.log(`Extracted ${extractedText.length} chars, ${actualPageCount} pages`);
-      } catch (e) {
-        console.error("Text extraction failed (non-fatal):", e);
-      }
 
-      if (isPptx && extractedText.length < 200) {
+      // For PPTX: prefer Slides API text (most accurate), then PPTX XML, then PDF text
+      if (isPptx && slidesApiText.length >= 200) {
+        extractedText = slidesApiText;
+        console.log(`Using Slides API text: ${extractedText.length} chars`);
+      } else {
+        // Try PDF text extraction
         try {
-          const { data: origFile } = await adminClient.storage.from("decks").download(storagePath);
-          if (origFile) {
-            const origBuffer = await origFile.arrayBuffer();
-            const pptxResult = await extractPptxText(origBuffer);
-            if (pptxResult.text.length > extractedText.length) {
-              extractedText = pptxResult.text;
-              actualPageCount = pptxResult.pageCount;
+          const result = extractPdfText(compressedPdf.buffer as ArrayBuffer);
+          extractedText = result.text;
+          if (result.pageCount > 0) actualPageCount = result.pageCount;
+          console.log(`Extracted ${extractedText.length} chars from PDF, ${actualPageCount} pages`);
+        } catch (e) {
+          console.error("Text extraction failed (non-fatal):", e);
+        }
+
+        // For PPTX: fallback to XML extraction if PDF text is insufficient
+        if (isPptx && extractedText.length < 200) {
+          // Try Slides API text even if short
+          if (slidesApiText.length > extractedText.length) {
+            extractedText = slidesApiText;
+            console.log(`Using Slides API text (short but best available): ${extractedText.length} chars`);
+          } else {
+            try {
+              const { data: origFile } = await adminClient.storage.from("decks").download(storagePath);
+              if (origFile) {
+                const origBuffer = await origFile.arrayBuffer();
+                const pptxResult = await extractPptxText(origBuffer);
+                if (pptxResult.text.length > extractedText.length) {
+                  extractedText = pptxResult.text;
+                  actualPageCount = pptxResult.pageCount;
+                }
+              }
+            } catch (e) {
+              console.warn("PPTX fallback text extraction failed:", e);
             }
           }
-        } catch (e) {
-          console.warn("PPTX fallback text extraction failed:", e);
         }
       }
 
@@ -475,24 +490,11 @@ Deno.serve(async (req) => {
       }
 
       const userContent: unknown[] = [];
-      const hasUsableText = extractedText.length >= 200;
 
-      if (isSapinsapin && hasUsableText) {
-        // Text-based extraction for Sapinsapin when we have good text
-        userContent.push({ type: "text", text: `Here is the full text content of the pitch deck:\n\n${extractedText.slice(0, 50_000)}\n\nAnalyze this pitch deck and extract metadata using the extract_deck_metadata tool.` });
-      } else if (isSapinsapin && slideImages.length > 0) {
-        // Vision-based extraction: send slide images when text extraction failed
-        console.log(`Using vision mode: sending ${slideImages.length} slide images to model`);
-        userContent.push({ type: "text", text: "I'm sending you images of each slide from a startup pitch deck. Analyze all slides and extract metadata using the extract_deck_metadata tool." });
-        for (let i = 0; i < slideImages.length; i++) {
-          userContent.push({
-            type: "image_url",
-            image_url: { url: `data:image/png;base64,${slideImages[i]}` },
-          });
-        }
-      } else if (isSapinsapin) {
-        // Fallback: no text and no images
-        userContent.push({ type: "text", text: "No text or images could be extracted from the deck file. Please return null for all optional fields.\n\nAnalyze this pitch deck and extract metadata using the extract_deck_metadata tool." });
+      if (isSapinsapin) {
+        // Sapinsapin is text-only — always use extracted text
+        const textToSend = extractedText.length > 0 ? extractedText.slice(0, 50_000) : "No text could be extracted from the deck file.";
+        userContent.push({ type: "text", text: `Here is the full text content of the pitch deck:\n\n${textToSend}\n\nAnalyze this pitch deck and extract metadata using the extract_deck_metadata tool. Return null for fields you cannot determine.` });
       } else {
         // OpenAI path: send PDF directly
         const base64 = btoa(new Uint8Array(compressedPdf).reduce((data, byte) => data + String.fromCharCode(byte), ""));
