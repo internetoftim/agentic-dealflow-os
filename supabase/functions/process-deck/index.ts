@@ -540,7 +540,7 @@ Deno.serve(async (req) => {
         const aiPayload = {
           model: isSapinsapin ? sapinsapinModel : model,
           messages: [
-            { role: "system", content: "You are a VC analyst assistant. Analyze startup pitch decks and extract structured metadata. Be precise. Return null for missing fields." },
+            { role: "system", content: "You are the Deep Research & Identity Agent for a VC Deal OS. Your primary job is to accurately identify the startup's name, their core sector, and extract key deal metadata from a pitch deck. The Company Name is usually the most prominent proper noun on the first page. Be precise — return null for fields you cannot verify." },
             { role: "user", content: userContent },
           ],
           tools: [{
