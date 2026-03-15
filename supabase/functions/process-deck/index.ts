@@ -308,7 +308,7 @@ Deno.serve(async (req) => {
       });
     }
 
-    const { dealId, storagePath, resumeFrom } = await req.json();
+    const { dealId, storagePath, resumeFrom, localExtracted } = await req.json();
     if (!dealId || !storagePath) {
       return new Response(JSON.stringify({ error: "Missing dealId or storagePath" }), {
         status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
