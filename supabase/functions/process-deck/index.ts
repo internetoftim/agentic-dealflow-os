@@ -78,6 +78,24 @@ async function setDealStatus(adminClient: any, dealId: string, status: string) {
     .eq("id", dealId);
 }
 
+/** Check if the deal has been paused by the user. If so, record the step and exit. */
+async function checkPaused(adminClient: any, dealId: string, currentStep: string): Promise<boolean> {
+  const { data } = await adminClient
+    .from("deals")
+    .select("status")
+    .eq("id", dealId)
+    .single();
+  if (data?.status === "paused") {
+    await adminClient
+      .from("deals")
+      .update({ paused_at_step: currentStep, updated_at: new Date().toISOString() })
+      .eq("id", dealId);
+    console.log(`Deal ${dealId} paused at step: ${currentStep}`);
+    return true;
+  }
+  return false;
+}
+
 /**
  * Convert PPTX to PDF using Google Drive API.
  * Upload as Google Slides (with convert), then export as PDF.
