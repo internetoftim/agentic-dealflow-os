@@ -161,10 +161,8 @@ Deno.serve(async (req) => {
     }
 
     // Upload to Google Drive with the formatted name
-    const isPptx = fileName.toLowerCase().endsWith(".pptx") || fileName.toLowerCase().endsWith(".ppt");
-    const mimeType = isPptx
-      ? "application/vnd.openxmlformats-officedocument.presentationml.presentation"
-      : "application/pdf";
+    // Files are always PDF at this point (PPTX converted upstream)
+    const mimeType = "application/pdf";
     const metadata: Record<string, unknown> = {
       name: driveFileName,
       mimeType,
