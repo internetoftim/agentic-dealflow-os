@@ -431,164 +431,189 @@ Deno.serve(async (req) => {
       let extractedText = "";
       let actualPageCount = pageCount;
 
-      // For PPTX: prefer Slides API text (most accurate), then PPTX XML, then PDF text
-      if (isPptx && slidesApiText.length >= 200) {
-        extractedText = slidesApiText;
-        console.log(`Using Slides API text: ${extractedText.length} chars`);
+      // If client already extracted text locally (e.g. Florence-2), load it
+      if (localExtracted) {
+        const { data: existingSource } = await adminClient.from("sources")
+          .select("extracted_text")
+          .eq("deal_id", dealId)
+          .eq("user_id", user.id)
+          .single();
+        extractedText = existingSource?.extracted_text ?? "";
+        console.log(`Using locally-extracted text: ${extractedText.length} chars`);
       } else {
-        // Try PDF text extraction
-        try {
-          const result = extractPdfText(compressedPdf.buffer as ArrayBuffer);
-          extractedText = result.text;
-          if (result.pageCount > 0) actualPageCount = result.pageCount;
-          console.log(`Extracted ${extractedText.length} chars from PDF, ${actualPageCount} pages`);
-        } catch (e) {
-          console.error("Text extraction failed (non-fatal):", e);
-        }
+        // Server-side text extraction
+        // For PPTX: prefer Slides API text (most accurate), then PPTX XML, then PDF text
+        if (isPptx && slidesApiText.length >= 200) {
+          extractedText = slidesApiText;
+          console.log(`Using Slides API text: ${extractedText.length} chars`);
+        } else {
+          // Try PDF text extraction
+          try {
+            const result = extractPdfText(compressedPdf.buffer as ArrayBuffer);
+            extractedText = result.text;
+            if (result.pageCount > 0) actualPageCount = result.pageCount;
+            console.log(`Extracted ${extractedText.length} chars from PDF, ${actualPageCount} pages`);
+          } catch (e) {
+            console.error("Text extraction failed (non-fatal):", e);
+          }
 
-        // For PPTX: fallback to XML extraction if PDF text is insufficient
-        if (isPptx && extractedText.length < 200) {
-          // Try Slides API text even if short
-          if (slidesApiText.length > extractedText.length) {
-            extractedText = slidesApiText;
-            console.log(`Using Slides API text (short but best available): ${extractedText.length} chars`);
-          } else {
-            try {
-              const { data: origFile } = await adminClient.storage.from("decks").download(storagePath);
-              if (origFile) {
-                const origBuffer = await origFile.arrayBuffer();
-                const pptxResult = await extractPptxText(origBuffer);
-                if (pptxResult.text.length > extractedText.length) {
-                  extractedText = pptxResult.text;
-                  actualPageCount = pptxResult.pageCount;
+          // For PPTX: fallback to XML extraction if PDF text is insufficient
+          if (isPptx && extractedText.length < 200) {
+            if (slidesApiText.length > extractedText.length) {
+              extractedText = slidesApiText;
+              console.log(`Using Slides API text (short but best available): ${extractedText.length} chars`);
+            } else {
+              try {
+                const { data: origFile } = await adminClient.storage.from("decks").download(storagePath);
+                if (origFile) {
+                  const origBuffer = await origFile.arrayBuffer();
+                  const pptxResult = await extractPptxText(origBuffer);
+                  if (pptxResult.text.length > extractedText.length) {
+                    extractedText = pptxResult.text;
+                    actualPageCount = pptxResult.pageCount;
+                  }
                 }
+              } catch (e) {
+                console.warn("PPTX fallback text extraction failed:", e);
               }
-            } catch (e) {
-              console.warn("PPTX fallback text extraction failed:", e);
             }
           }
         }
+
+        if (extractedText) {
+          await adminClient.from("sources")
+            .update({ extracted_text: extractedText.slice(0, 100_000) })
+            .eq("deal_id", dealId).eq("user_id", user.id);
+        }
       }
 
-      if (extractedText) {
-        await adminClient.from("sources")
-          .update({ extracted_text: extractedText.slice(0, 100_000) })
-          .eq("deal_id", dealId).eq("user_id", user.id);
-      }
-
-      // LLM metadata extraction
-      const isSapinsapin = model === "gpt-oss-202b";
-      const sapinsapinModel = "/models/gpt-oss-20b-balitanlp-cpt";
-      const baseUrl = isSapinsapin ? SAPINSAPIN_BASE : OPENAI_BASE;
-      const rawApiKey = (isSapinsapin ? sapinsapinApiKey : openaiApiKey)?.trim().replace(/[\r\n]/g, "");
-
-      if (!rawApiKey) {
-        throw new Error(isSapinsapin ? "APOLLO_API_KEY is not configured" : "OPENAI_API_KEY is not configured");
-      }
-
-      const aiHeaders: Record<string, string> = { "Content-Type": "application/json" };
-      if (isSapinsapin) {
-        aiHeaders["X-API-Key"] = rawApiKey;
+      // For local-florence2 model: skip LLM metadata extraction, use basic heuristic
+      if (isLocalModel) {
+        console.log("Local model selected — skipping LLM metadata extraction, using heuristic");
+        const updatePayload: Record<string, unknown> = {
+          updated_at: new Date().toISOString(),
+          pages: actualPageCount > 0 ? actualPageCount : null,
+        };
+        // Try to extract a website URL from the text
+        const urlMatch = extractedText.match(/https?:\/\/(?:www\.)?([a-zA-Z0-9-]+\.[a-zA-Z]{2,})[^\s)"\]<]*/);
+        if (urlMatch) {
+          updatePayload.website = urlMatch[0];
+          updatePayload.website_searching = false;
+        }
+        await adminClient.from("deals").update(updatePayload).eq("id", dealId);
       } else {
-        aiHeaders["Authorization"] = `Bearer ${rawApiKey}`;
-      }
+        // LLM metadata extraction (cloud models)
+        const isSapinsapin = model === "gpt-oss-202b";
+        const sapinsapinModel = "/models/gpt-oss-20b-balitanlp-cpt";
+        const baseUrl = isSapinsapin ? SAPINSAPIN_BASE : OPENAI_BASE;
+        const rawApiKey = (isSapinsapin ? sapinsapinApiKey : openaiApiKey)?.trim().replace(/[\r\n]/g, "");
 
-      const userContent: unknown[] = [];
+        if (!rawApiKey) {
+          throw new Error(isSapinsapin ? "APOLLO_API_KEY is not configured" : "OPENAI_API_KEY is not configured");
+        }
 
-      // Determine if the model supports file/image input
-      const supportsFileInput = !isSapinsapin && (model === "gpt-4o" || model === "gpt-5" || model === "gpt-5-mini");
+        const aiHeaders: Record<string, string> = { "Content-Type": "application/json" };
+        if (isSapinsapin) {
+          aiHeaders["X-API-Key"] = rawApiKey;
+        } else {
+          aiHeaders["Authorization"] = `Bearer ${rawApiKey}`;
+        }
 
-      if (supportsFileInput) {
-        // Models with vision/file support: send PDF directly
-        const base64 = btoa(new Uint8Array(compressedPdf).reduce((data, byte) => data + String.fromCharCode(byte), ""));
-        userContent.push({ type: "file", file: { filename: "deck.pdf", file_data: `data:application/pdf;base64,${base64}` } });
-        userContent.push({ type: "text", text: "Analyze this pitch deck and extract metadata using the extract_deck_metadata tool." });
-      } else {
-        // Text-only models: send extracted text
-        const textToSend = extractedText.length > 0 ? extractedText.slice(0, 50_000) : "No text could be extracted from the deck file.";
-        userContent.push({ type: "text", text: `Here is the full text content of the pitch deck:\n\n${textToSend}\n\nAnalyze this pitch deck and extract metadata using the extract_deck_metadata tool. Return null for fields you cannot determine.` });
-      }
+        const userContent: unknown[] = [];
 
-      const aiPayload = {
-        model: isSapinsapin ? sapinsapinModel : model,
-        messages: [
-          { role: "system", content: "You are a VC analyst assistant. Analyze startup pitch decks and extract structured metadata. Be precise. Return null for missing fields." },
-          { role: "user", content: userContent },
-        ],
-        tools: [{
-          type: "function",
-          function: {
-            name: "extract_deck_metadata",
-            description: "Extract structured metadata from a startup pitch deck.",
-            parameters: {
-              type: "object",
-              properties: {
-                startup_name: { type: "string", description: "Name of the startup/company" },
-                website: { type: ["string", "null"], description: "Company website URL if found" },
-                stage: { type: "string", enum: ["Pre-Seed", "Seed", "Series A", "Series B", "Series C", "Growth", "Unknown"] },
-                sector: { type: "string", description: "Primary sector/industry" },
-                ask_amount: { type: ["string", "null"], description: "Amount being raised" },
-                valuation: { type: ["string", "null"], description: "Valuation if mentioned" },
-                revenue: { type: ["string", "null"], description: "Current revenue/ARR" },
-                growth: { type: ["string", "null"], description: "Growth rate" },
-                team_size: { type: ["string", "null"], description: "Team size" },
-                page_count: { type: "number", description: "Number of pages/slides" },
+        // Determine if the model supports file/image input
+        const supportsFileInput = !isSapinsapin && (model === "gpt-4o" || model === "gpt-5" || model === "gpt-5-mini");
+
+        if (supportsFileInput) {
+          const base64 = btoa(new Uint8Array(compressedPdf).reduce((data, byte) => data + String.fromCharCode(byte), ""));
+          userContent.push({ type: "file", file: { filename: "deck.pdf", file_data: `data:application/pdf;base64,${base64}` } });
+          userContent.push({ type: "text", text: "Analyze this pitch deck and extract metadata using the extract_deck_metadata tool." });
+        } else {
+          const textToSend = extractedText.length > 0 ? extractedText.slice(0, 50_000) : "No text could be extracted from the deck file.";
+          userContent.push({ type: "text", text: `Here is the full text content of the pitch deck:\n\n${textToSend}\n\nAnalyze this pitch deck and extract metadata using the extract_deck_metadata tool. Return null for fields you cannot determine.` });
+        }
+
+        const aiPayload = {
+          model: isSapinsapin ? sapinsapinModel : model,
+          messages: [
+            { role: "system", content: "You are a VC analyst assistant. Analyze startup pitch decks and extract structured metadata. Be precise. Return null for missing fields." },
+            { role: "user", content: userContent },
+          ],
+          tools: [{
+            type: "function",
+            function: {
+              name: "extract_deck_metadata",
+              description: "Extract structured metadata from a startup pitch deck.",
+              parameters: {
+                type: "object",
+                properties: {
+                  startup_name: { type: "string", description: "Name of the startup/company" },
+                  website: { type: ["string", "null"], description: "Company website URL if found" },
+                  stage: { type: "string", enum: ["Pre-Seed", "Seed", "Series A", "Series B", "Series C", "Growth", "Unknown"] },
+                  sector: { type: "string", description: "Primary sector/industry" },
+                  ask_amount: { type: ["string", "null"], description: "Amount being raised" },
+                  valuation: { type: ["string", "null"], description: "Valuation if mentioned" },
+                  revenue: { type: ["string", "null"], description: "Current revenue/ARR" },
+                  growth: { type: ["string", "null"], description: "Growth rate" },
+                  team_size: { type: ["string", "null"], description: "Team size" },
+                  page_count: { type: "number", description: "Number of pages/slides" },
+                },
+                required: ["startup_name", "stage", "sector", "page_count"],
+                additionalProperties: false,
               },
-              required: ["startup_name", "stage", "sector", "page_count"],
-              additionalProperties: false,
             },
-          },
-        }],
-        tool_choice: { type: "function", function: { name: "extract_deck_metadata" } },
-      };
+          }],
+          tool_choice: { type: "function", function: { name: "extract_deck_metadata" } },
+        };
 
-      let aiResponse = await fetch(`${baseUrl}/v1/chat/completions`, {
-        method: "POST",
-        headers: aiHeaders,
-        body: JSON.stringify(aiPayload),
-      });
-
-      // Fallback: if file-based request fails, retry with text-only
-      if (!aiResponse.ok && supportsFileInput && extractedText.length > 0) {
-        console.warn(`File-based AI call failed (${aiResponse.status}), falling back to text-only extraction`);
-        const textToSend = extractedText.slice(0, 50_000);
-        aiPayload.messages = [
-          { role: "system", content: "You are a VC analyst assistant. Analyze startup pitch decks and extract structured metadata. Be precise. Return null for missing fields." },
-          { role: "user", content: [{ type: "text", text: `Here is the full text content of the pitch deck:\n\n${textToSend}\n\nAnalyze this pitch deck and extract metadata using the extract_deck_metadata tool. Return null for fields you cannot determine.` }] },
-        ];
-        aiResponse = await fetch(`${baseUrl}/v1/chat/completions`, {
+        let aiResponse = await fetch(`${baseUrl}/v1/chat/completions`, {
           method: "POST",
           headers: aiHeaders,
           body: JSON.stringify(aiPayload),
         });
+
+        // Fallback: if file-based request fails, retry with text-only
+        if (!aiResponse.ok && supportsFileInput && extractedText.length > 0) {
+          console.warn(`File-based AI call failed (${aiResponse.status}), falling back to text-only extraction`);
+          const textToSend = extractedText.slice(0, 50_000);
+          aiPayload.messages = [
+            { role: "system", content: "You are a VC analyst assistant. Analyze startup pitch decks and extract structured metadata. Be precise. Return null for missing fields." },
+            { role: "user", content: [{ type: "text", text: `Here is the full text content of the pitch deck:\n\n${textToSend}\n\nAnalyze this pitch deck and extract metadata using the extract_deck_metadata tool. Return null for fields you cannot determine.` }] },
+          ];
+          aiResponse = await fetch(`${baseUrl}/v1/chat/completions`, {
+            method: "POST",
+            headers: aiHeaders,
+            body: JSON.stringify(aiPayload),
+          });
+        }
+
+        if (!aiResponse.ok) {
+          const errText = await aiResponse.text();
+          console.error("AI API error:", aiResponse.status, errText);
+          throw new Error(`AI API error [${aiResponse.status}]: ${errText}`);
+        }
+
+        const aiResult = await aiResponse.json();
+        const toolCall = aiResult.choices?.[0]?.message?.tool_calls?.[0];
+        if (!toolCall) throw new Error("No structured output returned from AI");
+
+        const metadata = JSON.parse(toolCall.function.arguments);
+        console.log("Extracted metadata:", JSON.stringify(metadata));
+
+        const updatePayload: Record<string, unknown> = { updated_at: new Date().toISOString() };
+        if (metadata.startup_name) updatePayload.name = metadata.startup_name;
+        if (metadata.website) { updatePayload.website = metadata.website; updatePayload.website_searching = false; }
+        if (metadata.stage) updatePayload.stage = metadata.stage;
+        if (metadata.sector) updatePayload.sector = metadata.sector;
+        if (metadata.ask_amount) updatePayload.ask_amount = metadata.ask_amount;
+        if (metadata.valuation) updatePayload.valuation = metadata.valuation;
+        if (metadata.revenue) updatePayload.revenue = metadata.revenue;
+        if (metadata.growth) updatePayload.growth = metadata.growth;
+        if (metadata.team_size) updatePayload.team_size = metadata.team_size;
+        updatePayload.pages = actualPageCount > 0 ? actualPageCount : (metadata.page_count ?? null);
+
+        await adminClient.from("deals").update(updatePayload).eq("id", dealId);
       }
-
-      if (!aiResponse.ok) {
-        const errText = await aiResponse.text();
-        console.error("AI API error:", aiResponse.status, errText);
-        throw new Error(`AI API error [${aiResponse.status}]: ${errText}`);
-      }
-
-      const aiResult = await aiResponse.json();
-      const toolCall = aiResult.choices?.[0]?.message?.tool_calls?.[0];
-      if (!toolCall) throw new Error("No structured output returned from AI");
-
-      const metadata = JSON.parse(toolCall.function.arguments);
-      console.log("Extracted metadata:", JSON.stringify(metadata));
-
-      const updatePayload: Record<string, unknown> = { updated_at: new Date().toISOString() };
-      if (metadata.startup_name) updatePayload.name = metadata.startup_name;
-      if (metadata.website) { updatePayload.website = metadata.website; updatePayload.website_searching = false; }
-      if (metadata.stage) updatePayload.stage = metadata.stage;
-      if (metadata.sector) updatePayload.sector = metadata.sector;
-      if (metadata.ask_amount) updatePayload.ask_amount = metadata.ask_amount;
-      if (metadata.valuation) updatePayload.valuation = metadata.valuation;
-      if (metadata.revenue) updatePayload.revenue = metadata.revenue;
-      if (metadata.growth) updatePayload.growth = metadata.growth;
-      if (metadata.team_size) updatePayload.team_size = metadata.team_size;
-      updatePayload.pages = actualPageCount > 0 ? actualPageCount : (metadata.page_count ?? null);
-
-      await adminClient.from("deals").update(updatePayload).eq("id", dealId);
     }
 
     // --- STEP 4: Lite website search ---
