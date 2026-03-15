@@ -236,12 +236,22 @@ Deno.serve(async (req) => {
       });
     }
 
-    const { dealId, storagePath } = await req.json();
+    const { dealId, storagePath, resumeFrom } = await req.json();
     if (!dealId || !storagePath) {
       return new Response(JSON.stringify({ error: "Missing dealId or storagePath" }), {
         status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
+
+    // When resuming, clear the paused_at_step
+    if (resumeFrom) {
+      await adminClient.from("deals").update({ paused_at_step: null, status: resumeFrom, updated_at: new Date().toISOString() }).eq("id", dealId);
+    }
+
+    // Determine which steps to skip when resuming
+    const stepOrder = ["converting", "compressing", "extracting", "searching-website", "syncing", "memo-ready"];
+    const resumeIdx = resumeFrom ? stepOrder.indexOf(resumeFrom) : -1;
+    const shouldSkip = (step: string) => resumeFrom ? stepOrder.indexOf(step) < resumeIdx : false;
 
     // Fetch user settings (needed for Google token for conversion + AI model)
     const { data: settings } = await adminClient
