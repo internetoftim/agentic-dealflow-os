@@ -311,265 +311,245 @@ Deno.serve(async (req) => {
     }
 
     // --- STEP 2: Compress PDF ---
+    let compressedPdf: Uint8Array;
+    let pageCount: number;
     if (!shouldSkip("compressing")) {
       if (await checkPaused(adminClient, dealId, "compressing")) {
         return new Response(JSON.stringify({ success: true, paused: true, at: "compressing" }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
       }
       await setDealStatus(adminClient, dealId, "compressing");
 
-    const pdfBytes = new Uint8Array(arrayBuffer);
-    const { compressed: compressedPdf, pages: pageCount } = await compressPdfToTarget(pdfBytes);
+      const pdfBytes = new Uint8Array(arrayBuffer);
+      const result = await compressPdfToTarget(pdfBytes);
+      compressedPdf = result.compressed;
+      pageCount = result.pages;
 
-    // Re-upload compressed PDF
-    const { error: compressUploadError } = await adminClient.storage
-      .from("decks")
-      .upload(pdfStoragePath, new Blob([compressedPdf], { type: "application/pdf" }), {
-        upsert: true,
-      });
-    if (compressUploadError) {
-      console.warn("Failed to upload compressed PDF:", compressUploadError.message);
+      const { error: compressUploadError } = await adminClient.storage
+        .from("decks")
+        .upload(pdfStoragePath, new Blob([compressedPdf], { type: "application/pdf" }), { upsert: true });
+      if (compressUploadError) console.warn("Failed to upload compressed PDF:", compressUploadError.message);
+
+      await adminClient.from("deals").update({
+        compressed_size: `${(compressedPdf.length / (1024 * 1024)).toFixed(1)}MB`,
+        pages: pageCount,
+        updated_at: new Date().toISOString(),
+      }).eq("id", dealId);
+    } else {
+      // Resuming past compression — re-download the already-compressed PDF
+      const { data: existingPdf } = await adminClient.storage.from("decks").download(pdfStoragePath);
+      if (!existingPdf) throw new Error("Cannot find compressed PDF for resume");
+      compressedPdf = new Uint8Array(await existingPdf.arrayBuffer());
+      const { data: dealData } = await adminClient.from("deals").select("pages").eq("id", dealId).single();
+      pageCount = dealData?.pages ?? 0;
     }
-
-    await adminClient.from("deals").update({
-      compressed_size: `${(compressedPdf.length / (1024 * 1024)).toFixed(1)}MB`,
-      pages: pageCount,
-      updated_at: new Date().toISOString(),
-    }).eq("id", dealId);
 
     // --- STEP 3: Extracting metadata ---
-    await setDealStatus(adminClient, dealId, "extracting");
-
-    // Extract text from the (now always PDF) file
-    let extractedText = "";
-    let actualPageCount = pageCount;
-    try {
-      const result = extractPdfText(compressedPdf.buffer as ArrayBuffer);
-      extractedText = result.text;
-      if (result.pageCount > 0) actualPageCount = result.pageCount;
-      console.log(`Extracted ${extractedText.length} chars, ${actualPageCount} pages`);
-    } catch (e) {
-      console.error("Text extraction failed (non-fatal):", e);
-    }
-
-    // If PDF text extraction yielded little and we had PPTX, try PPTX extraction from original
-    if (isPptx && extractedText.length < 200) {
-      try {
-        const { data: origFile } = await adminClient.storage.from("decks").download(storagePath);
-        if (origFile) {
-          const origBuffer = await origFile.arrayBuffer();
-          const pptxResult = await extractPptxText(origBuffer);
-          if (pptxResult.text.length > extractedText.length) {
-            extractedText = pptxResult.text;
-            actualPageCount = pptxResult.pageCount;
-            console.log(`Used PPTX text extraction instead: ${extractedText.length} chars`);
-          }
-        }
-      } catch (e) {
-        console.warn("PPTX fallback text extraction failed:", e);
+    if (!shouldSkip("extracting")) {
+      if (await checkPaused(adminClient, dealId, "extracting")) {
+        return new Response(JSON.stringify({ success: true, paused: true, at: "extracting" }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
       }
-    }
+      await setDealStatus(adminClient, dealId, "extracting");
 
-    // Store extracted text
-    if (extractedText) {
-      const truncated = extractedText.slice(0, 100_000);
-      await adminClient.from("sources")
-        .update({ extracted_text: truncated })
-        .eq("deal_id", dealId).eq("user_id", user.id);
-    }
-
-    // LLM metadata extraction
-    const isSapinsapin = model === "gpt-oss-202b";
-    const sapinsapinModel = "/models/gpt-oss-20b-balitanlp-cpt";
-    const baseUrl = isSapinsapin ? SAPINSAPIN_BASE : OPENAI_BASE;
-    const rawApiKey = (isSapinsapin ? sapinsapinApiKey : openaiApiKey)?.trim().replace(/[\r\n]/g, "");
-
-    if (!rawApiKey) {
-      throw new Error(isSapinsapin ? "APOLLO_API_KEY is not configured" : "OPENAI_API_KEY is not configured");
-    }
-
-    const aiHeaders: Record<string, string> = { "Content-Type": "application/json" };
-    if (isSapinsapin) {
-      aiHeaders["X-API-Key"] = rawApiKey;
-    } else {
-      aiHeaders["Authorization"] = `Bearer ${rawApiKey}`;
-    }
-
-    const userContent: unknown[] = [];
-    if (isSapinsapin) {
-      const deckText = extractedText
-        ? `Here is the full text content of the pitch deck:\n\n${extractedText.slice(0, 50_000)}`
-        : "No text could be extracted from the deck file.";
-      userContent.push({ type: "text", text: `${deckText}\n\nAnalyze this pitch deck and extract metadata using the extract_deck_metadata tool.` });
-    } else {
-      // Always send the compressed PDF (even if originally PPTX, it's now converted)
-      const base64 = btoa(new Uint8Array(compressedPdf).reduce((data, byte) => data + String.fromCharCode(byte), ""));
-      userContent.push({
-        type: "file",
-        file: {
-          filename: "deck.pdf",
-          file_data: `data:application/pdf;base64,${base64}`,
-        },
-      });
-      userContent.push({ type: "text", text: "Analyze this pitch deck and extract metadata using the extract_deck_metadata tool." });
-    }
-
-    const aiResponse = await fetch(`${baseUrl}/v1/chat/completions`, {
-      method: "POST",
-      headers: aiHeaders,
-      body: JSON.stringify({
-        model: isSapinsapin ? sapinsapinModel : model,
-        messages: [
-          { role: "system", content: "You are a VC analyst assistant. Analyze startup pitch decks and extract structured metadata. Be precise. Return null for missing fields." },
-          { role: "user", content: userContent },
-        ],
-        tools: [{
-          type: "function",
-          function: {
-            name: "extract_deck_metadata",
-            description: "Extract structured metadata from a startup pitch deck.",
-            parameters: {
-              type: "object",
-              properties: {
-                startup_name: { type: "string", description: "Name of the startup/company" },
-                website: { type: ["string", "null"], description: "Company website URL if found" },
-                stage: { type: "string", enum: ["Pre-Seed", "Seed", "Series A", "Series B", "Series C", "Growth", "Unknown"] },
-                sector: { type: "string", description: "Primary sector/industry" },
-                ask_amount: { type: ["string", "null"], description: "Amount being raised" },
-                valuation: { type: ["string", "null"], description: "Valuation if mentioned" },
-                revenue: { type: ["string", "null"], description: "Current revenue/ARR" },
-                growth: { type: ["string", "null"], description: "Growth rate" },
-                team_size: { type: ["string", "null"], description: "Team size" },
-                page_count: { type: "number", description: "Number of pages/slides" },
-              },
-              required: ["startup_name", "stage", "sector", "page_count"],
-              additionalProperties: false,
-            },
-          },
-        }],
-        tool_choice: { type: "function", function: { name: "extract_deck_metadata" } },
-      }),
-    });
-
-    if (!aiResponse.ok) {
-      const errText = await aiResponse.text();
-      console.error("AI API error:", aiResponse.status, errText);
-      throw new Error(`AI API error [${aiResponse.status}]: ${errText}`);
-    }
-
-    const aiResult = await aiResponse.json();
-    const toolCall = aiResult.choices?.[0]?.message?.tool_calls?.[0];
-    if (!toolCall) throw new Error("No structured output returned from AI");
-
-    const metadata = JSON.parse(toolCall.function.arguments);
-    console.log("Extracted metadata:", JSON.stringify(metadata));
-
-    // Update deal with metadata
-    const updatePayload: Record<string, unknown> = {
-      updated_at: new Date().toISOString(),
-    };
-    if (metadata.startup_name) updatePayload.name = metadata.startup_name;
-    if (metadata.website) {
-      updatePayload.website = metadata.website;
-      updatePayload.website_searching = false;
-    }
-    if (metadata.stage) updatePayload.stage = metadata.stage;
-    if (metadata.sector) updatePayload.sector = metadata.sector;
-    if (metadata.ask_amount) updatePayload.ask_amount = metadata.ask_amount;
-    if (metadata.valuation) updatePayload.valuation = metadata.valuation;
-    if (metadata.revenue) updatePayload.revenue = metadata.revenue;
-    if (metadata.growth) updatePayload.growth = metadata.growth;
-    if (metadata.team_size) updatePayload.team_size = metadata.team_size;
-    updatePayload.pages = actualPageCount > 0 ? actualPageCount : (metadata.page_count ?? null);
-
-    await adminClient.from("deals").update(updatePayload).eq("id", dealId);
-
-    // --- STEP 4: Lite website search (if no website found in deck) ---
-    let foundWebsite = metadata.website;
-    if (!foundWebsite && firecrawlApiKey && metadata.startup_name) {
-      await setDealStatus(adminClient, dealId, "searching-website");
-      await adminClient.from("deals").update({ website_searching: true }).eq("id", dealId);
-
+      let extractedText = "";
+      let actualPageCount = pageCount;
       try {
-        const searchQuery = `${metadata.startup_name} company official website`;
-        console.log("Lite website search:", searchQuery);
-
-        const searchResponse = await fetch("https://api.firecrawl.dev/v1/search", {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${firecrawlApiKey}`,
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({ query: searchQuery, limit: 5 }),
-        });
-
-        if (searchResponse.ok) {
-          const searchData = await searchResponse.json();
-          const results = searchData.data || searchData.results || [];
-
-          const candidateUrl = results.find((r: any) =>
-            r.url &&
-            !r.url.includes("linkedin.com") &&
-            !r.url.includes("crunchbase.com") &&
-            !r.url.includes("google.com") &&
-            !r.url.includes("wikipedia.org") &&
-            !r.url.includes("facebook.com") &&
-            !r.url.includes("twitter.com")
-          )?.url;
-
-          const linkedinUrl = results.find((r: any) =>
-            r.url?.includes("linkedin.com/company")
-          )?.url;
-
-          if (candidateUrl) {
-            foundWebsite = candidateUrl;
-            console.log("Found website:", foundWebsite);
-          }
-
-          const webUpdate: Record<string, unknown> = {
-            website_searching: false,
-            updated_at: new Date().toISOString(),
-          };
-          if (foundWebsite) webUpdate.website = foundWebsite;
-          if (linkedinUrl) webUpdate.linkedin_url = linkedinUrl;
-
-          await adminClient.from("deals").update(webUpdate).eq("id", dealId);
-        }
+        const result = extractPdfText(compressedPdf.buffer as ArrayBuffer);
+        extractedText = result.text;
+        if (result.pageCount > 0) actualPageCount = result.pageCount;
+        console.log(`Extracted ${extractedText.length} chars, ${actualPageCount} pages`);
       } catch (e) {
-        console.warn("Lite website search failed (non-fatal):", e);
-        await adminClient.from("deals").update({ website_searching: false }).eq("id", dealId);
+        console.error("Text extraction failed (non-fatal):", e);
+      }
+
+      if (isPptx && extractedText.length < 200) {
+        try {
+          const { data: origFile } = await adminClient.storage.from("decks").download(storagePath);
+          if (origFile) {
+            const origBuffer = await origFile.arrayBuffer();
+            const pptxResult = await extractPptxText(origBuffer);
+            if (pptxResult.text.length > extractedText.length) {
+              extractedText = pptxResult.text;
+              actualPageCount = pptxResult.pageCount;
+            }
+          }
+        } catch (e) {
+          console.warn("PPTX fallback text extraction failed:", e);
+        }
+      }
+
+      if (extractedText) {
+        await adminClient.from("sources")
+          .update({ extracted_text: extractedText.slice(0, 100_000) })
+          .eq("deal_id", dealId).eq("user_id", user.id);
+      }
+
+      // LLM metadata extraction
+      const isSapinsapin = model === "gpt-oss-202b";
+      const sapinsapinModel = "/models/gpt-oss-20b-balitanlp-cpt";
+      const baseUrl = isSapinsapin ? SAPINSAPIN_BASE : OPENAI_BASE;
+      const rawApiKey = (isSapinsapin ? sapinsapinApiKey : openaiApiKey)?.trim().replace(/[\r\n]/g, "");
+
+      if (!rawApiKey) {
+        throw new Error(isSapinsapin ? "APOLLO_API_KEY is not configured" : "OPENAI_API_KEY is not configured");
+      }
+
+      const aiHeaders: Record<string, string> = { "Content-Type": "application/json" };
+      if (isSapinsapin) {
+        aiHeaders["X-API-Key"] = rawApiKey;
+      } else {
+        aiHeaders["Authorization"] = `Bearer ${rawApiKey}`;
+      }
+
+      const userContent: unknown[] = [];
+      if (isSapinsapin) {
+        const deckText = extractedText
+          ? `Here is the full text content of the pitch deck:\n\n${extractedText.slice(0, 50_000)}`
+          : "No text could be extracted from the deck file.";
+        userContent.push({ type: "text", text: `${deckText}\n\nAnalyze this pitch deck and extract metadata using the extract_deck_metadata tool.` });
+      } else {
+        const base64 = btoa(new Uint8Array(compressedPdf).reduce((data, byte) => data + String.fromCharCode(byte), ""));
+        userContent.push({ type: "file", file: { filename: "deck.pdf", file_data: `data:application/pdf;base64,${base64}` } });
+        userContent.push({ type: "text", text: "Analyze this pitch deck and extract metadata using the extract_deck_metadata tool." });
+      }
+
+      const aiResponse = await fetch(`${baseUrl}/v1/chat/completions`, {
+        method: "POST",
+        headers: aiHeaders,
+        body: JSON.stringify({
+          model: isSapinsapin ? sapinsapinModel : model,
+          messages: [
+            { role: "system", content: "You are a VC analyst assistant. Analyze startup pitch decks and extract structured metadata. Be precise. Return null for missing fields." },
+            { role: "user", content: userContent },
+          ],
+          tools: [{
+            type: "function",
+            function: {
+              name: "extract_deck_metadata",
+              description: "Extract structured metadata from a startup pitch deck.",
+              parameters: {
+                type: "object",
+                properties: {
+                  startup_name: { type: "string", description: "Name of the startup/company" },
+                  website: { type: ["string", "null"], description: "Company website URL if found" },
+                  stage: { type: "string", enum: ["Pre-Seed", "Seed", "Series A", "Series B", "Series C", "Growth", "Unknown"] },
+                  sector: { type: "string", description: "Primary sector/industry" },
+                  ask_amount: { type: ["string", "null"], description: "Amount being raised" },
+                  valuation: { type: ["string", "null"], description: "Valuation if mentioned" },
+                  revenue: { type: ["string", "null"], description: "Current revenue/ARR" },
+                  growth: { type: ["string", "null"], description: "Growth rate" },
+                  team_size: { type: ["string", "null"], description: "Team size" },
+                  page_count: { type: "number", description: "Number of pages/slides" },
+                },
+                required: ["startup_name", "stage", "sector", "page_count"],
+                additionalProperties: false,
+              },
+            },
+          }],
+          tool_choice: { type: "function", function: { name: "extract_deck_metadata" } },
+        }),
+      });
+
+      if (!aiResponse.ok) {
+        const errText = await aiResponse.text();
+        console.error("AI API error:", aiResponse.status, errText);
+        throw new Error(`AI API error [${aiResponse.status}]: ${errText}`);
+      }
+
+      const aiResult = await aiResponse.json();
+      const toolCall = aiResult.choices?.[0]?.message?.tool_calls?.[0];
+      if (!toolCall) throw new Error("No structured output returned from AI");
+
+      const metadata = JSON.parse(toolCall.function.arguments);
+      console.log("Extracted metadata:", JSON.stringify(metadata));
+
+      const updatePayload: Record<string, unknown> = { updated_at: new Date().toISOString() };
+      if (metadata.startup_name) updatePayload.name = metadata.startup_name;
+      if (metadata.website) { updatePayload.website = metadata.website; updatePayload.website_searching = false; }
+      if (metadata.stage) updatePayload.stage = metadata.stage;
+      if (metadata.sector) updatePayload.sector = metadata.sector;
+      if (metadata.ask_amount) updatePayload.ask_amount = metadata.ask_amount;
+      if (metadata.valuation) updatePayload.valuation = metadata.valuation;
+      if (metadata.revenue) updatePayload.revenue = metadata.revenue;
+      if (metadata.growth) updatePayload.growth = metadata.growth;
+      if (metadata.team_size) updatePayload.team_size = metadata.team_size;
+      updatePayload.pages = actualPageCount > 0 ? actualPageCount : (metadata.page_count ?? null);
+
+      await adminClient.from("deals").update(updatePayload).eq("id", dealId);
+    }
+
+    // --- STEP 4: Lite website search ---
+    if (!shouldSkip("searching-website")) {
+      if (await checkPaused(adminClient, dealId, "searching-website")) {
+        return new Response(JSON.stringify({ success: true, paused: true, at: "searching-website" }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      }
+
+      const { data: currentDeal } = await adminClient.from("deals").select("website, name").eq("id", dealId).single();
+      if (!currentDeal?.website && firecrawlApiKey && currentDeal?.name) {
+        await setDealStatus(adminClient, dealId, "searching-website");
+        await adminClient.from("deals").update({ website_searching: true }).eq("id", dealId);
+
+        try {
+          const searchResponse = await fetch("https://api.firecrawl.dev/v1/search", {
+            method: "POST",
+            headers: { Authorization: `Bearer ${firecrawlApiKey}`, "Content-Type": "application/json" },
+            body: JSON.stringify({ query: `${currentDeal.name} company official website`, limit: 5 }),
+          });
+
+          if (searchResponse.ok) {
+            const searchData = await searchResponse.json();
+            const results = searchData.data || searchData.results || [];
+
+            const candidateUrl = results.find((r: any) =>
+              r.url && !r.url.includes("linkedin.com") && !r.url.includes("crunchbase.com") &&
+              !r.url.includes("google.com") && !r.url.includes("wikipedia.org") &&
+              !r.url.includes("facebook.com") && !r.url.includes("twitter.com")
+            )?.url;
+
+            const linkedinUrl = results.find((r: any) => r.url?.includes("linkedin.com/company"))?.url;
+
+            const webUpdate: Record<string, unknown> = { website_searching: false, updated_at: new Date().toISOString() };
+            if (candidateUrl) webUpdate.website = candidateUrl;
+            if (linkedinUrl) webUpdate.linkedin_url = linkedinUrl;
+            await adminClient.from("deals").update(webUpdate).eq("id", dealId);
+          }
+        } catch (e) {
+          console.warn("Lite website search failed (non-fatal):", e);
+          await adminClient.from("deals").update({ website_searching: false }).eq("id", dealId);
+        }
       }
     }
 
     // --- STEP 5: Sync to Google Drive ---
-    await setDealStatus(adminClient, dealId, "syncing");
-
-    try {
-      // Use the converted PDF path for syncing
-      const syncFileName = pdfStoragePath.split("/").pop() ?? fileName;
-      const response = await fetch(`${supabaseUrl}/functions/v1/sync-to-drive`, {
-        method: "POST",
-        headers: {
-          Authorization: authHeader,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ dealId, storagePath: pdfStoragePath, fileName: syncFileName }),
-      });
-
-      if (response.ok) {
-        console.log("Drive sync completed");
-      } else {
-        const errText = await response.text();
-        console.warn("Drive sync returned error:", errText);
+    if (!shouldSkip("syncing")) {
+      if (await checkPaused(adminClient, dealId, "syncing")) {
+        return new Response(JSON.stringify({ success: true, paused: true, at: "syncing" }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
       }
-    } catch (e) {
-      console.warn("Drive sync skipped:", e);
+      await setDealStatus(adminClient, dealId, "syncing");
+
+      try {
+        const syncFileName = pdfStoragePath.split("/").pop() ?? fileName;
+        const response = await fetch(`${supabaseUrl}/functions/v1/sync-to-drive`, {
+          method: "POST",
+          headers: { Authorization: authHeader, "Content-Type": "application/json" },
+          body: JSON.stringify({ dealId, storagePath: pdfStoragePath, fileName: syncFileName }),
+        });
+
+        if (response.ok) {
+          console.log("Drive sync completed");
+        } else {
+          const errText = await response.text();
+          console.warn("Drive sync returned error:", errText);
+        }
+      } catch (e) {
+        console.warn("Drive sync skipped:", e);
+      }
     }
 
     // --- STEP 6: Final status ---
     await setDealStatus(adminClient, dealId, "memo-ready");
 
     return new Response(
-      JSON.stringify({ success: true, metadata, converted: isPptx }),
+      JSON.stringify({ success: true, converted: isPptx }),
       { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
   } catch (error) {
