@@ -311,7 +311,11 @@ Deno.serve(async (req) => {
     }
 
     // --- STEP 2: Compress PDF ---
-    await setDealStatus(adminClient, dealId, "compressing");
+    if (!shouldSkip("compressing")) {
+      if (await checkPaused(adminClient, dealId, "compressing")) {
+        return new Response(JSON.stringify({ success: true, paused: true, at: "compressing" }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      }
+      await setDealStatus(adminClient, dealId, "compressing");
 
     const pdfBytes = new Uint8Array(arrayBuffer);
     const { compressed: compressedPdf, pages: pageCount } = await compressPdfToTarget(pdfBytes);
