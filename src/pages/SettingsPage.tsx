@@ -12,7 +12,7 @@ const AI_MODELS = [
   { value: "gpt-5-mini", label: "GPT-5 Mini", description: "Fast & cost-effective" },
   { value: "gpt-5", label: "GPT-5", description: "Most capable, complex tasks" },
   { value: "o3-mini", label: "o3-mini", description: "Reasoning model, math & code" },
-  { value: "local-florence2", label: "Local — Florence-2", description: "In-browser OCR via Transformers.js (~500MB download)" },
+  { value: "local-florence2", label: "Local — Gemma 3n E2B", description: "In-browser multimodal via MediaPipe WebGPU (~3.4GB)" },
 ] as const;
 
 function Toggle({ checked, onChange }: { checked: boolean; onChange: (v: boolean) => void }) {

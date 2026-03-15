@@ -1,22 +1,13 @@
 /**
- * Local vision processing using Florence-2 (Transformers.js) + pdf.js
- * Extracts text from PDF pages by rendering them to images and running OCR/captioning.
+ * Local vision processing using Gemma 3n E2B via MediaPipe LlmInference (WebGPU).
+ * Extracts text from PDF pages by rendering them to images and running multimodal inference.
  */
-import {
-  Florence2ForConditionalGeneration,
-  AutoProcessor,
-  AutoTokenizer,
-  RawImage,
-  type PreTrainedModel,
-  type Processor,
-  type PreTrainedTokenizer,
-} from "@huggingface/transformers";
+import { FilesetResolver, LlmInference } from "@mediapipe/tasks-genai";
 
-const MODEL_ID = "onnx-community/Florence-2-base-ft";
+const MODEL_URL =
+  "https://huggingface.co/google/gemma-3n-E2B-it-litert-lm/resolve/main/gemma-3n-E2B-it-int4-Web.litertlm";
 
-let model: PreTrainedModel | null = null;
-let processor: Processor | null = null;
-let tokenizer: PreTrainedTokenizer | null = null;
+let llm: LlmInference | null = null;
 
 export type VisionProgress = {
   stage: "loading-model" | "rendering-pages" | "processing-page" | "done";
@@ -25,39 +16,41 @@ export type VisionProgress = {
 };
 
 /**
- * Load Florence-2 model (cached after first load).
+ * Load Gemma 3n E2B model with vision support (cached after first load).
  */
 export async function loadVisionModel(
   onProgress?: (p: VisionProgress) => void
 ): Promise<void> {
-  if (model && processor && tokenizer) return;
+  if (llm) return;
+
+  if (!(navigator as any).gpu) {
+    throw new Error("WebGPU is required for Gemma 3n. Please use Chrome 113+ or Edge 113+.");
+  }
 
   onProgress?.({
     stage: "loading-model",
     percent: 0,
-    message: "Downloading Florence-2 model (~500MB)…",
+    message: "Initializing WebGPU runtime…",
   });
 
-  const [m, p, t] = await Promise.all([
-    Florence2ForConditionalGeneration.from_pretrained(MODEL_ID, {
-      dtype: "fp32",
-      progress_callback: (progress: any) => {
-        if (progress.status === "progress" && progress.progress) {
-          onProgress?.({
-            stage: "loading-model",
-            percent: Math.round(progress.progress),
-            message: `Downloading model: ${Math.round(progress.progress)}%`,
-          });
-        }
-      },
-    }),
-    AutoProcessor.from_pretrained(MODEL_ID),
-    AutoTokenizer.from_pretrained(MODEL_ID),
-  ]);
+  const genai = await FilesetResolver.forGenAiTasks(
+    "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-genai@latest/wasm"
+  );
 
-  model = m;
-  processor = p;
-  tokenizer = t;
+  onProgress?.({
+    stage: "loading-model",
+    percent: 5,
+    message: "Downloading Gemma 3n E2B (~3.4GB)… This may take a few minutes.",
+  });
+
+  llm = await LlmInference.createFromOptions(genai, {
+    baseOptions: { modelAssetPath: MODEL_URL },
+    maxTokens: 2048,
+    topK: 40,
+    temperature: 0.2,
+    randomSeed: 42,
+    maxNumImages: 8, // enable vision support
+  });
 
   onProgress?.({
     stage: "loading-model",
@@ -67,39 +60,43 @@ export async function loadVisionModel(
 }
 
 /**
- * Run Florence-2 OCR on a single image (RawImage).
+ * Run Gemma 3n multimodal inference on a canvas/image to extract text.
  */
-async function extractTextFromImage(image: RawImage): Promise<string> {
-  if (!model || !processor || !tokenizer) {
-    throw new Error("Model not loaded. Call loadVisionModel() first.");
+async function extractTextFromCanvas(
+  canvas: HTMLCanvasElement,
+  pageNum: number
+): Promise<string> {
+  if (!llm) throw new Error("Model not loaded. Call loadVisionModel() first.");
+
+  // Create an image blob URL from the canvas
+  const blob = await new Promise<Blob>((resolve) =>
+    canvas.toBlob((b) => resolve(b!), "image/png")
+  );
+  const imageUrl = URL.createObjectURL(blob);
+
+  try {
+    // Use multimodal prompting: array of text + image
+    const response = await llm.generateResponse([
+      "<start_of_turn>user\n",
+      "Extract ALL text visible in this slide image. Return only the raw text content, preserving the reading order. Include headings, bullet points, numbers, and any text in charts or diagrams. Do not add commentary.\n",
+      { imageSource: imageUrl },
+      "<end_of_turn>\n<start_of_turn>model\n",
+    ]);
+    return response?.trim() || "";
+  } finally {
+    URL.revokeObjectURL(imageUrl);
   }
-
-  // Use <OCR> task for text extraction
-  const task = "<OCR>";
-  const prompts = processor(image, task);
-  const textInputs = tokenizer(task);
-
-  const generated = await (model as any).generate({
-    ...textInputs,
-    ...prompts,
-    max_new_tokens: 1024,
-  });
-
-  const decoded = tokenizer.batch_decode(generated, { skip_special_tokens: true });
-  return decoded[0]?.replace(task, "").trim() || "";
 }
 
 /**
- * Render PDF pages to images using pdf.js and extract text from each via Florence-2.
+ * Render PDF pages to images using pdf.js and extract text from each via Gemma 3n.
  */
 export async function extractTextFromPdf(
   pdfArrayBuffer: ArrayBuffer,
   onProgress?: (p: VisionProgress) => void
 ): Promise<{ text: string; pageCount: number }> {
-  // Dynamically import pdf.js to avoid SSR issues
+  // Dynamically import pdf.js
   const pdfjsLib = await import("pdfjs-dist");
-
-  // Set worker source
   pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.mjs`;
 
   const pdf = await pdfjsLib.getDocument({ data: pdfArrayBuffer }).promise;
@@ -108,7 +105,7 @@ export async function extractTextFromPdf(
   onProgress?.({
     stage: "rendering-pages",
     percent: 0,
-    message: `Processing ${pageCount} pages…`,
+    message: `Processing ${pageCount} pages with Gemma 3n…`,
   });
 
   // Ensure model is loaded
@@ -135,17 +132,8 @@ export async function extractTextFromPdf(
 
     await page.render({ canvasContext: ctx, viewport }).promise;
 
-    // Convert canvas to RawImage
-    const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-    const rawImage = new RawImage(
-      new Uint8ClampedArray(imageData.data),
-      canvas.width,
-      canvas.height,
-      4 // RGBA channels
-    );
-
-    // Run OCR
-    const text = await extractTextFromImage(rawImage);
+    // Run multimodal OCR via Gemma 3n
+    const text = await extractTextFromCanvas(canvas, i);
     if (text.trim()) {
       pageTexts.push(`[Page ${i}] ${text}`);
     }
@@ -168,17 +156,15 @@ export async function extractTextFromPdf(
 }
 
 /**
- * Check if local vision model is available (WebGPU or WASM).
+ * Check if local vision model is available (requires WebGPU).
  */
 export function isLocalVisionAvailable(): boolean {
-  return true; // Transformers.js falls back to WASM if no WebGPU
+  return !!(navigator as any).gpu;
 }
 
 /**
  * Unload the model from memory.
  */
 export function unloadVisionModel(): void {
-  model = null;
-  processor = null;
-  tokenizer = null;
+  llm = null;
 }
