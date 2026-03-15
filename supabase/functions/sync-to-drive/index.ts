@@ -12,7 +12,8 @@ const corsHeaders = {
  */
 function applyNamingPattern(
   pattern: string,
-  deal: { name: string; website?: string | null; pages?: number | null; sector?: string; stage?: string }
+  deal: { name: string; website?: string | null; pages?: number | null; sector?: string; stage?: string },
+  originalFileName?: string
 ): string {
   const now = new Date();
   const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
