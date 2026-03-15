@@ -40,6 +40,8 @@ function applyNamingPattern(
 
   // Always use .pdf extension since PPTX files are now converted to PDF before syncing
   result = result.replace(/\.(pdf|pptx?)\s*$/i, "");
+  // Sanitize: remove illegal filename chars
+  result = result.replace(/[\/\\:*?"<>|]/g, "").replace(/\s+/g, " ").trim();
   if (!result.toLowerCase().endsWith(".pdf")) {
     result += ".pdf";
   }
