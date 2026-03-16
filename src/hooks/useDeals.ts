@@ -100,13 +100,13 @@ export function useSources(dealId?: string) {
   });
 }
 
-export function usePauseDeal() {
+export function useCancelDeal() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async (dealId: string) => {
       const { error } = await supabase
         .from("deals")
-        .update({ status: "paused" })
+        .update({ status: "cancelled" })
         .eq("id", dealId);
       if (error) throw error;
     },
