@@ -14,8 +14,8 @@ import {
 } from "@/components/ui/sidebar";
 
 const navItems = [
-  { title: "Kanban Pipeline", url: "/", icon: LayoutDashboard },
-  { title: "Deal Workspace", url: "/workspace", icon: FileSearch },
+  { title: "Deal Workspace", url: "/", icon: FileSearch },
+  { title: "Kanban Pipeline", url: "/pipeline", icon: LayoutDashboard },
   { title: "Data Room", url: "/data-room", icon: FolderOpen },
   { title: "Settings", url: "/settings", icon: Settings },
 ];
