@@ -511,11 +511,11 @@ export default function SettingsPage() {
         </div>
       </section>
 
-      {/* DocSend Bookmarklet */}
-      <section className="mb-8">
+      {/* DocSend Bookmarklet - DISABLED */}
+      {/* <section className="mb-8">
         <h2 className="text-sm font-semibold text-foreground mb-4">DocSend Ingestion</h2>
         <BookmarkletInstaller />
-      </section>
+      </section> */}
     </div>
   );
 }
