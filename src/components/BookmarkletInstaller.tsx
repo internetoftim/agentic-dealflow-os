@@ -14,23 +14,78 @@ function generateBookmarklet(appOrigin: string): string {
 (function(){
   var RELAY_URL = '${appOrigin}/ingest-relay';
   var slides = [];
-  var canvas = document.querySelector('canvas');
-  if (!canvas) { alert('AgenticVC: No canvas found on this page. Make sure you are viewing a DocSend deck.'); return; }
 
-  var nextBtn = document.querySelector('[data-testid="next-page-btn"]')
-    || document.querySelector('button[aria-label="Next page"]')
-    || document.querySelector('.next-page-button')
-    || (function(){ var btns = document.querySelectorAll('button'); for(var i=0;i<btns.length;i++){if(/next/i.test(btns[i].textContent)||/next/i.test(btns[i].getAttribute('aria-label')||'')){return btns[i];}} return null; })();
+  function findCanvas(doc){
+    var c = doc.querySelector('canvas');
+    if(c) return c;
+    var iframes = doc.querySelectorAll('iframe');
+    for(var i=0;i<iframes.length;i++){
+      try {
+        var d = iframes[i].contentDocument || iframes[i].contentWindow.document;
+        if(d){ var fc = findCanvas(d); if(fc) return fc; }
+      } catch(e){}
+    }
+    return null;
+  }
 
-  var pageIndicator = document.querySelector('[data-testid="page-indicator"]')
-    || document.querySelector('.page-indicator');
+  function findDoc(){
+    var iframes = document.querySelectorAll('iframe');
+    for(var i=0;i<iframes.length;i++){
+      try {
+        var d = iframes[i].contentDocument || iframes[i].contentWindow.document;
+        if(d && d.querySelector('canvas')) return d;
+      } catch(e){}
+    }
+    return document;
+  }
+
+  var targetDoc = findDoc();
+  var canvas = findCanvas(document);
+  if (!canvas) { alert('AgenticVC: No canvas found. The deck may still be loading, or the viewer uses a non-canvas renderer. Please wait for the deck to fully load and try again.'); return; }
+
+  function findBtn(d){
+    var selectors = [
+      '[data-testid="next-page-btn"]',
+      'button[aria-label="Next page"]',
+      'button[aria-label="next page"]',
+      '.next-page-button',
+      '[class*="next"]',
+      '[class*="Next"]'
+    ];
+    for(var i=0;i<selectors.length;i++){
+      var b = d.querySelector(selectors[i]);
+      if(b) return b;
+    }
+    var btns = d.querySelectorAll('button');
+    for(var j=0;j<btns.length;j++){
+      var txt = (btns[j].textContent||'')+(btns[j].getAttribute('aria-label')||'');
+      if(/next/i.test(txt)) return btns[j];
+    }
+    return null;
+  }
+
+  var nextBtn = findBtn(targetDoc) || findBtn(document);
+
+  function getPageInfo(d){
+    var el = d.querySelector('[data-testid="page-indicator"]') || d.querySelector('.page-indicator');
+    if(!el){
+      var spans = d.querySelectorAll('span, div, p');
+      for(var i=0;i<spans.length;i++){
+        if(/\\d+\\s*(of|\\/|out of)\\s*\\d+/i.test(spans[i].textContent||'')){
+          el = spans[i]; break;
+        }
+      }
+    }
+    if(el){
+      var m = (el.textContent||'').match(/(\\d+)\\s*(?:of|\\/|out of)\\s*(\\d+)/i);
+      if(m) return {current:parseInt(m[1],10), total:parseInt(m[2],10)};
+    }
+    return null;
+  }
 
   function getTotalPages(){
-    if(pageIndicator){
-      var m = pageIndicator.textContent.match(/(\\d+)\\s*\\/\\s*(\\d+)/);
-      if(m) return parseInt(m[2],10);
-    }
-    return 999;
+    var info = getPageInfo(targetDoc) || getPageInfo(document);
+    return info ? info.total : 999;
   }
 
   function captureSlide(){
@@ -38,7 +93,7 @@ function generateBookmarklet(appOrigin: string): string {
       var dataUrl = canvas.toDataURL('image/jpeg', 0.85);
       slides.push(dataUrl);
     } catch(e) {
-      alert('AgenticVC: Canvas is tainted — cross-origin restriction. Cloud fallback required.');
+      alert('AgenticVC: Canvas is tainted (cross-origin restriction). Cloud fallback required.');
       sendToRelay();
       return;
     }
@@ -50,7 +105,7 @@ function generateBookmarklet(appOrigin: string): string {
     }
 
     nextBtn.click();
-    setTimeout(captureSlide, 800);
+    setTimeout(captureSlide, 1000);
   }
 
   function sendToRelay(){
