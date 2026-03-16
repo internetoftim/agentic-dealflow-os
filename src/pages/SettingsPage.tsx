@@ -93,14 +93,21 @@ export default function SettingsPage() {
     if (!user) return;
     setAiModel(model);
     setSavingModel(true);
+    // When GPT-5.4 is selected, automatically set deep research to "custom" (computer use route)
+    const updates: Record<string, unknown> = { user_id: user.id, ai_model: model };
+    if (model === "gpt-5.4") {
+      updates.deep_research_provider = "custom";
+      setDeepResearchProvider("custom");
+    }
     const { error } = await supabase
       .from("user_settings")
-      .upsert({ user_id: user.id, ai_model: model }, { onConflict: "user_id" });
+      .upsert(updates as any, { onConflict: "user_id" });
     setSavingModel(false);
     if (error) {
       toast.error("Failed to save model preference");
     } else {
-      toast.success(`Model set to ${AI_MODELS.find((m) => m.value === model)?.label}`);
+      const label = AI_MODELS.find((m) => m.value === model)?.label;
+      toast.success(`Model set to ${label}${model === "gpt-5.4" ? " — Computer Use enabled for deep research" : ""}`);
     }
   };
 
