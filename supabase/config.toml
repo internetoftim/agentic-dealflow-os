@@ -20,3 +20,6 @@ verify_jwt = false
 
 [functions.process-docsend]
 verify_jwt = false
+
+[functions.ingest-relay]
+verify_jwt = false

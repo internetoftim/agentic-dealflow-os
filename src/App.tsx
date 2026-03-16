@@ -37,6 +37,7 @@ const App = () => (
         <AuthProvider>
           <Routes>
             <Route path="/login" element={<LoginPage />} />
+            <Route path="/ingest-relay" element={<ProtectedRoute><IngestRelay /></ProtectedRoute>} />
             <Route
               path="/*"
               element={
