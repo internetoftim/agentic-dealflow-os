@@ -394,14 +394,45 @@ export default function DealWorkspace() {
           {activeTab === "memo" && (
             <div className="p-5">
               <div className="rounded-lg border border-border bg-card p-5 prose prose-sm max-w-none">
-                <h3 className="text-sm font-semibold text-foreground mb-3">Investment Memo Draft</h3>
+                <div className="flex items-center justify-between mb-3">
+                  <h3 className="text-sm font-semibold text-foreground m-0">Investment Memo Draft</h3>
+                  {activeDeal && (
+                    <button
+                      onClick={() => {
+                        if (!activeDeal) return;
+                        toast.promise(
+                          generateMemo.mutateAsync(activeDeal.id),
+                          {
+                            loading: "Generating memo (deep research + AI)…",
+                            success: (data) =>
+                              data.driveFileId
+                                ? `Memo generated & uploaded to Drive as "${data.driveFileName}"`
+                                : "Memo generated successfully!",
+                            error: (err) => `Memo failed: ${err.message}`,
+                          }
+                        );
+                      }}
+                      disabled={generateMemo.isPending}
+                      className="flex items-center gap-1.5 rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:opacity-90 transition-opacity disabled:opacity-50"
+                    >
+                      {generateMemo.isPending ? (
+                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      ) : (
+                        <FileUp className="h-3.5 w-3.5" />
+                      )}
+                      {generateMemo.isPending ? "Generating…" : activeDeal.memo_draft ? "Regenerate Memo" : "Generate Memo"}
+                    </button>
+                  )}
+                </div>
                 {activeDeal?.memo_draft ? (
                   <div className="text-sm text-muted-foreground leading-relaxed">
                     <ReactMarkdown>{activeDeal.memo_draft}</ReactMarkdown>
                   </div>
                 ) : (
                   <p className="text-sm text-muted-foreground leading-relaxed italic">
-                    No memo generated yet. Upload a deck to get started.
+                    {generateMemo.isPending
+                      ? "Generating memo… This may take a minute."
+                      : "No memo generated yet. Click \"Generate Memo\" to create one using deep research and deck content."}
                   </p>
                 )}
               </div>
