@@ -509,6 +509,65 @@ export default function SettingsPage() {
         </div>
       </section>
 
+      {/* Recap Naming Pattern */}
+      <section className="mb-8">
+        <h2 className="text-sm font-semibold text-foreground mb-4 flex items-center gap-2">
+          <FileText className="h-4 w-4 text-muted-foreground" />
+          Recap File Naming
+        </h2>
+        <div className="rounded-lg border border-border bg-card p-5 space-y-3">
+          <p className="text-xs text-muted-foreground">
+            Pattern used when uploading generated memos to Google Drive. Same tokens as deck naming but defaults to "recap" instead of "deck".
+          </p>
+          <input
+            type="text"
+            value={recapPattern}
+            onChange={(e) => setRecapPattern(e.target.value)}
+            onBlur={async () => {
+              if (!user) return;
+              const { error } = await supabase
+                .from("user_settings")
+                .upsert({ user_id: user.id, recap_naming_pattern: recapPattern.trim() || DEFAULT_RECAP_PATTERN } as any, { onConflict: "user_id" });
+              if (error) toast.error("Failed to save recap pattern");
+              else toast.success("Recap naming pattern saved");
+            }}
+            className="w-full rounded-md border border-input bg-card px-3 py-2 text-sm font-mono outline-none placeholder:text-muted-foreground focus:ring-1 focus:ring-ring"
+          />
+          <div className="flex items-center justify-between">
+            <div className="flex flex-wrap gap-1.5">
+              {["<WEBSITE>", "<NAME>", "<MonthYYYY>", "<pages>", "<SECTOR>", "<STAGE>"].map((token) => (
+                <button
+                  key={token}
+                  onClick={() => setRecapPattern((p) => p + " " + token)}
+                  className="rounded bg-muted px-2 py-0.5 text-xs font-mono text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
+                >
+                  {token}
+                </button>
+              ))}
+            </div>
+            {recapPattern !== DEFAULT_RECAP_PATTERN && (
+              <button
+                onClick={async () => {
+                  setRecapPattern(DEFAULT_RECAP_PATTERN);
+                  if (!user) return;
+                  await supabase
+                    .from("user_settings")
+                    .upsert({ user_id: user.id, recap_naming_pattern: DEFAULT_RECAP_PATTERN } as any, { onConflict: "user_id" });
+                  toast.success("Recap pattern reset to default");
+                }}
+                className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
+              >
+                <RotateCcw className="h-3 w-3" />
+                Reset
+              </button>
+            )}
+          </div>
+          <p className="text-xs text-muted-foreground">
+            Default: <code className="bg-muted rounded px-1">{DEFAULT_RECAP_PATTERN}</code>
+          </p>
+        </div>
+      </section>
+
       {/* DocSend Bookmarklet - DISABLED */}
       {/* <section className="mb-8">
         <h2 className="text-sm font-semibold text-foreground mb-4">DocSend Ingestion</h2>
