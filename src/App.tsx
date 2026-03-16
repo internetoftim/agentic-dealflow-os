@@ -11,6 +11,7 @@ import DataRoom from "@/pages/DataRoom";
 import SettingsPage from "@/pages/SettingsPage";
 import LoginPage from "@/pages/LoginPage";
 import NotFound from "@/pages/NotFound";
+import IngestRelay from "@/pages/IngestRelay";
 
 const queryClient = new QueryClient();
 
