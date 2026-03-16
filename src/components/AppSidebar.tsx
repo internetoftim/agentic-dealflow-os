@@ -14,10 +14,10 @@ import {
 } from "@/components/ui/sidebar";
 
 const navItems = [
-  { title: "Deal Workspace", url: "/", icon: FileSearch },
-  { title: "Kanban Pipeline", url: "/pipeline", icon: LayoutDashboard },
-  { title: "Data Room", url: "/data-room", icon: FolderOpen },
-  { title: "Settings", url: "/settings", icon: Settings },
+  { title: "Deal Workspace", url: "/", icon: FileSearch, disabled: false },
+  { title: "Kanban Pipeline", url: "/pipeline", icon: LayoutDashboard, disabled: false },
+  { title: "Data Room", url: "/data-room", icon: FolderOpen, disabled: true },
+  { title: "Settings", url: "/settings", icon: Settings, disabled: false },
 ];
 
 export function AppSidebar() {
