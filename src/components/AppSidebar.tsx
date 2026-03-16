@@ -1,6 +1,9 @@
 import { LayoutDashboard, FileSearch, FolderOpen, Settings, LogOut, Zap } from "lucide-react";
 import { NavLink } from "@/components/NavLink";
-import { useLocation } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
+import { useAuth } from "@/contexts/AuthContext";
+import { supabase } from "@/integrations/supabase/client";
+import { toast } from "sonner";
 import {
   Sidebar,
   SidebarContent,
