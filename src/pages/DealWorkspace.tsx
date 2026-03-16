@@ -1,6 +1,6 @@
 import { useState, useCallback, useRef, useEffect } from "react";
-import { Upload, Link, Cog, Check, Search, Send, FileText, Globe, Layers, Square, Linkedin, Loader2, FileUp } from "lucide-react";
-import { useDeals, useSources, useCreateDealWithUpload, useProcessDocsend } from "@/hooks/useDeals";
+import { Upload, Link, Cog, Check, Search, Send, FileText, Globe, Layers, Square, Linkedin, Loader2, FileUp, CircleDashed, CircleCheck, Circle } from "lucide-react";
+import { useDeals, useSources, useCreateDealWithUpload, useProcessDocsend, WORKFLOW_STEPS, type WorkflowStatus } from "@/hooks/useDeals";
 import { useDealChat } from "@/hooks/useDealChat";
 import { useGenerateMemo } from "@/hooks/useGenerateMemo";
 import { toast } from "sonner";
@@ -156,6 +156,49 @@ export default function DealWorkspace() {
             ))}
           </div>
         </div>
+
+        {/* Processing Pipeline Status */}
+        {activeDeal && activeDeal.status !== "inbox" && activeDeal.status !== "memo-ready" && activeDeal.status !== "paused" && (
+          <div>
+            <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-2.5">Pipeline Status</h3>
+            <div className="rounded-md border border-border bg-card p-3 flex flex-col gap-1.5">
+              {WORKFLOW_STEPS.map((step) => {
+                const stepIndex = WORKFLOW_STEPS.findIndex(s => s.key === step.key);
+                const currentIndex = WORKFLOW_STEPS.findIndex(s => s.key === activeDeal.status);
+                const isCompleted = currentIndex > stepIndex;
+                const isActive = activeDeal.status === step.key;
+                const isPending = currentIndex < stepIndex;
+
+                return (
+                  <div key={step.key} className="flex items-center gap-2">
+                    {isCompleted ? (
+                      <CircleCheck className="h-3.5 w-3.5 text-success shrink-0" />
+                    ) : isActive ? (
+                      <Loader2 className="h-3.5 w-3.5 text-primary animate-spin shrink-0" />
+                    ) : (
+                      <CircleDashed className="h-3.5 w-3.5 text-muted-foreground/40 shrink-0" />
+                    )}
+                    <span className={`text-xs font-medium ${
+                      isCompleted ? "text-success" : isActive ? "text-primary" : "text-muted-foreground/40"
+                    }`}>
+                      {step.label}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {activeDeal && activeDeal.status === "memo-ready" && (
+          <div>
+            <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-2.5">Pipeline Status</h3>
+            <div className="rounded-md border border-border bg-card p-3 flex items-center gap-2">
+              <CircleCheck className="h-3.5 w-3.5 text-success shrink-0" />
+              <span className="text-xs font-medium text-success">All steps complete</span>
+            </div>
+          </div>
+        )}
 
         {deals && deals.length > 0 && (
           <div>
