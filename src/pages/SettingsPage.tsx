@@ -26,6 +26,7 @@ const AI_MODELS = [
   { value: "gpt-4o", label: "GPT-4o", description: "Best multimodal, strong reasoning" },
   { value: "gpt-5-mini", label: "GPT-5 Mini", description: "Fast & cost-effective" },
   { value: "gpt-5", label: "GPT-5", description: "Most capable, complex tasks" },
+  { value: "gpt-5.4", label: "GPT-5.4", description: "Flagship — Computer Use agent for deep research" },
   { value: "o3-mini", label: "o3-mini", description: "Reasoning model, math & code" },
   { value: "local-florence2", label: "Local — Gemma 3n E2B", description: "In-browser multimodal via MediaPipe WebGPU (~3.4GB)" },
 ] as const;
@@ -92,14 +93,21 @@ export default function SettingsPage() {
     if (!user) return;
     setAiModel(model);
     setSavingModel(true);
+    // When GPT-5.4 is selected, automatically set deep research to "custom" (computer use route)
+    const updates: Record<string, unknown> = { user_id: user.id, ai_model: model };
+    if (model === "gpt-5.4") {
+      updates.deep_research_provider = "custom";
+      setDeepResearchProvider("custom");
+    }
     const { error } = await supabase
       .from("user_settings")
-      .upsert({ user_id: user.id, ai_model: model }, { onConflict: "user_id" });
+      .upsert(updates as any, { onConflict: "user_id" });
     setSavingModel(false);
     if (error) {
       toast.error("Failed to save model preference");
     } else {
-      toast.success(`Model set to ${AI_MODELS.find((m) => m.value === model)?.label}`);
+      const label = AI_MODELS.find((m) => m.value === model)?.label;
+      toast.success(`Model set to ${label}${model === "gpt-5.4" ? " — Computer Use enabled for deep research" : ""}`);
     }
   };
 
@@ -239,7 +247,7 @@ export default function SettingsPage() {
           Deep Research Agent
         </h2>
         <div className="rounded-lg border border-border bg-card p-5">
-          <p className="text-xs text-muted-foreground mb-3">Choose which engine powers company deep research after deck extraction.</p>
+          <p className="text-xs text-muted-foreground mb-3">Choose which engine powers company deep research after deck extraction. Selecting GPT-5.4 as your AI model automatically enables Computer Use.</p>
           <div className="grid grid-cols-2 gap-2">
             {([
               { value: "custom" as const, label: "Custom Agent", description: "Uses your selected AI model + Firecrawl search" },

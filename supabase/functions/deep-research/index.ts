@@ -12,10 +12,12 @@ const OPENAI_BASE = "https://api.openai.com";
 
 function getAiConfig(model: string) {
   const isSapinsapin = model === "gpt-oss-202b";
+  const isComputerUse = model === "gpt-5.4";
   return {
     isSapinsapin,
+    isComputerUse,
     baseUrl: isSapinsapin ? SAPINSAPIN_BASE : OPENAI_BASE,
-    modelName: isSapinsapin ? SAPINSAPIN_MODEL : model,
+    modelName: isComputerUse ? "computer-use-preview" : isSapinsapin ? SAPINSAPIN_MODEL : model,
     envKey: isSapinsapin ? "APOLLO_API_KEY" : "OPENAI_API_KEY",
   };
 }
@@ -170,7 +172,89 @@ Deno.serve(async (req) => {
         .map((r: any, i: number) => `[${i + 1}] ${r.title || ""} - ${r.url || ""}\n${r.description || ""}`)
         .join("\n\n");
 
-      const researchPrompt = `You are a VC research analyst. Based on the following search results and website content, extract accurate company information.
+      if (config.isComputerUse) {
+        // GPT-5.4 Computer Use path — uses OpenAI Responses API with computer_use_preview tool
+        console.log("Using GPT-5.4 Computer Use agent for deep research");
+
+        const cuPrompt = `You are a VC research analyst. Find the official website and LinkedIn company page for "${deal.name}" (sector: ${deal.sector || "unknown"}, stage: ${deal.stage || "unknown"}).
+
+Here are initial search results to guide you:
+${searchSummary}
+
+${candidateWebsite ? `Candidate website: ${candidateWebsite}` : ""}
+
+Navigate to the most promising URLs to verify. Once verified, call the extract_company_research function with the results.`;
+
+        const cuResponse = await fetch(`${OPENAI_BASE}/v1/responses`, {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${rawApiKey}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            model: "computer-use-preview",
+            tools: [
+              {
+                type: "computer_use_preview",
+                display_width: 1024,
+                display_height: 768,
+                environment: "browser",
+              },
+              {
+                type: "function",
+                name: "extract_company_research",
+                description: "Extract verified company research data.",
+                parameters: {
+                  type: "object",
+                  properties: {
+                    website: {
+                      type: ["string", "null"],
+                      description: "Official company website URL",
+                    },
+                    linkedin_url: {
+                      type: ["string", "null"],
+                      description: "LinkedIn company page URL",
+                    },
+                  },
+                  required: ["website", "linkedin_url"],
+                  additionalProperties: false,
+                },
+              },
+            ],
+            instructions: "You are a precise research analyst. Browse to verify company information. When confident, call extract_company_research.",
+            input: [{ role: "user", content: cuPrompt }],
+            truncation: "auto",
+          }),
+        });
+
+        if (!cuResponse.ok) {
+          const errText = await cuResponse.text();
+          console.error("Computer Use API error:", cuResponse.status, errText);
+          throw new Error(`Computer Use API error [${cuResponse.status}]`);
+        }
+
+        const cuResult = await cuResponse.json();
+        console.log("Computer Use response output length:", cuResult.output?.length);
+
+        // Find the function call in the output items
+        const funcCall = cuResult.output?.find(
+          (item: any) => item.type === "function_call" && item.name === "extract_company_research"
+        );
+
+        if (funcCall) {
+          research = JSON.parse(funcCall.arguments);
+          console.log("Computer Use extraction:", JSON.stringify(research));
+        } else {
+          // Fallback: try to extract from any text output
+          console.warn("No function call in Computer Use response, falling back to heuristic");
+          research = {
+            website: candidateWebsite || null,
+            linkedin_url: searchResults.find((r: any) => r.url?.includes("linkedin.com/company"))?.url || null,
+          };
+        }
+      } else {
+        // Standard LLM tool-calling path
+        const researchPrompt = `You are a VC research analyst. Based on the following search results and website content, extract accurate company information.
 
 COMPANY NAME: ${deal.name}
 SECTOR: ${deal.sector}
@@ -183,66 +267,67 @@ ${websiteContent ? `WEBSITE CONTENT:\n${websiteContent}` : ""}
 
 Extract the company's official website URL and LinkedIn company page URL using the extract_company_research tool. Only return URLs you are confident about. Return null for any field you cannot verify.`;
 
-      const aiHeaders: Record<string, string> = { "Content-Type": "application/json" };
-      if (config.isSapinsapin) {
-        aiHeaders["X-API-Key"] = rawApiKey;
-      } else {
-        aiHeaders["Authorization"] = `Bearer ${rawApiKey}`;
-      }
+        const aiHeaders: Record<string, string> = { "Content-Type": "application/json" };
+        if (config.isSapinsapin) {
+          aiHeaders["X-API-Key"] = rawApiKey;
+        } else {
+          aiHeaders["Authorization"] = `Bearer ${rawApiKey}`;
+        }
 
-      const aiResponse = await fetch(`${config.baseUrl}/v1/chat/completions`, {
-        method: "POST",
-        headers: aiHeaders,
-        body: JSON.stringify({
-          model: config.modelName,
-          messages: [
-            { role: "system", content: "You are a precise research analyst. Only return verified information." },
-            { role: "user", content: researchPrompt },
-          ],
-          tools: [
-            {
-              type: "function",
-              function: {
-                name: "extract_company_research",
-                description: "Extract verified company research data from search results.",
-                parameters: {
-                  type: "object",
-                  properties: {
-                    website: {
-                      type: ["string", "null"],
-                      description: "Official company website URL (e.g. https://company.com)",
+        const aiResponse = await fetch(`${config.baseUrl}/v1/chat/completions`, {
+          method: "POST",
+          headers: aiHeaders,
+          body: JSON.stringify({
+            model: config.modelName,
+            messages: [
+              { role: "system", content: "You are a precise research analyst. Only return verified information." },
+              { role: "user", content: researchPrompt },
+            ],
+            tools: [
+              {
+                type: "function",
+                function: {
+                  name: "extract_company_research",
+                  description: "Extract verified company research data from search results.",
+                  parameters: {
+                    type: "object",
+                    properties: {
+                      website: {
+                        type: ["string", "null"],
+                        description: "Official company website URL (e.g. https://company.com)",
+                      },
+                      linkedin_url: {
+                        type: ["string", "null"],
+                        description: "LinkedIn company page URL (e.g. https://linkedin.com/company/company-name)",
+                      },
                     },
-                    linkedin_url: {
-                      type: ["string", "null"],
-                      description: "LinkedIn company page URL (e.g. https://linkedin.com/company/company-name)",
-                    },
+                    required: ["website", "linkedin_url"],
+                    additionalProperties: false,
                   },
-                  required: ["website", "linkedin_url"],
-                  additionalProperties: false,
                 },
               },
-            },
-          ],
-          tool_choice: { type: "function", function: { name: "extract_company_research" } },
-        }),
-      });
+            ],
+            tool_choice: { type: "function", function: { name: "extract_company_research" } },
+          }),
+        });
 
-      if (!aiResponse.ok) {
-        const errText = await aiResponse.text();
-        console.error("AI API error:", aiResponse.status, errText);
-        throw new Error(`AI API error [${aiResponse.status}]`);
+        if (!aiResponse.ok) {
+          const errText = await aiResponse.text();
+          console.error("AI API error:", aiResponse.status, errText);
+          throw new Error(`AI API error [${aiResponse.status}]`);
+        }
+
+        const aiResult = await aiResponse.json();
+        const toolCall = aiResult.choices?.[0]?.message?.tool_calls?.[0];
+
+        if (!toolCall) {
+          console.error("No tool call in response:", JSON.stringify(aiResult));
+          throw new Error("No structured output from AI");
+        }
+
+        research = JSON.parse(toolCall.function.arguments);
+        console.log("Custom agent extraction:", JSON.stringify(research));
       }
-
-      const aiResult = await aiResponse.json();
-      const toolCall = aiResult.choices?.[0]?.message?.tool_calls?.[0];
-
-      if (!toolCall) {
-        console.error("No tool call in response:", JSON.stringify(aiResult));
-        throw new Error("No structured output from AI");
-      }
-
-      research = JSON.parse(toolCall.function.arguments);
-      console.log("Custom agent extraction:", JSON.stringify(research));
     }
 
     // Update deal with research results
