@@ -190,7 +190,7 @@ DEAL CONTEXT:
             content: `Generate an investment memo for the following deal.\n\n${dealContext}\n\nDECK CONTENT:\n${deckContent || "No deck content available."}`,
           },
         ],
-        max_tokens: 4096,
+        max_completion_tokens: 4096,
       }),
     });
 
