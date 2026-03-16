@@ -85,7 +85,7 @@ Deno.serve(async (req) => {
       .eq("user_id", user.id)
       .single();
 
-    const provider = (settings as any)?.deep_research_provider ?? "custom";
+    const provider = "firecrawl";
     const aiModel = settings?.ai_model ?? "gpt-oss-202b";
 
     // Mark as researching
