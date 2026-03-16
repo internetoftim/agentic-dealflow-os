@@ -1,0 +1,1 @@
+ALTER TABLE public.user_settings ADD COLUMN memo_prompt text DEFAULT NULL;

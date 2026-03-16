@@ -162,6 +162,7 @@ export type Database = {
           google_provider_refresh_token: string | null
           google_provider_token: string | null
           id: string
+          memo_prompt: string | null
           naming_mode: string | null
           naming_pattern: string | null
           spam_filter_enabled: boolean | null
@@ -178,6 +179,7 @@ export type Database = {
           google_provider_refresh_token?: string | null
           google_provider_token?: string | null
           id?: string
+          memo_prompt?: string | null
           naming_mode?: string | null
           naming_pattern?: string | null
           spam_filter_enabled?: boolean | null
@@ -194,6 +196,7 @@ export type Database = {
           google_provider_refresh_token?: string | null
           google_provider_token?: string | null
           id?: string
+          memo_prompt?: string | null
           naming_mode?: string | null
           naming_pattern?: string | null
           spam_filter_enabled?: boolean | null
