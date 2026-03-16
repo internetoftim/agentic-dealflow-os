@@ -169,7 +169,6 @@ export default function DealWorkspace() {
                 const currentIndex = WORKFLOW_STEPS.findIndex(s => s.key === activeDeal.status);
                 const isCompleted = currentIndex > stepIndex;
                 const isActive = activeDeal.status === step.key;
-                const isPending = currentIndex < stepIndex;
 
                 return (
                   <div key={step.key} className="flex items-center gap-2">
@@ -188,6 +187,16 @@ export default function DealWorkspace() {
                   </div>
                 );
               })}
+              <Button
+                variant="outline"
+                size="sm"
+                className="mt-2 h-7 text-[11px] gap-1 px-2 w-fit"
+                onClick={() => activeDeal && pauseDeal.mutate(activeDeal.id)}
+                disabled={pauseDeal.isPending}
+              >
+                {pauseDeal.isPending ? <Loader2 className="h-3 w-3 animate-spin" /> : <Pause className="h-3 w-3" />}
+                Stop
+              </Button>
             </div>
           </div>
         )}

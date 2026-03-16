@@ -98,18 +98,18 @@ function WorkflowProgress({ deal, onPause, onResume, isPausing, isResuming }: {
             disabled={isPausing}
           >
             {isPausing ? <Loader2 className="h-3 w-3 animate-spin" /> : <Pause className="h-3 w-3" />}
-            Pause
+            Stop
           </Button>
         ) : (
           <Button
-            variant="default"
+            variant="outline"
             size="sm"
-            className="h-7 text-[11px] gap-1 px-2"
-            onClick={(e) => { e.stopPropagation(); onResume(); }}
-            disabled={isResuming}
+            className="h-7 text-[11px] gap-1 px-2 opacity-50 cursor-not-allowed"
+            disabled
           >
-            {isResuming ? <Loader2 className="h-3 w-3 animate-spin" /> : <Play className="h-3 w-3" />}
+            <Play className="h-3 w-3" />
             Resume
+            <span className="ml-1 text-[9px] rounded bg-muted px-1 py-0.5 text-muted-foreground">Soon</span>
           </Button>
         )}
       </div>
