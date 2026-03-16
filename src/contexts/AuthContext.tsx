@@ -95,6 +95,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         provider: "google",
         options: {
           scopes: "https://www.googleapis.com/auth/drive.file",
+          redirectTo: window.location.origin,
           queryParams: {
             access_type: "offline",
             prompt: "consent",
