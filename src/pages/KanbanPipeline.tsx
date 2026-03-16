@@ -77,19 +77,15 @@ function WorkflowProgress({ deal, onCancel, isCancelling }: {
               <div className="flex items-center justify-center w-4 h-4">
                 {isDone ? (
                   <Check className="h-3.5 w-3.5 text-success shrink-0" />
-                ) : isActive && !isPaused ? (
+                ) : isActive ? (
                   <Loader2 className="h-3.5 w-3.5 text-primary animate-spin shrink-0" />
-                ) : isActive && isPaused ? (
-                  <Pause className="h-3.5 w-3.5 text-warning shrink-0" />
                 ) : (
                   <Icon className="h-3.5 w-3.5 text-muted-foreground/30 shrink-0" />
                 )}
               </div>
               <span
                 className={`text-[11px] leading-none ${
-                  isActive && isPaused
-                    ? "text-warning font-semibold"
-                    : isActive
+                  isActive
                     ? "text-primary font-semibold"
                     : isDone
                     ? "text-success font-medium"
@@ -97,9 +93,8 @@ function WorkflowProgress({ deal, onCancel, isCancelling }: {
                 }`}
               >
                 {step.label}
-                {isActive && isPaused && " (paused)"}
               </span>
-              {isActive && !isPaused && (
+              {isActive && (
                 <div className="flex-1 h-1 rounded-full bg-muted overflow-hidden ml-1">
                   <div className="h-full bg-primary/60 rounded-full animate-pulse w-2/3" />
                 </div>
@@ -110,29 +105,16 @@ function WorkflowProgress({ deal, onCancel, isCancelling }: {
       </div>
 
       <div className="mt-2.5 flex gap-1.5">
-        {!isPaused ? (
-          <Button
-            variant="outline"
-            size="sm"
-            className="h-7 text-[11px] gap-1 px-2"
-            onClick={(e) => { e.stopPropagation(); onPause(); }}
-            disabled={isPausing}
-          >
-            {isPausing ? <Loader2 className="h-3 w-3 animate-spin" /> : <Pause className="h-3 w-3" />}
-            Stop
-          </Button>
-        ) : (
-          <Button
-            variant="outline"
-            size="sm"
-            className="h-7 text-[11px] gap-1 px-2 opacity-50 cursor-not-allowed"
-            disabled
-          >
-            <Play className="h-3 w-3" />
-            Resume
-            <span className="ml-1 text-[9px] rounded bg-muted px-1 py-0.5 text-muted-foreground">Soon</span>
-          </Button>
-        )}
+        <Button
+          variant="outline"
+          size="sm"
+          className="h-7 text-[11px] gap-1 px-2"
+          onClick={(e) => { e.stopPropagation(); onCancel(); }}
+          disabled={isCancelling}
+        >
+          {isCancelling ? <Loader2 className="h-3 w-3 animate-spin" /> : <Pause className="h-3 w-3" />}
+          Stop
+        </Button>
       </div>
     </div>
   );
@@ -141,11 +123,11 @@ function WorkflowProgress({ deal, onCancel, isCancelling }: {
 function DealCard({ deal }: { deal: Deal }) {
   const source = sourceConfig[deal.source] ?? sourceConfig.manual;
   const isProcessing = PROCESSING_STATUSES.includes(deal.status);
-  const isPaused = deal.status === "paused";
-  const showWorkflow = isProcessing || isPaused;
+  const isQueued = deal.status === "queued";
+  const isCancelled = deal.status === "cancelled";
+  const showWorkflow = isProcessing || isQueued || isCancelled;
 
-  const pauseMutation = usePauseDeal();
-  const resumeMutation = useResumeDeal();
+  const cancelMutation = useCancelDeal();
 
   return (
     <div className="rounded-lg border border-border bg-card p-3.5 shadow-surface hover:shadow-surface-md transition-shadow cursor-pointer group">
@@ -159,7 +141,7 @@ function DealCard({ deal }: { deal: Deal }) {
             <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-success" />
           </span>
         )}
-        {isPaused && (
+        {isQueued && (
           <span className="relative flex h-2.5 w-2.5 shrink-0 mt-1">
             <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-warning" />
           </span>
@@ -172,10 +154,8 @@ function DealCard({ deal }: { deal: Deal }) {
       {showWorkflow && (
         <WorkflowProgress
           deal={deal}
-          onPause={() => pauseMutation.mutate(deal.id)}
-          onResume={() => resumeMutation.mutate({ dealId: deal.id, pausedAtStep: deal.paused_at_step! })}
-          isPausing={pauseMutation.isPending}
-          isResuming={resumeMutation.isPending}
+          onCancel={() => cancelMutation.mutate(deal.id)}
+          isCancelling={cancelMutation.isPending}
         />
       )}
     </div>
