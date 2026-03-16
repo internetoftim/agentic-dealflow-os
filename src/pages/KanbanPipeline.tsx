@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 
 const columns = [
   { key: "inbox", title: "Inbox" },
-  { key: "processing", title: "Processing", matchFn: (s: string) => ["uploading", "converting", "compressing", "extracting", "searching-website", "syncing", "paused"].includes(s) },
+  { key: "processing", title: "Processing", matchFn: (s: string) => [...PROCESSING_STATUSES, "queued", "cancelled"].includes(s) },
   { key: "memo-ready", title: "Memo Ready" },
 ];
 
