@@ -87,22 +87,59 @@ async function setDealStatus(adminClient: any, dealId: string, status: string) {
     .eq("id", dealId);
 }
 
-/** Check if the deal has been paused by the user. If so, record the step and exit. */
-async function checkPaused(adminClient: any, dealId: string, currentStep: string): Promise<boolean> {
+/** Check if the deal has been cancelled/aborted by the user. If so, exit. */
+async function checkAborted(adminClient: any, dealId: string, currentStep: string): Promise<boolean> {
   const { data } = await adminClient
     .from("deals")
     .select("status")
     .eq("id", dealId)
     .single();
-  if (data?.status === "paused") {
-    await adminClient
-      .from("deals")
-      .update({ paused_at_step: currentStep, updated_at: new Date().toISOString() })
-      .eq("id", dealId);
-    console.log(`Deal ${dealId} paused at step: ${currentStep}`);
+  if (data?.status === "cancelled") {
+    console.log(`Deal ${dealId} was cancelled at step: ${currentStep}`);
     return true;
   }
   return false;
+}
+
+/** After a job finishes or is cancelled, check if there's a queued deal for this user and start it. */
+async function processNextQueued(adminClient: any, userId: string, supabaseUrl: string, supabaseServiceKey: string) {
+  const { data: queued } = await adminClient
+    .from("deals")
+    .select("id")
+    .eq("user_id", userId)
+    .eq("status", "queued")
+    .order("created_at", { ascending: true })
+    .limit(1);
+  
+  if (queued && queued.length > 0) {
+    const nextDeal = queued[0];
+    // Get the source to find storage path
+    const { data: sources } = await adminClient
+      .from("sources")
+      .select("storage_path")
+      .eq("deal_id", nextDeal.id)
+      .limit(1);
+    const storagePath = sources?.[0]?.storage_path;
+    if (!storagePath) return;
+
+    // Update status from queued to uploading
+    await adminClient.from("deals").update({ status: "uploading", updated_at: new Date().toISOString() }).eq("id", nextDeal.id);
+
+    // Fire process-deck for the queued deal
+    try {
+      await fetch(`${supabaseUrl}/functions/v1/process-deck`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${supabaseServiceKey}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ dealId: nextDeal.id, storagePath }),
+      });
+      console.log(`Started queued deal: ${nextDeal.id}`);
+    } catch (e) {
+      console.warn("Failed to start queued deal:", e);
+    }
+  }
 }
 
 /** Extract text from a Google Slides presentation via the Slides API. */
