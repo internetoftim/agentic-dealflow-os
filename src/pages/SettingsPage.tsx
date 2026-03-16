@@ -350,13 +350,14 @@ export default function SettingsPage() {
       </section>
 
       {/* Firm Deal Desk */}
-      <section className="mb-8">
+      <section className="mb-8 opacity-40 pointer-events-none select-none">
         <h2 className="text-sm font-semibold text-foreground mb-4 flex items-center gap-2">
           <Shield className="h-4 w-4 text-muted-foreground" />
           Firm Deal Desk
+          <span className="ml-auto text-[10px] font-medium uppercase tracking-wider text-muted-foreground bg-muted rounded px-1.5 py-0.5">Coming Soon</span>
         </h2>
         <div className="rounded-lg border border-border bg-card p-5 space-y-4">
-          <button className="flex items-center gap-2 rounded-md border border-border px-4 py-2.5 text-sm font-medium hover:bg-accent transition-colors">
+          <button className="flex items-center gap-2 rounded-md border border-border px-4 py-2.5 text-sm font-medium" disabled>
             <HardDrive className="h-4 w-4 text-muted-foreground" />
             Connect Shared Inbox
           </button>
@@ -365,15 +366,15 @@ export default function SettingsPage() {
               <p className="text-sm text-foreground">Enable AI Spam & Relevance Filtering</p>
               <p className="text-xs text-muted-foreground">AI Gatekeeper blocks vendor emails</p>
             </div>
-            <Toggle checked={spamFilter} onChange={setSpamFilter} />
+            <Toggle checked={spamFilter} onChange={() => {}} />
           </div>
           <div className="flex gap-6 pt-2">
             <div>
-              <span className="text-2xl font-semibold text-foreground">142</span>
+              <span className="text-2xl font-semibold text-foreground">—</span>
               <p className="text-xs text-muted-foreground">Pitches Processed</p>
             </div>
             <div>
-              <span className="text-2xl font-semibold text-foreground">89</span>
+              <span className="text-2xl font-semibold text-foreground">—</span>
               <p className="text-xs text-muted-foreground">Spam Blocked</p>
             </div>
           </div>
