@@ -10,6 +10,8 @@ const quickActions = ["Extract Cap Table", "Calculate Burn Rate", "Team Backgrou
 export default function DealWorkspace() {
   const [activeTab, setActiveTab] = useState<"chat" | "data" | "memo">("chat");
   const [chatInput, setChatInput] = useState("");
+  const [docSendUrl, setDocSendUrl] = useState("");
+  const [selectedDealId, setSelectedDealId] = useState<string | undefined>();
   const [selectedDealId, setSelectedDealId] = useState<string | undefined>();
   const chatEndRef = useRef<HTMLDivElement>(null);
 
