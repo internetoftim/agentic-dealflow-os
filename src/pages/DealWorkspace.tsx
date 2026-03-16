@@ -1,6 +1,7 @@
 import { useState, useCallback, useRef, useEffect } from "react";
-import { Upload, Link, Cog, Check, Search, Send, FileText, Globe, Layers, Square, Linkedin, Loader2, FileUp, CircleDashed, CircleCheck, Circle } from "lucide-react";
-import { useDeals, useSources, useCreateDealWithUpload, useProcessDocsend, WORKFLOW_STEPS, type WorkflowStatus } from "@/hooks/useDeals";
+import { Upload, Link, Cog, Check, Search, Send, FileText, Globe, Layers, Square, Linkedin, Loader2, FileUp, CircleDashed, CircleCheck, Circle, Pause } from "lucide-react";
+import { useDeals, useSources, useCreateDealWithUpload, useProcessDocsend, usePauseDeal, WORKFLOW_STEPS, type WorkflowStatus } from "@/hooks/useDeals";
+import { Button } from "@/components/ui/button";
 import { useDealChat } from "@/hooks/useDealChat";
 import { useGenerateMemo } from "@/hooks/useGenerateMemo";
 import { toast } from "sonner";
