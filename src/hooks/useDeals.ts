@@ -34,6 +34,9 @@ export interface Deal {
   updated_at: string;
 }
 
+/** Active processing statuses (not terminal) */
+export const PROCESSING_STATUSES = ["uploading", "converting", "compressing", "extracting", "searching-website", "syncing"];
+
 /** Workflow steps in order */
 export const WORKFLOW_STEPS = [
   { key: "uploading", label: "Uploading" },
