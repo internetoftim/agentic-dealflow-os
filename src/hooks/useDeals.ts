@@ -132,6 +132,14 @@ export function useCreateDealWithUpload() {
     }) => {
       if (!user) throw new Error("Not authenticated");
 
+      // Check if there's already an active job for this user
+      const { data: activeDeals } = await supabase
+        .from("deals")
+        .select("id")
+        .eq("user_id", user.id)
+        .in("status", PROCESSING_STATUSES);
+      const hasActiveJob = (activeDeals?.length ?? 0) > 0;
+
       // Check user's model preference
       const { data: settings } = await supabase
         .from("user_settings")
