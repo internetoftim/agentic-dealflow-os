@@ -280,13 +280,14 @@ export default function SettingsPage() {
       </section>
 
       {/* Workspace Auth */}
-      <section className="mb-8">
+      <section className="mb-8 opacity-40 pointer-events-none select-none">
         <h2 className="text-sm font-semibold text-foreground mb-4 flex items-center gap-2">
           <Mail className="h-4 w-4 text-muted-foreground" />
           Workspace Auth
+          <span className="ml-auto text-[10px] font-medium uppercase tracking-wider text-muted-foreground bg-muted rounded px-1.5 py-0.5">Coming Soon</span>
         </h2>
         <div className="rounded-lg border border-border bg-card p-5 space-y-4">
-          <button className="flex items-center gap-3 rounded-md border border-border px-4 py-2.5 text-sm font-medium hover:bg-accent transition-colors">
+          <button className="flex items-center gap-3 rounded-md border border-border px-4 py-2.5 text-sm font-medium" disabled>
             <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" alt="Google" className="h-4 w-4" />
             Connect Google Workspace
           </button>
@@ -295,14 +296,14 @@ export default function SettingsPage() {
               <p className="text-sm text-foreground">Listen to Gmail label: <code className="rounded bg-muted px-1.5 py-0.5 text-xs">deck</code></p>
               <p className="text-xs text-muted-foreground">Auto-ingest decks tagged with this label</p>
             </div>
-            <Toggle checked={gmailLabel} onChange={setGmailLabel} />
+            <Toggle checked={gmailLabel} onChange={() => {}} />
           </div>
           <div className="flex items-center justify-between">
             <div>
               <p className="text-sm text-foreground">Sync Memos to Drive</p>
               <p className="text-xs text-muted-foreground">Automatically upload completed memos</p>
             </div>
-            <Toggle checked={driveSync} onChange={setDriveSync} />
+            <Toggle checked={driveSync} onChange={() => {}} />
           </div>
         </div>
       </section>
