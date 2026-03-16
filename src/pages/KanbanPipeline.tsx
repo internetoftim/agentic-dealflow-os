@@ -27,7 +27,7 @@ const stepIcons: Record<string, React.ElementType> = {
   "memo-ready": Check,
 };
 
-const PROCESSING_STATUSES = ["uploading", "converting", "compressing", "extracting", "searching-website", "syncing"];
+
 
 function WorkflowProgress({ deal, onPause, onResume, isPausing, isResuming }: {
   deal: Deal;
