@@ -1,6 +1,6 @@
 import { useState, useCallback, useRef, useEffect } from "react";
 import { Upload, Link, Cog, Check, Search, Send, FileText, Globe, Layers, Square, Linkedin } from "lucide-react";
-import { useDeals, useSources, useCreateDealWithUpload } from "@/hooks/useDeals";
+import { useDeals, useSources, useCreateDealWithUpload, useProcessDocsend } from "@/hooks/useDeals";
 import { useDealChat } from "@/hooks/useDealChat";
 import { toast } from "sonner";
 import ReactMarkdown from "react-markdown";
@@ -10,12 +10,14 @@ const quickActions = ["Extract Cap Table", "Calculate Burn Rate", "Team Backgrou
 export default function DealWorkspace() {
   const [activeTab, setActiveTab] = useState<"chat" | "data" | "memo">("chat");
   const [chatInput, setChatInput] = useState("");
+  const [docSendUrl, setDocSendUrl] = useState("");
   const [selectedDealId, setSelectedDealId] = useState<string | undefined>();
   const chatEndRef = useRef<HTMLDivElement>(null);
 
   const { data: deals } = useDeals();
   const { data: sources } = useSources(selectedDealId);
   const createDeal = useCreateDealWithUpload();
+  const processDocsend = useProcessDocsend();
 
   const activeDeal = deals?.find((d) => d.id === selectedDealId) ?? deals?.[0];
   const { messages, isStreaming, send, stop } = useDealChat(activeDeal?.id);
@@ -64,6 +66,19 @@ export default function DealWorkspace() {
     [createDeal]
   );
 
+  const handleFetchUrl = useCallback(() => {
+    const trimmed = docSendUrl.trim();
+    if (!trimmed) return;
+    toast.promise(
+      processDocsend.mutateAsync(trimmed).then(() => setDocSendUrl("")),
+      {
+        loading: "Fetching deck from link…",
+        success: "Deal created from link!",
+        error: (err) => `Fetch failed: ${err.message}`,
+      }
+    );
+  }, [docSendUrl, processDocsend]);
+
   const tabs = [
     { key: "chat" as const, label: "Chat", icon: Send },
     { key: "data" as const, label: "Structured Data", icon: Layers },
@@ -96,10 +111,18 @@ export default function DealWorkspace() {
                 type="text"
                 placeholder="Paste DocSend / PandaDoc URL"
                 className="flex-1 text-xs bg-transparent outline-none placeholder:text-muted-foreground"
+                value={docSendUrl}
+                onChange={(e) => setDocSendUrl(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && handleFetchUrl()}
+                disabled={processDocsend.isPending}
               />
             </div>
-            <button className="px-3 py-2 rounded-md bg-primary text-primary-foreground text-xs font-medium hover:opacity-90 transition-opacity">
-              Fetch
+            <button
+              onClick={handleFetchUrl}
+              disabled={processDocsend.isPending || !docSendUrl.trim()}
+              className="px-3 py-2 rounded-md bg-primary text-primary-foreground text-xs font-medium hover:opacity-90 transition-opacity disabled:opacity-50"
+            >
+              {processDocsend.isPending ? "Fetching…" : "Fetch"}
             </button>
           </div>
         </div>

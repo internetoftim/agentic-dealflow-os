@@ -17,3 +17,6 @@ verify_jwt = false
 
 [functions.gmail-listener]
 verify_jwt = false
+
+[functions.process-docsend]
+verify_jwt = false
