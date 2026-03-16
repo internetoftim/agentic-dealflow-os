@@ -495,8 +495,9 @@ Deno.serve(async (req) => {
     const isLocalModel = model === "local-florence2";
 
     if (!shouldSkip("extracting")) {
-      if (await checkPaused(adminClient, dealId, "extracting")) {
-        return new Response(JSON.stringify({ success: true, paused: true, at: "extracting" }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      if (await checkAborted(adminClient, dealId, "extracting")) {
+        await processNextQueued(adminClient, userId, supabaseUrl, supabaseServiceKey);
+        return new Response(JSON.stringify({ success: true, cancelled: true, at: "extracting" }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
       }
       await setDealStatus(adminClient, dealId, "extracting");
 
