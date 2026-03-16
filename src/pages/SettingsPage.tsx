@@ -3,6 +3,7 @@ import { Sparkles, Check, Mail, HardDrive, Shield, Bot, Search, RotateCcw, Loade
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { toast } from "sonner";
+import { BookmarkletInstaller } from "@/components/BookmarkletInstaller";
 
 const DEFAULT_PATTERN = "<WEBSITE> deck <MonthYYYY> p<pages>.pdf";
 
