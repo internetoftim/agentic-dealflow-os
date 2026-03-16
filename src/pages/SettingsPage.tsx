@@ -3,6 +3,7 @@ import { Sparkles, Check, Mail, HardDrive, Shield, Bot, Search, RotateCcw, Loade
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { toast } from "sonner";
+import { BookmarkletInstaller } from "@/components/BookmarkletInstaller";
 
 const DEFAULT_PATTERN = "<WEBSITE> deck <MonthYYYY> p<pages>.pdf";
 
@@ -500,6 +501,12 @@ export default function SettingsPage() {
             </div>
           )}
         </div>
+      </section>
+
+      {/* DocSend Bookmarklet */}
+      <section className="mb-8">
+        <h2 className="text-sm font-semibold text-foreground mb-4">DocSend Ingestion</h2>
+        <BookmarkletInstaller />
       </section>
     </div>
   );
