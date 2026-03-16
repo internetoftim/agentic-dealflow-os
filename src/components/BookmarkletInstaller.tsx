@@ -93,7 +93,7 @@ function generateBookmarklet(appOrigin: string): string {
       var dataUrl = canvas.toDataURL('image/jpeg', 0.85);
       slides.push(dataUrl);
     } catch(e) {
-      alert('AgenticVC: Canvas is tainted (cross-origin restriction). Cloud fallback required.');
+      alert('EasyVC: Canvas is tainted (cross-origin restriction). Cloud fallback required.');
       sendToRelay();
       return;
     }
