@@ -14,10 +14,10 @@ import {
 } from "@/components/ui/sidebar";
 
 const navItems = [
-  { title: "Deal Workspace", url: "/", icon: FileSearch },
-  { title: "Kanban Pipeline", url: "/pipeline", icon: LayoutDashboard },
-  { title: "Data Room", url: "/data-room", icon: FolderOpen },
-  { title: "Settings", url: "/settings", icon: Settings },
+  { title: "Deal Workspace", url: "/", icon: FileSearch, disabled: false },
+  { title: "Kanban Pipeline", url: "/pipeline", icon: LayoutDashboard, disabled: false },
+  { title: "Data Room", url: "/data-room", icon: FolderOpen, disabled: true },
+  { title: "Settings", url: "/settings", icon: Settings, disabled: false },
 ];
 
 export function AppSidebar() {
@@ -42,16 +42,28 @@ export function AppSidebar() {
             <SidebarMenu>
               {navItems.map((item) => (
                 <SidebarMenuItem key={item.title}>
-                  <SidebarMenuButton asChild>
-                    <NavLink
-                      to={item.url}
-                      end={item.url === "/"}
-                      className="hover:bg-accent"
-                      activeClassName="bg-accent text-foreground font-medium"
-                    >
-                      <item.icon className="mr-2 h-4 w-4" />
-                      {!collapsed && <span>{item.title}</span>}
-                    </NavLink>
+                  <SidebarMenuButton asChild={!item.disabled}>
+                    {item.disabled ? (
+                      <span className="flex items-center opacity-40 cursor-not-allowed">
+                        <item.icon className="mr-2 h-4 w-4" />
+                        {!collapsed && (
+                          <>
+                            <span>{item.title}</span>
+                            <span className="ml-auto text-[9px] font-medium uppercase tracking-wider text-muted-foreground bg-muted rounded px-1 py-0.5">Soon</span>
+                          </>
+                        )}
+                      </span>
+                    ) : (
+                      <NavLink
+                        to={item.url}
+                        end={item.url === "/"}
+                        className="hover:bg-accent"
+                        activeClassName="bg-accent text-foreground font-medium"
+                      >
+                        <item.icon className="mr-2 h-4 w-4" />
+                        {!collapsed && <span>{item.title}</span>}
+                      </NavLink>
+                    )}
                   </SidebarMenuButton>
                 </SidebarMenuItem>
               ))}
