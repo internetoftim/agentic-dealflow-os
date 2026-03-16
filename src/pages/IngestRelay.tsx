@@ -23,7 +23,7 @@ const STATUS_CONFIG: Record<RelayState, { icon: React.ReactNode; text: string; s
     sub: "Sending slides to the ingestion edge function.",
   },
   success: {
-    icon: <CheckCircle className="h-16 w-16 text-green-500" />,
+    icon: <CheckCircle className="h-16 w-16 text-primary" />,
     text: "Ingestion complete!",
     sub: "Redirecting to Deal Workspace…",
   },
