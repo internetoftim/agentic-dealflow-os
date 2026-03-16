@@ -57,6 +57,7 @@ export default function SettingsPage() {
   const [aiModel, setAiModel] = useState("gpt-oss-202b");
   const [deepResearchProvider, setDeepResearchProvider] = useState<"custom" | "firecrawl">("custom");
   const [driveFolder, setDriveFolder] = useState("WAITING ROOM");
+  const [memoPrompt, setMemoPrompt] = useState(DEFAULT_MEMO_PROMPT);
   const [savingModel, setSavingModel] = useState(false);
 
   // Load settings from DB
