@@ -87,22 +87,59 @@ async function setDealStatus(adminClient: any, dealId: string, status: string) {
     .eq("id", dealId);
 }
 
-/** Check if the deal has been paused by the user. If so, record the step and exit. */
-async function checkPaused(adminClient: any, dealId: string, currentStep: string): Promise<boolean> {
+/** Check if the deal has been cancelled/aborted by the user. If so, exit. */
+async function checkAborted(adminClient: any, dealId: string, currentStep: string): Promise<boolean> {
   const { data } = await adminClient
     .from("deals")
     .select("status")
     .eq("id", dealId)
     .single();
-  if (data?.status === "paused") {
-    await adminClient
-      .from("deals")
-      .update({ paused_at_step: currentStep, updated_at: new Date().toISOString() })
-      .eq("id", dealId);
-    console.log(`Deal ${dealId} paused at step: ${currentStep}`);
+  if (data?.status === "cancelled") {
+    console.log(`Deal ${dealId} was cancelled at step: ${currentStep}`);
     return true;
   }
   return false;
+}
+
+/** After a job finishes or is cancelled, check if there's a queued deal for this user and start it. */
+async function processNextQueued(adminClient: any, userId: string, supabaseUrl: string, supabaseServiceKey: string) {
+  const { data: queued } = await adminClient
+    .from("deals")
+    .select("id")
+    .eq("user_id", userId)
+    .eq("status", "queued")
+    .order("created_at", { ascending: true })
+    .limit(1);
+  
+  if (queued && queued.length > 0) {
+    const nextDeal = queued[0];
+    // Get the source to find storage path
+    const { data: sources } = await adminClient
+      .from("sources")
+      .select("storage_path")
+      .eq("deal_id", nextDeal.id)
+      .limit(1);
+    const storagePath = sources?.[0]?.storage_path;
+    if (!storagePath) return;
+
+    // Update status from queued to uploading
+    await adminClient.from("deals").update({ status: "uploading", updated_at: new Date().toISOString() }).eq("id", nextDeal.id);
+
+    // Fire process-deck for the queued deal
+    try {
+      await fetch(`${supabaseUrl}/functions/v1/process-deck`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${supabaseServiceKey}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ dealId: nextDeal.id, storagePath }),
+      });
+      console.log(`Started queued deal: ${nextDeal.id}`);
+    } catch (e) {
+      console.warn("Failed to start queued deal:", e);
+    }
+  }
 }
 
 /** Extract text from a Google Slides presentation via the Slides API. */
@@ -382,8 +419,9 @@ Deno.serve(async (req) => {
     let pdfStoragePath = storagePath;
     let slidesApiText = ""; // text extracted via Google Slides API during conversion
     if (isPptx && !shouldSkip("converting")) {
-      if (await checkPaused(adminClient, dealId, "converting")) {
-        return new Response(JSON.stringify({ success: true, paused: true, at: "converting" }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      if (await checkAborted(adminClient, dealId, "converting")) {
+        await processNextQueued(adminClient, userId, supabaseUrl, supabaseServiceKey);
+        return new Response(JSON.stringify({ success: true, cancelled: true, at: "converting" }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
       }
       await setDealStatus(adminClient, dealId, "converting");
 
@@ -421,8 +459,9 @@ Deno.serve(async (req) => {
     let compressedPdf: Uint8Array;
     let pageCount: number;
     if (!shouldSkip("compressing")) {
-      if (await checkPaused(adminClient, dealId, "compressing")) {
-        return new Response(JSON.stringify({ success: true, paused: true, at: "compressing" }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      if (await checkAborted(adminClient, dealId, "compressing")) {
+        await processNextQueued(adminClient, userId, supabaseUrl, supabaseServiceKey);
+        return new Response(JSON.stringify({ success: true, cancelled: true, at: "compressing" }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
       }
       await setDealStatus(adminClient, dealId, "compressing");
 
@@ -456,8 +495,9 @@ Deno.serve(async (req) => {
     const isLocalModel = model === "local-florence2";
 
     if (!shouldSkip("extracting")) {
-      if (await checkPaused(adminClient, dealId, "extracting")) {
-        return new Response(JSON.stringify({ success: true, paused: true, at: "extracting" }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      if (await checkAborted(adminClient, dealId, "extracting")) {
+        await processNextQueued(adminClient, userId, supabaseUrl, supabaseServiceKey);
+        return new Response(JSON.stringify({ success: true, cancelled: true, at: "extracting" }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
       }
       await setDealStatus(adminClient, dealId, "extracting");
 
@@ -648,8 +688,9 @@ Deno.serve(async (req) => {
 
     // --- STEP 4: Smart website search — extract company name, search, verify URL ---
     if (!shouldSkip("searching-website")) {
-      if (await checkPaused(adminClient, dealId, "searching-website")) {
-        return new Response(JSON.stringify({ success: true, paused: true, at: "searching-website" }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      if (await checkAborted(adminClient, dealId, "searching-website")) {
+        await processNextQueued(adminClient, userId, supabaseUrl, supabaseServiceKey);
+        return new Response(JSON.stringify({ success: true, cancelled: true, at: "searching-website" }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
       }
 
       const { data: currentDeal } = await adminClient.from("deals").select("website, name, sector, stage").eq("id", dealId).single();
@@ -767,8 +808,9 @@ Deno.serve(async (req) => {
 
     // --- STEP 5: Sync to Google Drive ---
     if (!shouldSkip("syncing")) {
-      if (await checkPaused(adminClient, dealId, "syncing")) {
-        return new Response(JSON.stringify({ success: true, paused: true, at: "syncing" }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      if (await checkAborted(adminClient, dealId, "syncing")) {
+        await processNextQueued(adminClient, userId, supabaseUrl, supabaseServiceKey);
+        return new Response(JSON.stringify({ success: true, cancelled: true, at: "syncing" }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
       }
       await setDealStatus(adminClient, dealId, "syncing");
 
@@ -793,6 +835,9 @@ Deno.serve(async (req) => {
 
     // --- STEP 6: Final status ---
     await setDealStatus(adminClient, dealId, "memo-ready");
+
+    // Process next queued deal for this user
+    await processNextQueued(adminClient, userId, supabaseUrl, supabaseServiceKey);
 
     return new Response(
       JSON.stringify({ success: true, converted: isPptx }),

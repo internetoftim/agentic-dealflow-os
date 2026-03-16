@@ -1,11 +1,11 @@
-import { useDeals, usePauseDeal, useResumeDeal, type Deal, WORKFLOW_STEPS } from "@/hooks/useDeals";
+import { useDeals, useCancelDeal, type Deal, WORKFLOW_STEPS, PROCESSING_STATUSES } from "@/hooks/useDeals";
 import { sourceConfig as mockSourceConfig } from "@/data/mockDeals";
-import { Loader2, Check, Globe, Upload, FileArchive, FileSearch, CloudUpload, ArrowRightLeft, Pause, Play } from "lucide-react";
+import { Loader2, Check, Globe, Upload, FileArchive, FileSearch, CloudUpload, ArrowRightLeft, Pause, Play, Clock } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
 const columns = [
   { key: "inbox", title: "Inbox" },
-  { key: "processing", title: "Processing", matchFn: (s: string) => ["uploading", "converting", "compressing", "extracting", "searching-website", "syncing", "paused"].includes(s) },
+  { key: "processing", title: "Processing", matchFn: (s: string) => [...PROCESSING_STATUSES, "queued", "cancelled"].includes(s) },
   { key: "memo-ready", title: "Memo Ready" },
 ];
 
@@ -27,21 +27,42 @@ const stepIcons: Record<string, React.ElementType> = {
   "memo-ready": Check,
 };
 
-const PROCESSING_STATUSES = ["uploading", "converting", "compressing", "extracting", "searching-website", "syncing"];
 
-function WorkflowProgress({ deal, onPause, onResume, isPausing, isResuming }: {
+
+function WorkflowProgress({ deal, onCancel, isCancelling }: {
   deal: Deal;
-  onPause: () => void;
-  onResume: () => void;
-  isPausing: boolean;
-  isResuming: boolean;
+  onCancel: () => void;
+  isCancelling: boolean;
 }) {
-  const isPaused = deal.status === "paused";
-  const activeStatus = isPaused ? deal.paused_at_step : deal.status;
+  const isQueued = deal.status === "queued";
+  const isCancelled = deal.status === "cancelled";
+  const activeStatus = deal.status;
   const activeSteps = WORKFLOW_STEPS.filter((s) => s.key !== "memo-ready");
   const currentIdx = activeSteps.findIndex((s) => s.key === activeStatus);
 
-  if (currentIdx === -1 && !isPaused) return null;
+  if (isQueued) {
+    return (
+      <div className="mt-3">
+        <div className="flex items-center gap-2 text-muted-foreground">
+          <Clock className="h-3.5 w-3.5" />
+          <span className="text-[11px] font-medium">Queued — waiting for active job</span>
+        </div>
+      </div>
+    );
+  }
+
+  if (isCancelled) {
+    return (
+      <div className="mt-3">
+        <div className="flex items-center gap-2 text-destructive">
+          <Pause className="h-3.5 w-3.5" />
+          <span className="text-[11px] font-medium">Cancelled</span>
+        </div>
+      </div>
+    );
+  }
+
+  if (currentIdx === -1) return null;
 
   return (
     <div className="mt-3">
@@ -56,19 +77,15 @@ function WorkflowProgress({ deal, onPause, onResume, isPausing, isResuming }: {
               <div className="flex items-center justify-center w-4 h-4">
                 {isDone ? (
                   <Check className="h-3.5 w-3.5 text-success shrink-0" />
-                ) : isActive && !isPaused ? (
+                ) : isActive ? (
                   <Loader2 className="h-3.5 w-3.5 text-primary animate-spin shrink-0" />
-                ) : isActive && isPaused ? (
-                  <Pause className="h-3.5 w-3.5 text-warning shrink-0" />
                 ) : (
                   <Icon className="h-3.5 w-3.5 text-muted-foreground/30 shrink-0" />
                 )}
               </div>
               <span
                 className={`text-[11px] leading-none ${
-                  isActive && isPaused
-                    ? "text-warning font-semibold"
-                    : isActive
+                  isActive
                     ? "text-primary font-semibold"
                     : isDone
                     ? "text-success font-medium"
@@ -76,9 +93,8 @@ function WorkflowProgress({ deal, onPause, onResume, isPausing, isResuming }: {
                 }`}
               >
                 {step.label}
-                {isActive && isPaused && " (paused)"}
               </span>
-              {isActive && !isPaused && (
+              {isActive && (
                 <div className="flex-1 h-1 rounded-full bg-muted overflow-hidden ml-1">
                   <div className="h-full bg-primary/60 rounded-full animate-pulse w-2/3" />
                 </div>
@@ -89,29 +105,16 @@ function WorkflowProgress({ deal, onPause, onResume, isPausing, isResuming }: {
       </div>
 
       <div className="mt-2.5 flex gap-1.5">
-        {!isPaused ? (
-          <Button
-            variant="outline"
-            size="sm"
-            className="h-7 text-[11px] gap-1 px-2"
-            onClick={(e) => { e.stopPropagation(); onPause(); }}
-            disabled={isPausing}
-          >
-            {isPausing ? <Loader2 className="h-3 w-3 animate-spin" /> : <Pause className="h-3 w-3" />}
-            Stop
-          </Button>
-        ) : (
-          <Button
-            variant="outline"
-            size="sm"
-            className="h-7 text-[11px] gap-1 px-2 opacity-50 cursor-not-allowed"
-            disabled
-          >
-            <Play className="h-3 w-3" />
-            Resume
-            <span className="ml-1 text-[9px] rounded bg-muted px-1 py-0.5 text-muted-foreground">Soon</span>
-          </Button>
-        )}
+        <Button
+          variant="outline"
+          size="sm"
+          className="h-7 text-[11px] gap-1 px-2"
+          onClick={(e) => { e.stopPropagation(); onCancel(); }}
+          disabled={isCancelling}
+        >
+          {isCancelling ? <Loader2 className="h-3 w-3 animate-spin" /> : <Pause className="h-3 w-3" />}
+          Stop
+        </Button>
       </div>
     </div>
   );
@@ -120,11 +123,11 @@ function WorkflowProgress({ deal, onPause, onResume, isPausing, isResuming }: {
 function DealCard({ deal }: { deal: Deal }) {
   const source = sourceConfig[deal.source] ?? sourceConfig.manual;
   const isProcessing = PROCESSING_STATUSES.includes(deal.status);
-  const isPaused = deal.status === "paused";
-  const showWorkflow = isProcessing || isPaused;
+  const isQueued = deal.status === "queued";
+  const isCancelled = deal.status === "cancelled";
+  const showWorkflow = isProcessing || isQueued || isCancelled;
 
-  const pauseMutation = usePauseDeal();
-  const resumeMutation = useResumeDeal();
+  const cancelMutation = useCancelDeal();
 
   return (
     <div className="rounded-lg border border-border bg-card p-3.5 shadow-surface hover:shadow-surface-md transition-shadow cursor-pointer group">
@@ -138,7 +141,7 @@ function DealCard({ deal }: { deal: Deal }) {
             <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-success" />
           </span>
         )}
-        {isPaused && (
+        {isQueued && (
           <span className="relative flex h-2.5 w-2.5 shrink-0 mt-1">
             <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-warning" />
           </span>
@@ -151,10 +154,8 @@ function DealCard({ deal }: { deal: Deal }) {
       {showWorkflow && (
         <WorkflowProgress
           deal={deal}
-          onPause={() => pauseMutation.mutate(deal.id)}
-          onResume={() => resumeMutation.mutate({ dealId: deal.id, pausedAtStep: deal.paused_at_step! })}
-          isPausing={pauseMutation.isPending}
-          isResuming={resumeMutation.isPending}
+          onCancel={() => cancelMutation.mutate(deal.id)}
+          isCancelling={cancelMutation.isPending}
         />
       )}
     </div>

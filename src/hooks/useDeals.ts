@@ -34,6 +34,9 @@ export interface Deal {
   updated_at: string;
 }
 
+/** Active processing statuses (not terminal) */
+export const PROCESSING_STATUSES = ["uploading", "converting", "compressing", "extracting", "searching-website", "syncing"];
+
 /** Workflow steps in order */
 export const WORKFLOW_STEPS = [
   { key: "uploading", label: "Uploading" },
@@ -97,50 +100,15 @@ export function useSources(dealId?: string) {
   });
 }
 
-export function usePauseDeal() {
+export function useCancelDeal() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async (dealId: string) => {
       const { error } = await supabase
         .from("deals")
-        .update({ status: "paused" })
+        .update({ status: "cancelled" })
         .eq("id", dealId);
       if (error) throw error;
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["deals"] });
-    },
-  });
-}
-
-export function useResumeDeal() {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: async ({ dealId, pausedAtStep, storagePath }: { dealId: string; pausedAtStep: string; storagePath?: string }) => {
-      // First get the source to find the storage path
-      let path = storagePath;
-      if (!path) {
-        const { data: sources } = await supabase
-          .from("sources")
-          .select("storage_path")
-          .eq("deal_id", dealId)
-          .limit(1);
-        path = sources?.[0]?.storage_path ?? undefined;
-      }
-      if (!path) throw new Error("No storage path found for this deal");
-
-      // Set status back to the paused step so the edge function picks up
-      await supabase
-        .from("deals")
-        .update({ status: pausedAtStep, paused_at_step: null })
-        .eq("id", dealId);
-
-      // Re-invoke process-deck with resumeFrom
-      supabase.functions
-        .invoke("process-deck", {
-          body: { dealId, storagePath: path, resumeFrom: pausedAtStep },
-        })
-        .catch((e) => console.warn("Resume processing failed:", e));
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["deals"] });
@@ -164,6 +132,14 @@ export function useCreateDealWithUpload() {
     }) => {
       if (!user) throw new Error("Not authenticated");
 
+      // Check if there's already an active job for this user
+      const { data: activeDeals } = await supabase
+        .from("deals")
+        .select("id")
+        .eq("user_id", user.id)
+        .in("status", PROCESSING_STATUSES);
+      const hasActiveJob = (activeDeals?.length ?? 0) > 0;
+
       // Check user's model preference
       const { data: settings } = await supabase
         .from("user_settings")
@@ -172,19 +148,41 @@ export function useCreateDealWithUpload() {
         .single();
       const isLocalModel = settings?.ai_model === "local-florence2";
 
-      // 1. Create the deal with "uploading" status
+      // 1. Create the deal — if another job is active, set status to "queued"
+      const initialStatus = hasActiveJob ? "queued" : "uploading";
       const { data: deal, error: dealError } = await supabase
         .from("deals")
         .insert({
           user_id: user.id,
           name,
           source: "manual",
-          status: "uploading",
+          status: initialStatus,
           deck_size: `${(file.size / (1024 * 1024)).toFixed(1)}MB`,
         })
         .select()
         .single();
       if (dealError) throw dealError;
+
+      // If queued, still upload the file + create source but don't start processing
+      if (hasActiveJob) {
+        const storagePath = `${user.id}/${deal.id}/${file.name}`;
+        const { error: uploadError } = await supabase.storage
+          .from("decks")
+          .upload(storagePath, file);
+        if (uploadError) throw uploadError;
+
+        await supabase.from("sources").insert({
+          deal_id: deal.id,
+          user_id: user.id,
+          file_name: file.name,
+          original_size: `${(file.size / (1024 * 1024)).toFixed(1)}MB`,
+          storage_path: storagePath,
+          source_type: "upload",
+          processing_status: "queued",
+        });
+
+        return deal;
+      }
 
       // 2. Compress (PDF) or pass-through (PPTX)
       await supabase.from("deals").update({ status: "compressing" }).eq("id", deal.id);
@@ -235,7 +233,6 @@ export function useCreateDealWithUpload() {
       if (sourceError) throw sourceError;
 
       // 6. Trigger processing pipeline (fire-and-forget)
-      // Pass flag so edge function knows text was already extracted locally
       supabase.functions
         .invoke("process-deck", {
           body: {
