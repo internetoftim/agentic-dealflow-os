@@ -686,7 +686,7 @@ Deno.serve(async (req) => {
       }
     }
 
-    // --- STEP 4: Smart website search — extract company name, search, verify URL ---
+    // --- STEP 4: Smart website search via GPT-5 web search + Firecrawl fallback ---
     if (!shouldSkip("searching-website")) {
       if (await checkAborted(adminClient, dealId, "searching-website")) {
         await processNextQueued(adminClient, userId, supabaseUrl, supabaseServiceKey);
@@ -695,129 +695,169 @@ Deno.serve(async (req) => {
 
       const { data: currentDeal } = await adminClient.from("deals").select("website, name, sector, stage").eq("id", dealId).single();
 
-      // Get latest extracted text for context
-      const { data: sourceData } = await adminClient.from("sources")
-        .select("extracted_text")
-        .eq("deal_id", dealId)
-        .eq("user_id", userId)
-        .single();
-      const extractedContext = sourceData?.extracted_text ?? "";
-
-      if (firecrawlApiKey && currentDeal?.name) {
+      if (currentDeal?.name) {
         await setDealStatus(adminClient, dealId, "searching-website");
         await adminClient.from("deals").update({ website_searching: true }).eq("id", dealId);
 
-        try {
-          const companyName = currentDeal.name;
-          const sectorHint = currentDeal.sector && currentDeal.sector !== "Unknown" ? currentDeal.sector : "";
+        const companyName = currentDeal.name;
+        const sectorHint = currentDeal.sector && currentDeal.sector !== "Unknown" ? currentDeal.sector : "";
+        let verifiedWebsite: string | null = null;
+        let linkedinUrl: string | null = null;
 
-          // Build multiple search queries — from most specific to broadest
-          const searchQueries = [
-            `"${companyName}" official website`,
-            `${companyName} startup ${sectorHint}`.trim(),
-            `${companyName} company`,
-          ];
+        // --- PRIMARY: GPT-5 web search ---
+        if (openaiApiKey) {
+          try {
+            console.log(`GPT-5 web search for: ${companyName}`);
+            const searchPrompt = `Find the official company website and LinkedIn company page for "${companyName}"${sectorHint ? ` (${sectorHint} sector)` : ""}. This is a startup. Search the web and return the verified URLs. Do NOT guess — only return URLs you find in search results. Exclude aggregator sites like Crunchbase, PitchBook, etc.`;
 
-          // Excluded domains — aggregators, social, not company websites
-          const excludedDomains = [
-            "linkedin.com", "crunchbase.com", "google.com", "wikipedia.org",
-            "facebook.com", "twitter.com", "x.com", "instagram.com", "youtube.com",
-            "glassdoor.com", "indeed.com", "pitchbook.com", "bloomberg.com",
-            "techcrunch.com", "ycombinator.com", "reddit.com", "github.com",
-          ];
-          const isExcluded = (url: string) => excludedDomains.some((d) => url.includes(d));
+            const searchPayload = {
+              model: "gpt-5-search-api",
+              messages: [
+                { role: "system", content: "You are a research assistant. Find official company websites and LinkedIn pages. Use the find_company_urls tool to return results." },
+                { role: "user", content: searchPrompt },
+              ],
+              tools: [{
+                type: "function",
+                function: {
+                  name: "find_company_urls",
+                  description: "Return the verified company website and LinkedIn URLs found via web search.",
+                  parameters: {
+                    type: "object",
+                    properties: {
+                      website: { type: ["string", "null"], description: "The official company website URL (e.g. https://company.com). Null if not found." },
+                      linkedin_url: { type: ["string", "null"], description: "The LinkedIn company page URL. Null if not found." },
+                      confidence: { type: "number", description: "Confidence 0-100 that the website belongs to this specific company" },
+                    },
+                    required: ["website", "linkedin_url", "confidence"],
+                    additionalProperties: false,
+                  },
+                },
+              }],
+              tool_choice: { type: "function", function: { name: "find_company_urls" } },
+            };
 
-          let verifiedWebsite: string | null = null;
-          let linkedinUrl: string | null = null;
-          const companyNameLower = companyName.toLowerCase();
-          const seenUrls = new Set<string>();
-
-          // Try each query until we find a verified website
-          for (const searchQuery of searchQueries) {
-            if (verifiedWebsite) break;
-
-            console.log("Website search query:", searchQuery);
-            const searchResponse = await fetch("https://api.firecrawl.dev/v1/search", {
+            const searchRes = await fetch("https://api.openai.com/v1/chat/completions", {
               method: "POST",
-              headers: { Authorization: `Bearer ${firecrawlApiKey}`, "Content-Type": "application/json" },
-              body: JSON.stringify({ query: searchQuery, limit: 8 }),
+              headers: {
+                "Authorization": `Bearer ${openaiApiKey?.trim().replace(/[\r\n]/g, "")}`,
+                "Content-Type": "application/json",
+              },
+              body: JSON.stringify(searchPayload),
             });
 
-            if (!searchResponse.ok) {
-              console.warn(`Search query failed (${searchResponse.status}), trying next`);
-              continue;
-            }
+            if (searchRes.ok) {
+              const searchResult = await searchRes.json();
+              const toolCall = searchResult.choices?.[0]?.message?.tool_calls?.[0];
+              if (toolCall) {
+                const urls = JSON.parse(toolCall.function.arguments);
+                console.log("GPT-5 web search result:", JSON.stringify(urls));
 
-            const searchData = await searchResponse.json();
-            const results = searchData.data || searchData.results || [];
-            console.log(`Search returned ${results.length} results`);
-
-            // Collect LinkedIn URL from any query
-            if (!linkedinUrl) {
-              linkedinUrl = results.find((r: any) => r.url?.includes("linkedin.com/company"))?.url ?? null;
-            }
-
-            // Collect candidate URLs (non-aggregator, not already seen)
-            const candidateResults = results.filter((r: any) => r.url && !isExcluded(r.url) && !seenUrls.has(r.url));
-            candidateResults.forEach((r: any) => seenUrls.add(r.url));
-
-            // Verify each candidate
-            for (const candidate of candidateResults.slice(0, 3)) {
-              try {
-                console.log(`Verifying candidate: ${candidate.url}`);
-
-                const titleDesc = `${candidate.title || ""} ${candidate.description || ""}`.toLowerCase();
-                const titleMentionsCompany = titleDesc.includes(companyNameLower) ||
-                  companyNameLower.split(/\s+/).filter((w: string) => w.length > 2).every((w: string) => titleDesc.includes(w));
-
-                if (!titleMentionsCompany) {
-                  console.log(`  Skipped — title/description doesn't mention "${companyName}"`);
-                  continue;
-                }
-
-                const scrapeResponse = await fetch("https://api.firecrawl.dev/v1/scrape", {
-                  method: "POST",
-                  headers: { Authorization: `Bearer ${firecrawlApiKey}`, "Content-Type": "application/json" },
-                  body: JSON.stringify({ url: candidate.url, formats: ["markdown"], onlyMainContent: true }),
-                });
-
-                if (scrapeResponse.ok) {
-                  const scrapeData = await scrapeResponse.json();
-                  const pageContent = (scrapeData.data?.markdown || scrapeData.markdown || "").toLowerCase().slice(0, 5000);
-
-                  const contentMentionsCompany = pageContent.includes(companyNameLower) ||
-                    companyNameLower.split(/\s+/).filter((w: string) => w.length > 2).every((w: string) => pageContent.includes(w));
-
-                  if (contentMentionsCompany) {
-                    try {
-                      const u = new URL(candidate.url.startsWith("http") ? candidate.url : `https://${candidate.url}`);
-                      verifiedWebsite = `${u.protocol}//${u.hostname}`;
-                    } catch {
-                      verifiedWebsite = candidate.url;
-                    }
-                    console.log(`  ✓ Verified website: ${verifiedWebsite}`);
-                    break;
-                  } else {
-                    console.log(`  ✗ Page content doesn't mention "${companyName}"`);
+                if (urls.website && urls.confidence >= 60) {
+                  try {
+                    const u = new URL(urls.website.startsWith("http") ? urls.website : `https://${urls.website}`);
+                    verifiedWebsite = `${u.protocol}//${u.hostname}`;
+                  } catch {
+                    verifiedWebsite = urls.website;
                   }
+                  console.log(`✓ GPT-5 verified website: ${verifiedWebsite} (confidence: ${urls.confidence})`);
                 }
-              } catch (e) {
-                console.warn(`  Verification failed for ${candidate.url}:`, e);
+                if (urls.linkedin_url) {
+                  linkedinUrl = urls.linkedin_url;
+                  console.log(`✓ GPT-5 found LinkedIn: ${linkedinUrl}`);
+                }
+              }
+            } else {
+              const errText = await searchRes.text();
+              console.warn(`GPT-5 web search failed (${searchRes.status}): ${errText}`);
+            }
+          } catch (e) {
+            console.warn("GPT-5 web search error (non-fatal):", e);
+          }
+        }
+
+        // --- FALLBACK: Firecrawl multi-query search if GPT-5 didn't find a website ---
+        if (!verifiedWebsite && firecrawlApiKey) {
+          try {
+            const searchQueries = [
+              `"${companyName}" official website`,
+              `${companyName} startup ${sectorHint}`.trim(),
+              `${companyName} company`,
+            ];
+
+            const excludedDomains = [
+              "linkedin.com", "crunchbase.com", "google.com", "wikipedia.org",
+              "facebook.com", "twitter.com", "x.com", "instagram.com", "youtube.com",
+              "glassdoor.com", "indeed.com", "pitchbook.com", "bloomberg.com",
+              "techcrunch.com", "ycombinator.com", "reddit.com", "github.com",
+            ];
+            const isExcluded = (url: string) => excludedDomains.some((d) => url.includes(d));
+            const companyNameLower = companyName.toLowerCase();
+            const seenUrls = new Set<string>();
+
+            for (const searchQuery of searchQueries) {
+              if (verifiedWebsite) break;
+              console.log("Firecrawl fallback query:", searchQuery);
+
+              const searchResponse = await fetch("https://api.firecrawl.dev/v1/search", {
+                method: "POST",
+                headers: { Authorization: `Bearer ${firecrawlApiKey}`, "Content-Type": "application/json" },
+                body: JSON.stringify({ query: searchQuery, limit: 8 }),
+              });
+
+              if (!searchResponse.ok) { console.warn(`Firecrawl query failed (${searchResponse.status})`); continue; }
+
+              const searchData = await searchResponse.json();
+              const results = searchData.data || searchData.results || [];
+              console.log(`Firecrawl returned ${results.length} results`);
+
+              if (!linkedinUrl) {
+                linkedinUrl = results.find((r: any) => r.url?.includes("linkedin.com/company"))?.url ?? null;
+              }
+
+              const candidates = results.filter((r: any) => r.url && !isExcluded(r.url) && !seenUrls.has(r.url));
+              candidates.forEach((r: any) => seenUrls.add(r.url));
+
+              for (const candidate of candidates.slice(0, 3)) {
+                try {
+                  const titleDesc = `${candidate.title || ""} ${candidate.description || ""}`.toLowerCase();
+                  const mentions = titleDesc.includes(companyNameLower) ||
+                    companyNameLower.split(/\s+/).filter((w: string) => w.length > 2).every((w: string) => titleDesc.includes(w));
+                  if (!mentions) continue;
+
+                  const scrapeRes = await fetch("https://api.firecrawl.dev/v1/scrape", {
+                    method: "POST",
+                    headers: { Authorization: `Bearer ${firecrawlApiKey}`, "Content-Type": "application/json" },
+                    body: JSON.stringify({ url: candidate.url, formats: ["markdown"], onlyMainContent: true }),
+                  });
+
+                  if (scrapeRes.ok) {
+                    const scrapeData = await scrapeRes.json();
+                    const content = (scrapeData.data?.markdown || scrapeData.markdown || "").toLowerCase().slice(0, 5000);
+                    const contentMatch = content.includes(companyNameLower) ||
+                      companyNameLower.split(/\s+/).filter((w: string) => w.length > 2).every((w: string) => content.includes(w));
+                    if (contentMatch) {
+                      try {
+                        const u = new URL(candidate.url.startsWith("http") ? candidate.url : `https://${candidate.url}`);
+                        verifiedWebsite = `${u.protocol}//${u.hostname}`;
+                      } catch { verifiedWebsite = candidate.url; }
+                      console.log(`✓ Firecrawl verified: ${verifiedWebsite}`);
+                      break;
+                    }
+                  }
+                } catch (e) { console.warn(`Firecrawl verify failed for ${candidate.url}:`, e); }
               }
             }
+          } catch (e) {
+            console.warn("Firecrawl fallback failed (non-fatal):", e);
           }
-
-          // Update deal metadata
-          const webUpdate: Record<string, unknown> = { website_searching: false, updated_at: new Date().toISOString() };
-          if (verifiedWebsite && !currentDeal.website) webUpdate.website = verifiedWebsite;
-          if (linkedinUrl) webUpdate.linkedin_url = linkedinUrl;
-          await adminClient.from("deals").update(webUpdate).eq("id", dealId);
-
-          console.log(`Website search complete: website=${verifiedWebsite || "none"}, linkedin=${linkedinUrl || "none"}`);
-        } catch (e) {
-          console.warn("Smart website search failed (non-fatal):", e);
-          await adminClient.from("deals").update({ website_searching: false }).eq("id", dealId);
         }
+
+        // Update deal
+        const webUpdate: Record<string, unknown> = { website_searching: false, updated_at: new Date().toISOString() };
+        if (verifiedWebsite && !currentDeal.website) webUpdate.website = verifiedWebsite;
+        if (linkedinUrl) webUpdate.linkedin_url = linkedinUrl;
+        await adminClient.from("deals").update(webUpdate).eq("id", dealId);
+        console.log(`Website search complete: website=${verifiedWebsite || "none"}, linkedin=${linkedinUrl || "none"}`);
       }
     }
 
