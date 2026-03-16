@@ -711,43 +711,61 @@ Deno.serve(async (req) => {
           const companyName = currentDeal.name;
           const sectorHint = currentDeal.sector && currentDeal.sector !== "Unknown" ? currentDeal.sector : "";
 
-          // Step A: Search for the company by name
-          const searchQuery = `"${companyName}" ${sectorHint} company official website`.trim();
-          console.log("Website search query:", searchQuery);
+          // Build multiple search queries — from most specific to broadest
+          const searchQueries = [
+            `"${companyName}" official website`,
+            `${companyName} startup ${sectorHint}`.trim(),
+            `${companyName} company`,
+          ];
 
-          const searchResponse = await fetch("https://api.firecrawl.dev/v1/search", {
-            method: "POST",
-            headers: { Authorization: `Bearer ${firecrawlApiKey}`, "Content-Type": "application/json" },
-            body: JSON.stringify({ query: searchQuery, limit: 8 }),
-          });
+          // Excluded domains — aggregators, social, not company websites
+          const excludedDomains = [
+            "linkedin.com", "crunchbase.com", "google.com", "wikipedia.org",
+            "facebook.com", "twitter.com", "x.com", "instagram.com", "youtube.com",
+            "glassdoor.com", "indeed.com", "pitchbook.com", "bloomberg.com",
+            "techcrunch.com", "ycombinator.com", "reddit.com", "github.com",
+          ];
+          const isExcluded = (url: string) => excludedDomains.some((d) => url.includes(d));
 
-          if (searchResponse.ok) {
+          let verifiedWebsite: string | null = null;
+          let linkedinUrl: string | null = null;
+          const companyNameLower = companyName.toLowerCase();
+          const seenUrls = new Set<string>();
+
+          // Try each query until we find a verified website
+          for (const searchQuery of searchQueries) {
+            if (verifiedWebsite) break;
+
+            console.log("Website search query:", searchQuery);
+            const searchResponse = await fetch("https://api.firecrawl.dev/v1/search", {
+              method: "POST",
+              headers: { Authorization: `Bearer ${firecrawlApiKey}`, "Content-Type": "application/json" },
+              body: JSON.stringify({ query: searchQuery, limit: 8 }),
+            });
+
+            if (!searchResponse.ok) {
+              console.warn(`Search query failed (${searchResponse.status}), trying next`);
+              continue;
+            }
+
             const searchData = await searchResponse.json();
             const results = searchData.data || searchData.results || [];
             console.log(`Search returned ${results.length} results`);
 
-            // Excluded domains — aggregators, social, not company websites
-            const excludedDomains = [
-              "linkedin.com", "crunchbase.com", "google.com", "wikipedia.org",
-              "facebook.com", "twitter.com", "x.com", "instagram.com", "youtube.com",
-              "glassdoor.com", "indeed.com", "pitchbook.com", "bloomberg.com",
-              "techcrunch.com", "ycombinator.com", "reddit.com", "github.com",
-            ];
-            const isExcluded = (url: string) => excludedDomains.some((d) => url.includes(d));
+            // Collect LinkedIn URL from any query
+            if (!linkedinUrl) {
+              linkedinUrl = results.find((r: any) => r.url?.includes("linkedin.com/company"))?.url ?? null;
+            }
 
-            // Step B: Collect candidate URLs (non-aggregator results)
-            const candidateResults = results.filter((r: any) => r.url && !isExcluded(r.url));
-            const linkedinUrl = results.find((r: any) => r.url?.includes("linkedin.com/company"))?.url;
+            // Collect candidate URLs (non-aggregator, not already seen)
+            const candidateResults = results.filter((r: any) => r.url && !isExcluded(r.url) && !seenUrls.has(r.url));
+            candidateResults.forEach((r: any) => seenUrls.add(r.url));
 
-            // Step C: Verify each candidate — scrape and check if the content is about this company
-            let verifiedWebsite: string | null = null;
-            const companyNameLower = companyName.toLowerCase();
-
+            // Verify each candidate
             for (const candidate of candidateResults.slice(0, 3)) {
               try {
                 console.log(`Verifying candidate: ${candidate.url}`);
 
-                // First check: does the search result title/description mention the company?
                 const titleDesc = `${candidate.title || ""} ${candidate.description || ""}`.toLowerCase();
                 const titleMentionsCompany = titleDesc.includes(companyNameLower) ||
                   companyNameLower.split(/\s+/).filter((w: string) => w.length > 2).every((w: string) => titleDesc.includes(w));
@@ -757,7 +775,6 @@ Deno.serve(async (req) => {
                   continue;
                 }
 
-                // Second check: scrape the page and verify company name appears in content
                 const scrapeResponse = await fetch("https://api.firecrawl.dev/v1/scrape", {
                   method: "POST",
                   headers: { Authorization: `Bearer ${firecrawlApiKey}`, "Content-Type": "application/json" },
@@ -768,12 +785,10 @@ Deno.serve(async (req) => {
                   const scrapeData = await scrapeResponse.json();
                   const pageContent = (scrapeData.data?.markdown || scrapeData.markdown || "").toLowerCase().slice(0, 5000);
 
-                  // The page content must mention the company name
                   const contentMentionsCompany = pageContent.includes(companyNameLower) ||
                     companyNameLower.split(/\s+/).filter((w: string) => w.length > 2).every((w: string) => pageContent.includes(w));
 
                   if (contentMentionsCompany) {
-                    // Normalize to root domain
                     try {
                       const u = new URL(candidate.url.startsWith("http") ? candidate.url : `https://${candidate.url}`);
                       verifiedWebsite = `${u.protocol}//${u.hostname}`;
@@ -790,15 +805,15 @@ Deno.serve(async (req) => {
                 console.warn(`  Verification failed for ${candidate.url}:`, e);
               }
             }
-
-            // Step D: Update deal metadata
-            const webUpdate: Record<string, unknown> = { website_searching: false, updated_at: new Date().toISOString() };
-            if (verifiedWebsite && !currentDeal.website) webUpdate.website = verifiedWebsite;
-            if (linkedinUrl) webUpdate.linkedin_url = linkedinUrl;
-            await adminClient.from("deals").update(webUpdate).eq("id", dealId);
-
-            console.log(`Website search complete: website=${verifiedWebsite || "none"}, linkedin=${linkedinUrl || "none"}`);
           }
+
+          // Update deal metadata
+          const webUpdate: Record<string, unknown> = { website_searching: false, updated_at: new Date().toISOString() };
+          if (verifiedWebsite && !currentDeal.website) webUpdate.website = verifiedWebsite;
+          if (linkedinUrl) webUpdate.linkedin_url = linkedinUrl;
+          await adminClient.from("deals").update(webUpdate).eq("id", dealId);
+
+          console.log(`Website search complete: website=${verifiedWebsite || "none"}, linkedin=${linkedinUrl || "none"}`);
         } catch (e) {
           console.warn("Smart website search failed (non-fatal):", e);
           await adminClient.from("deals").update({ website_searching: false }).eq("id", dealId);
