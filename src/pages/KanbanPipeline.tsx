@@ -29,19 +29,40 @@ const stepIcons: Record<string, React.ElementType> = {
 
 
 
-function WorkflowProgress({ deal, onPause, onResume, isPausing, isResuming }: {
+function WorkflowProgress({ deal, onCancel, isCancelling }: {
   deal: Deal;
-  onPause: () => void;
-  onResume: () => void;
-  isPausing: boolean;
-  isResuming: boolean;
+  onCancel: () => void;
+  isCancelling: boolean;
 }) {
-  const isPaused = deal.status === "paused";
-  const activeStatus = isPaused ? deal.paused_at_step : deal.status;
+  const isQueued = deal.status === "queued";
+  const isCancelled = deal.status === "cancelled";
+  const activeStatus = deal.status;
   const activeSteps = WORKFLOW_STEPS.filter((s) => s.key !== "memo-ready");
   const currentIdx = activeSteps.findIndex((s) => s.key === activeStatus);
 
-  if (currentIdx === -1 && !isPaused) return null;
+  if (isQueued) {
+    return (
+      <div className="mt-3">
+        <div className="flex items-center gap-2 text-muted-foreground">
+          <Clock className="h-3.5 w-3.5" />
+          <span className="text-[11px] font-medium">Queued — waiting for active job</span>
+        </div>
+      </div>
+    );
+  }
+
+  if (isCancelled) {
+    return (
+      <div className="mt-3">
+        <div className="flex items-center gap-2 text-destructive">
+          <Pause className="h-3.5 w-3.5" />
+          <span className="text-[11px] font-medium">Cancelled</span>
+        </div>
+      </div>
+    );
+  }
+
+  if (currentIdx === -1) return null;
 
   return (
     <div className="mt-3">
