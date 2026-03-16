@@ -17,7 +17,7 @@ function getAiConfig(model: string) {
     isSapinsapin,
     isComputerUse,
     baseUrl: isSapinsapin ? SAPINSAPIN_BASE : OPENAI_BASE,
-    modelName: isComputerUse ? "computer-use-preview" : isSapinsapin ? SAPINSAPIN_MODEL : model,
+    modelName: isComputerUse ? "gpt-5.4" : isSapinsapin ? SAPINSAPIN_MODEL : model,
     envKey: isSapinsapin ? "APOLLO_API_KEY" : "OPENAI_API_KEY",
   };
 }
