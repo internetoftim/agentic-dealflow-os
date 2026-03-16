@@ -1,6 +1,6 @@
-import { useDeals, usePauseDeal, useResumeDeal, type Deal, WORKFLOW_STEPS } from "@/hooks/useDeals";
+import { useDeals, useCancelDeal, type Deal, WORKFLOW_STEPS, PROCESSING_STATUSES } from "@/hooks/useDeals";
 import { sourceConfig as mockSourceConfig } from "@/data/mockDeals";
-import { Loader2, Check, Globe, Upload, FileArchive, FileSearch, CloudUpload, ArrowRightLeft, Pause, Play } from "lucide-react";
+import { Loader2, Check, Globe, Upload, FileArchive, FileSearch, CloudUpload, ArrowRightLeft, Pause, Play, Clock } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
 const columns = [
