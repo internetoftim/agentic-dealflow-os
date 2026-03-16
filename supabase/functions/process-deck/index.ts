@@ -469,7 +469,7 @@ Deno.serve(async (req) => {
         const { data: existingSource } = await adminClient.from("sources")
           .select("extracted_text")
           .eq("deal_id", dealId)
-          .eq("user_id", user.id)
+          .eq("user_id", userId)
           .single();
         extractedText = existingSource?.extracted_text ?? "";
         console.log(`Using locally-extracted text: ${extractedText.length} chars`);
