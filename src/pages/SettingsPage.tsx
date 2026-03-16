@@ -6,6 +6,20 @@ import { toast } from "sonner";
 
 const DEFAULT_PATTERN = "<WEBSITE> deck <MonthYYYY> p<pages>.pdf";
 
+const DEFAULT_MEMO_PROMPT = `You are a VC analyst writing an internal investment memo. Given the extracted deck content and any deep research data, produce a structured memo with the following sections:
+
+1. **Executive Summary** — One paragraph overview of the company, what they do, and why it matters.
+2. **Market Opportunity** — TAM/SAM/SOM if available, market trends, and timing thesis.
+3. **Product & Traction** — What the product does, key metrics (ARR, growth, NRR, users), and competitive moat.
+4. **Team** — Founders' backgrounds, relevant experience, and team composition.
+5. **Business Model** — How they make money, unit economics, and pricing strategy.
+6. **Competition** — Key competitors and differentiation.
+7. **Risks & Concerns** — Red flags, market risks, execution risks.
+8. **Investment Thesis** — Bull case and bear case for investing.
+9. **Recommendation** — Pass / Follow-up / Invest, with reasoning.
+
+Be concise, data-driven, and flag any missing information. Use bullet points where appropriate.`;
+
 const AI_MODELS = [
   { value: "gpt-oss-202b", label: "GPT-OSS 202B", description: "Sapinsapin inference bridge — default" },
   { value: "gpt-4o", label: "GPT-4o", description: "Best multimodal, strong reasoning" },
