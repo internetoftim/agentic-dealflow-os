@@ -26,8 +26,6 @@ const AI_MODELS = [
   { value: "gpt-4o", label: "GPT-4o", description: "Best multimodal, strong reasoning" },
   { value: "gpt-5-mini", label: "GPT-5 Mini", description: "Fast & cost-effective" },
   { value: "gpt-5", label: "GPT-5", description: "Most capable, complex tasks" },
-  { value: "gpt-5.4", label: "GPT-5.4", description: "Flagship — Computer Use agent for deep research" },
-  { value: "o3-mini", label: "o3-mini", description: "Reasoning model, math & code" },
   { value: "local-florence2", label: "Local — Gemma 3n E2B", description: "In-browser multimodal via MediaPipe WebGPU (~3.4GB)" },
 ] as const;
 
@@ -93,12 +91,7 @@ export default function SettingsPage() {
     if (!user) return;
     setAiModel(model);
     setSavingModel(true);
-    // When GPT-5.4 is selected, automatically set deep research to "custom" (computer use route)
     const updates: Record<string, unknown> = { user_id: user.id, ai_model: model };
-    if (model === "gpt-5.4") {
-      updates.deep_research_provider = "custom";
-      setDeepResearchProvider("custom");
-    }
     const { error } = await supabase
       .from("user_settings")
       .upsert(updates as any, { onConflict: "user_id" });
@@ -107,7 +100,7 @@ export default function SettingsPage() {
       toast.error("Failed to save model preference");
     } else {
       const label = AI_MODELS.find((m) => m.value === model)?.label;
-      toast.success(`Model set to ${label}${model === "gpt-5.4" ? " — Computer Use enabled for deep research" : ""}`);
+      toast.success(`Model set to ${label}`);
     }
   };
 
