@@ -85,6 +85,9 @@ export default function SettingsPage() {
           if (data.naming_mode) {
             setNamingTab(data.naming_mode as "auto" | "manual");
           }
+          if ((data as any).recap_naming_pattern) {
+            setRecapPattern((data as any).recap_naming_pattern);
+          }
         }
       });
   }, [user]);
