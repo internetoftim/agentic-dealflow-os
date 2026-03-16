@@ -91,16 +91,19 @@ export function AppSidebar() {
 
       <SidebarFooter className="border-t border-sidebar-border p-3">
         <div className={`flex items-center gap-3 ${collapsed ? "justify-center" : ""}`}>
-          <div className="flex h-8 w-8 items-center justify-center rounded-full bg-accent text-sm font-medium text-accent-foreground">
-            A
+          <div className="flex h-8 w-8 items-center justify-center rounded-full bg-accent text-sm font-medium text-accent-foreground shrink-0">
+            {initial}
           </div>
           {!collapsed && (
-            <div className="flex flex-1 items-center justify-between">
-              <div>
-                <p className="text-sm font-medium text-foreground">Analyst</p>
-                <p className="text-xs text-muted-foreground">analyst@vcfirm.com</p>
+            <div className="flex flex-1 items-center justify-between min-w-0">
+              <div className="min-w-0">
+                <p className="text-sm font-medium text-foreground truncate">{email}</p>
               </div>
-              <button className="text-muted-foreground hover:text-foreground transition-colors">
+              <button
+                onClick={handleSignOut}
+                title="Sign out"
+                className="text-muted-foreground hover:text-destructive transition-colors shrink-0 ml-2"
+              >
                 <LogOut className="h-4 w-4" />
               </button>
             </div>
