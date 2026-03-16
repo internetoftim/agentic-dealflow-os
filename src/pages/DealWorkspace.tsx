@@ -66,6 +66,19 @@ export default function DealWorkspace() {
     [createDeal]
   );
 
+  const handleFetchUrl = useCallback(() => {
+    const trimmed = docSendUrl.trim();
+    if (!trimmed) return;
+    toast.promise(
+      processDocsend.mutateAsync(trimmed).then(() => setDocSendUrl("")),
+      {
+        loading: "Fetching deck from link…",
+        success: "Deal created from link!",
+        error: (err) => `Fetch failed: ${err.message}`,
+      }
+    );
+  }, [docSendUrl, processDocsend]);
+
   const tabs = [
     { key: "chat" as const, label: "Chat", icon: Send },
     { key: "data" as const, label: "Structured Data", icon: Layers },
