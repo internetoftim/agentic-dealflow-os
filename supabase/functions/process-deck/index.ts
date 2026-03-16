@@ -688,8 +688,9 @@ Deno.serve(async (req) => {
 
     // --- STEP 4: Smart website search — extract company name, search, verify URL ---
     if (!shouldSkip("searching-website")) {
-      if (await checkPaused(adminClient, dealId, "searching-website")) {
-        return new Response(JSON.stringify({ success: true, paused: true, at: "searching-website" }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      if (await checkAborted(adminClient, dealId, "searching-website")) {
+        await processNextQueued(adminClient, userId, supabaseUrl, supabaseServiceKey);
+        return new Response(JSON.stringify({ success: true, cancelled: true, at: "searching-website" }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
       }
 
       const { data: currentDeal } = await adminClient.from("deals").select("website, name, sector, stage").eq("id", dealId).single();
