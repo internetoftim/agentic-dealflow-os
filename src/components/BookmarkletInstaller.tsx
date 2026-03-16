@@ -111,7 +111,7 @@ function generateBookmarklet(appOrigin: string): string {
   function sendToRelay(){
     if(slides.length === 0){ alert('EasyVC: No slides captured.'); return; }
     var w = window.open(RELAY_URL, '_blank');
-    if(!w){ alert('AgenticVC: Popup blocked. Please allow popups for this site.'); return; }
+    if(!w){ alert('EasyVC: Popup blocked. Please allow popups for this site.'); return; }
 
     var attempts = 0;
     var timer = setInterval(function(){
