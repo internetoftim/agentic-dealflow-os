@@ -419,8 +419,9 @@ Deno.serve(async (req) => {
     let pdfStoragePath = storagePath;
     let slidesApiText = ""; // text extracted via Google Slides API during conversion
     if (isPptx && !shouldSkip("converting")) {
-      if (await checkPaused(adminClient, dealId, "converting")) {
-        return new Response(JSON.stringify({ success: true, paused: true, at: "converting" }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      if (await checkAborted(adminClient, dealId, "converting")) {
+        await processNextQueued(adminClient, userId, supabaseUrl, supabaseServiceKey);
+        return new Response(JSON.stringify({ success: true, cancelled: true, at: "converting" }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
       }
       await setDealStatus(adminClient, dealId, "converting");
 
