@@ -23,11 +23,11 @@ const DEFAULT_MEMO_PROMPT = `You are a VC analyst writing an internal investment
 Be concise, data-driven, and flag any missing information. Use bullet points where appropriate.`;
 
 const AI_MODELS = [
-  { value: "gpt-5-mini", label: "GPT-5 Mini", description: "Fast & cost-effective — default" },
-  { value: "gpt-oss-202b", label: "GPT-OSS 202B", description: "Sapinsapin inference bridge" },
-  { value: "gpt-4o", label: "GPT-4o", description: "Best multimodal, strong reasoning" },
-  { value: "gpt-5", label: "GPT-5", description: "Most capable, complex tasks" },
-  { value: "local-florence2", label: "Local — Gemma 3n E2B", description: "In-browser multimodal via MediaPipe WebGPU (~3.4GB)" },
+  { value: "gpt-5-mini", label: "GPT-5 Mini", description: "Fast & cost-effective — default", disabled: false },
+  { value: "gpt-oss-202b", label: "GPT-OSS 202B", description: "Sapinsapin inference bridge", disabled: true },
+  { value: "gpt-4o", label: "GPT-4o", description: "Best multimodal, strong reasoning", disabled: true },
+  { value: "gpt-5", label: "GPT-5", description: "Most capable, complex tasks", disabled: true },
+  { value: "local-florence2", label: "Local — Gemma 3n E2B", description: "In-browser multimodal via MediaPipe WebGPU (~3.4GB)", disabled: true },
 ] as const;
 
 function Toggle({ checked, onChange }: { checked: boolean; onChange: (v: boolean) => void }) {
@@ -170,17 +170,26 @@ export default function SettingsPage() {
             {AI_MODELS.map((model) => (
               <button
                 key={model.value}
-                onClick={() => handleModelChange(model.value)}
-                disabled={savingModel}
+                onClick={() => !model.disabled && handleModelChange(model.value)}
+                disabled={savingModel || model.disabled}
                 className={`text-left rounded-lg border p-3 transition-colors ${
                   aiModel === model.value
                     ? "border-primary bg-primary/5"
-                    : "border-border hover:border-primary/40 hover:bg-accent"
+                    : model.disabled
+                      ? "border-border bg-muted/30 opacity-50 cursor-not-allowed"
+                      : "border-border hover:border-primary/40 hover:bg-accent"
                 }`}
               >
                 <div className="flex items-center gap-2">
-                  <span className="text-sm font-medium text-foreground">{model.label}</span>
+                  <span className={`text-sm font-medium ${model.disabled ? "text-muted-foreground" : "text-foreground"}`}>
+                    {model.label}
+                  </span>
                   {aiModel === model.value && <Check className="h-3.5 w-3.5 text-primary ml-auto" />}
+                  {model.disabled && aiModel !== model.value && (
+                    <span className="ml-auto text-[9px] font-medium uppercase tracking-wider text-muted-foreground bg-muted rounded px-1 py-0.5">
+                      Soon
+                    </span>
+                  )}
                 </div>
                 <p className="text-xs text-muted-foreground mt-0.5">{model.description}</p>
               </button>
