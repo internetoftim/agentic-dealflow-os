@@ -189,208 +189,8 @@ export default function SettingsPage() {
         </div>
       </section>
 
-      {/* Memo Summarisation Prompt */}
-      <section className="mb-8">
-        <h2 className="text-sm font-semibold text-foreground mb-4 flex items-center gap-2">
-          <FileText className="h-4 w-4 text-muted-foreground" />
-          Memo Summarisation Prompt
-        </h2>
-        <div className="rounded-lg border border-border bg-card p-5 space-y-3">
-          <p className="text-xs text-muted-foreground">
-            This prompt is sent to the AI when generating investment memos from deck data. Customise it to match your firm's memo format.
-          </p>
-          <textarea
-            value={memoPrompt}
-            onChange={(e) => setMemoPrompt(e.target.value)}
-            onBlur={async () => {
-              if (!user) return;
-              const { error } = await supabase
-                .from("user_settings")
-                .upsert({ user_id: user.id, memo_prompt: memoPrompt.trim() || null } as any, { onConflict: "user_id" });
-              if (error) toast.error("Failed to save memo prompt");
-              else toast.success("Memo prompt saved");
-            }}
-            rows={14}
-            className="w-full rounded-md border border-input bg-card px-3 py-2 text-sm font-mono outline-none placeholder:text-muted-foreground focus:ring-1 focus:ring-ring resize-y"
-            placeholder="Enter your memo generation prompt..."
-          />
-          <div className="flex items-center justify-between">
-            <p className="text-xs text-muted-foreground">
-              Changes are saved automatically on blur.
-            </p>
-            {memoPrompt !== DEFAULT_MEMO_PROMPT && (
-              <button
-                onClick={async () => {
-                  setMemoPrompt(DEFAULT_MEMO_PROMPT);
-                  if (!user) return;
-                  await supabase
-                    .from("user_settings")
-                    .upsert({ user_id: user.id, memo_prompt: null } as any, { onConflict: "user_id" });
-                  toast.success("Memo prompt reset to default");
-                }}
-                className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
-              >
-                <RotateCcw className="h-3 w-3" />
-                Reset to default
-              </button>
-            )}
-          </div>
-        </div>
-      </section>
-
-      {/* Deep Research Provider */}
-      <section className="mb-8">
-        <h2 className="text-sm font-semibold text-foreground mb-4 flex items-center gap-2">
-          <Search className="h-4 w-4 text-muted-foreground" />
-          Deep Research Agent
-        </h2>
-        <div className="rounded-lg border border-border bg-card p-5">
-          <p className="text-xs text-muted-foreground mb-3">Choose which engine powers company deep research after deck extraction. Selecting GPT-5.4 as your AI model automatically enables Computer Use.</p>
-          <div className="grid grid-cols-2 gap-2">
-            {([
-              { value: "custom" as const, label: "Custom Agent", description: "Uses your selected AI model + Firecrawl search" },
-              { value: "firecrawl" as const, label: "Firecrawl Only", description: "Firecrawl search + scrape, no LLM extraction" },
-            ]).map((opt) => (
-              <button
-                key={opt.value}
-                onClick={async () => {
-                  if (!user) return;
-                  setDeepResearchProvider(opt.value);
-                  const { error } = await supabase
-                    .from("user_settings")
-                    .upsert({ user_id: user.id, deep_research_provider: opt.value } as any, { onConflict: "user_id" });
-                  if (error) toast.error("Failed to save preference");
-                  else toast.success(`Deep research set to ${opt.label}`);
-                }}
-                className={`text-left rounded-lg border p-3 transition-colors ${
-                  deepResearchProvider === opt.value
-                    ? "border-primary bg-primary/5"
-                    : "border-border hover:border-primary/40 hover:bg-accent"
-                }`}
-              >
-                <div className="flex items-center gap-2">
-                  <span className="text-sm font-medium text-foreground">{opt.label}</span>
-                  {deepResearchProvider === opt.value && <Check className="h-3.5 w-3.5 text-primary ml-auto" />}
-                </div>
-                <p className="text-xs text-muted-foreground mt-0.5">{opt.description}</p>
-              </button>
-            ))}
-          </div>
-        </div>
-      </section>
-
-      {/* Workspace Auth */}
-      <section className="mb-8 opacity-40 pointer-events-none select-none">
-        <h2 className="text-sm font-semibold text-foreground mb-4 flex items-center gap-2">
-          <Mail className="h-4 w-4 text-muted-foreground" />
-          Workspace Auth
-          <span className="ml-auto text-[10px] font-medium uppercase tracking-wider text-muted-foreground bg-muted rounded px-1.5 py-0.5">Coming Soon</span>
-        </h2>
-        <div className="rounded-lg border border-border bg-card p-5 space-y-4">
-          <button className="flex items-center gap-3 rounded-md border border-border px-4 py-2.5 text-sm font-medium" disabled>
-            <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" alt="Google" className="h-4 w-4" />
-            Connect Google Workspace
-          </button>
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-sm text-foreground">Listen to Gmail label: <code className="rounded bg-muted px-1.5 py-0.5 text-xs">deck</code></p>
-              <p className="text-xs text-muted-foreground">Auto-ingest decks tagged with this label</p>
-            </div>
-            <Toggle checked={gmailLabel} onChange={() => {}} />
-          </div>
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-sm text-foreground">Sync Memos to Drive</p>
-              <p className="text-xs text-muted-foreground">Automatically upload completed memos</p>
-            </div>
-            <Toggle checked={driveSync} onChange={() => {}} />
-          </div>
-        </div>
-      </section>
-
-      {/* Google Drive Folder */}
-      <section className="mb-8">
-        <h2 className="text-sm font-semibold text-foreground mb-4 flex items-center gap-2">
-          <FolderOpen className="h-4 w-4 text-muted-foreground" />
-          Drive Folder
-        </h2>
-        <div className="rounded-lg border border-border bg-card p-5 space-y-3">
-          <p className="text-xs text-muted-foreground">
-            Files synced to Google Drive will be saved inside this folder. It will be created automatically if it doesn't exist.
-          </p>
-          <div className="flex gap-2 items-center">
-            <input
-              type="text"
-              value={driveFolder}
-              onChange={(e) => setDriveFolder(e.target.value)}
-              onBlur={async () => {
-                if (!user) return;
-                const { error } = await supabase
-                  .from("user_settings")
-                  .upsert({ user_id: user.id, drive_folder: driveFolder.trim() || "WAITING ROOM" } as any, { onConflict: "user_id" });
-                if (error) toast.error("Failed to save folder");
-                else toast.success("Drive folder saved");
-              }}
-              placeholder="WAITING ROOM"
-              className="flex-1 rounded-md border border-input bg-card px-3 py-2 text-sm outline-none placeholder:text-muted-foreground focus:ring-1 focus:ring-ring"
-            />
-            {driveFolder !== "WAITING ROOM" && (
-              <button
-                onClick={async () => {
-                  setDriveFolder("WAITING ROOM");
-                  if (!user) return;
-                  await supabase
-                    .from("user_settings")
-                    .upsert({ user_id: user.id, drive_folder: "WAITING ROOM" } as any, { onConflict: "user_id" });
-                  toast.success("Folder reset to default");
-                }}
-                className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
-              >
-                <RotateCcw className="h-3 w-3" />
-                Reset
-              </button>
-            )}
-          </div>
-          <p className="text-xs text-muted-foreground">
-            Default: <code className="bg-muted rounded px-1">WAITING ROOM</code>
-          </p>
-        </div>
-      </section>
-
-      {/* Firm Deal Desk */}
-      <section className="mb-8 opacity-40 pointer-events-none select-none">
-        <h2 className="text-sm font-semibold text-foreground mb-4 flex items-center gap-2">
-          <Shield className="h-4 w-4 text-muted-foreground" />
-          Firm Deal Desk
-          <span className="ml-auto text-[10px] font-medium uppercase tracking-wider text-muted-foreground bg-muted rounded px-1.5 py-0.5">Coming Soon</span>
-        </h2>
-        <div className="rounded-lg border border-border bg-card p-5 space-y-4">
-          <button className="flex items-center gap-2 rounded-md border border-border px-4 py-2.5 text-sm font-medium" disabled>
-            <HardDrive className="h-4 w-4 text-muted-foreground" />
-            Connect Shared Inbox
-          </button>
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-sm text-foreground">Enable AI Spam & Relevance Filtering</p>
-              <p className="text-xs text-muted-foreground">AI Gatekeeper blocks vendor emails</p>
-            </div>
-            <Toggle checked={spamFilter} onChange={() => {}} />
-          </div>
-          <div className="flex gap-6 pt-2">
-            <div>
-              <span className="text-2xl font-semibold text-foreground">—</span>
-              <p className="text-xs text-muted-foreground">Pitches Processed</p>
-            </div>
-            <div>
-              <span className="text-2xl font-semibold text-foreground">—</span>
-              <p className="text-xs text-muted-foreground">Spam Blocked</p>
-            </div>
-          </div>
-        </div>
-      </section>
-
       {/* Naming Conventions */}
-      <section>
+      <section className="mb-8">
         <h2 className="text-sm font-semibold text-foreground mb-4 flex items-center gap-2">
           <Sparkles className="h-4 w-4 text-muted-foreground" />
           Naming Conventions
@@ -566,6 +366,206 @@ export default function SettingsPage() {
           <p className="text-xs text-muted-foreground">
             Default: <code className="bg-muted rounded px-1">{DEFAULT_RECAP_PATTERN}</code>
           </p>
+        </div>
+      </section>
+
+      {/* Memo Summarisation Prompt */}
+      <section className="mb-8">
+        <h2 className="text-sm font-semibold text-foreground mb-4 flex items-center gap-2">
+          <FileText className="h-4 w-4 text-muted-foreground" />
+          Memo Summarisation Prompt
+        </h2>
+        <div className="rounded-lg border border-border bg-card p-5 space-y-3">
+          <p className="text-xs text-muted-foreground">
+            This prompt is sent to the AI when generating investment memos from deck data. Customise it to match your firm's memo format.
+          </p>
+          <textarea
+            value={memoPrompt}
+            onChange={(e) => setMemoPrompt(e.target.value)}
+            onBlur={async () => {
+              if (!user) return;
+              const { error } = await supabase
+                .from("user_settings")
+                .upsert({ user_id: user.id, memo_prompt: memoPrompt.trim() || null } as any, { onConflict: "user_id" });
+              if (error) toast.error("Failed to save memo prompt");
+              else toast.success("Memo prompt saved");
+            }}
+            rows={14}
+            className="w-full rounded-md border border-input bg-card px-3 py-2 text-sm font-mono outline-none placeholder:text-muted-foreground focus:ring-1 focus:ring-ring resize-y"
+            placeholder="Enter your memo generation prompt..."
+          />
+          <div className="flex items-center justify-between">
+            <p className="text-xs text-muted-foreground">
+              Changes are saved automatically on blur.
+            </p>
+            {memoPrompt !== DEFAULT_MEMO_PROMPT && (
+              <button
+                onClick={async () => {
+                  setMemoPrompt(DEFAULT_MEMO_PROMPT);
+                  if (!user) return;
+                  await supabase
+                    .from("user_settings")
+                    .upsert({ user_id: user.id, memo_prompt: null } as any, { onConflict: "user_id" });
+                  toast.success("Memo prompt reset to default");
+                }}
+                className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
+              >
+                <RotateCcw className="h-3 w-3" />
+                Reset to default
+              </button>
+            )}
+          </div>
+        </div>
+      </section>
+
+      {/* Deep Research Provider */}
+      <section className="mb-8">
+        <h2 className="text-sm font-semibold text-foreground mb-4 flex items-center gap-2">
+          <Search className="h-4 w-4 text-muted-foreground" />
+          Deep Research Agent
+        </h2>
+        <div className="rounded-lg border border-border bg-card p-5">
+          <p className="text-xs text-muted-foreground mb-3">Choose which engine powers company deep research after deck extraction.</p>
+          <div className="grid grid-cols-2 gap-2">
+            {([
+              { value: "custom" as const, label: "Custom Agent", description: "Uses your selected AI model + Firecrawl search" },
+              { value: "firecrawl" as const, label: "Firecrawl Only", description: "Firecrawl search + scrape, no LLM extraction" },
+            ]).map((opt) => (
+              <button
+                key={opt.value}
+                onClick={async () => {
+                  if (!user) return;
+                  setDeepResearchProvider(opt.value);
+                  const { error } = await supabase
+                    .from("user_settings")
+                    .upsert({ user_id: user.id, deep_research_provider: opt.value } as any, { onConflict: "user_id" });
+                  if (error) toast.error("Failed to save preference");
+                  else toast.success(`Deep research set to ${opt.label}`);
+                }}
+                className={`text-left rounded-lg border p-3 transition-colors ${
+                  deepResearchProvider === opt.value
+                    ? "border-primary bg-primary/5"
+                    : "border-border hover:border-primary/40 hover:bg-accent"
+                }`}
+              >
+                <div className="flex items-center gap-2">
+                  <span className="text-sm font-medium text-foreground">{opt.label}</span>
+                  {deepResearchProvider === opt.value && <Check className="h-3.5 w-3.5 text-primary ml-auto" />}
+                </div>
+                <p className="text-xs text-muted-foreground mt-0.5">{opt.description}</p>
+              </button>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      {/* Workspace Auth */}
+      <section className="mb-8 opacity-40 pointer-events-none select-none">
+        <h2 className="text-sm font-semibold text-foreground mb-4 flex items-center gap-2">
+          <Mail className="h-4 w-4 text-muted-foreground" />
+          Workspace Auth
+          <span className="ml-auto text-[10px] font-medium uppercase tracking-wider text-muted-foreground bg-muted rounded px-1.5 py-0.5">Coming Soon</span>
+        </h2>
+        <div className="rounded-lg border border-border bg-card p-5 space-y-4">
+          <button className="flex items-center gap-3 rounded-md border border-border px-4 py-2.5 text-sm font-medium" disabled>
+            <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" alt="Google" className="h-4 w-4" />
+            Connect Google Workspace
+          </button>
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-sm text-foreground">Listen to Gmail label: <code className="rounded bg-muted px-1.5 py-0.5 text-xs">deck</code></p>
+              <p className="text-xs text-muted-foreground">Auto-ingest decks tagged with this label</p>
+            </div>
+            <Toggle checked={gmailLabel} onChange={() => {}} />
+          </div>
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-sm text-foreground">Sync Memos to Drive</p>
+              <p className="text-xs text-muted-foreground">Automatically upload completed memos</p>
+            </div>
+            <Toggle checked={driveSync} onChange={() => {}} />
+          </div>
+        </div>
+      </section>
+
+      {/* Google Drive Folder */}
+      <section className="mb-8">
+        <h2 className="text-sm font-semibold text-foreground mb-4 flex items-center gap-2">
+          <FolderOpen className="h-4 w-4 text-muted-foreground" />
+          Drive Folder
+        </h2>
+        <div className="rounded-lg border border-border bg-card p-5 space-y-3">
+          <p className="text-xs text-muted-foreground">
+            Files synced to Google Drive will be saved inside this folder. It will be created automatically if it doesn't exist.
+          </p>
+          <div className="flex gap-2 items-center">
+            <input
+              type="text"
+              value={driveFolder}
+              onChange={(e) => setDriveFolder(e.target.value)}
+              onBlur={async () => {
+                if (!user) return;
+                const { error } = await supabase
+                  .from("user_settings")
+                  .upsert({ user_id: user.id, drive_folder: driveFolder.trim() || "WAITING ROOM" } as any, { onConflict: "user_id" });
+                if (error) toast.error("Failed to save folder");
+                else toast.success("Drive folder saved");
+              }}
+              placeholder="WAITING ROOM"
+              className="flex-1 rounded-md border border-input bg-card px-3 py-2 text-sm outline-none placeholder:text-muted-foreground focus:ring-1 focus:ring-ring"
+            />
+            {driveFolder !== "WAITING ROOM" && (
+              <button
+                onClick={async () => {
+                  setDriveFolder("WAITING ROOM");
+                  if (!user) return;
+                  await supabase
+                    .from("user_settings")
+                    .upsert({ user_id: user.id, drive_folder: "WAITING ROOM" } as any, { onConflict: "user_id" });
+                  toast.success("Folder reset to default");
+                }}
+                className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
+              >
+                <RotateCcw className="h-3 w-3" />
+                Reset
+              </button>
+            )}
+          </div>
+          <p className="text-xs text-muted-foreground">
+            Default: <code className="bg-muted rounded px-1">WAITING ROOM</code>
+          </p>
+        </div>
+      </section>
+
+      {/* Firm Deal Desk */}
+      <section className="mb-8 opacity-40 pointer-events-none select-none">
+        <h2 className="text-sm font-semibold text-foreground mb-4 flex items-center gap-2">
+          <Shield className="h-4 w-4 text-muted-foreground" />
+          Firm Deal Desk
+          <span className="ml-auto text-[10px] font-medium uppercase tracking-wider text-muted-foreground bg-muted rounded px-1.5 py-0.5">Coming Soon</span>
+        </h2>
+        <div className="rounded-lg border border-border bg-card p-5 space-y-4">
+          <button className="flex items-center gap-2 rounded-md border border-border px-4 py-2.5 text-sm font-medium" disabled>
+            <HardDrive className="h-4 w-4 text-muted-foreground" />
+            Connect Shared Inbox
+          </button>
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-sm text-foreground">Enable AI Spam & Relevance Filtering</p>
+              <p className="text-xs text-muted-foreground">AI Gatekeeper blocks vendor emails</p>
+            </div>
+            <Toggle checked={spamFilter} onChange={() => {}} />
+          </div>
+          <div className="flex gap-6 pt-2">
+            <div>
+              <span className="text-2xl font-semibold text-foreground">—</span>
+              <p className="text-xs text-muted-foreground">Pitches Processed</p>
+            </div>
+            <div>
+              <span className="text-2xl font-semibold text-foreground">—</span>
+              <p className="text-xs text-muted-foreground">Spam Blocked</p>
+            </div>
+          </div>
         </div>
       </section>
 
