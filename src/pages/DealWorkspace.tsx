@@ -1,6 +1,7 @@
 import { useState, useCallback, useRef, useEffect } from "react";
-import { Upload, Link, Cog, Check, Search, Send, FileText, Globe, Layers, Square, Linkedin, Loader2, FileUp, CircleDashed, CircleCheck, Circle } from "lucide-react";
-import { useDeals, useSources, useCreateDealWithUpload, useProcessDocsend, WORKFLOW_STEPS, type WorkflowStatus } from "@/hooks/useDeals";
+import { Upload, Link, Cog, Check, Search, Send, FileText, Globe, Layers, Square, Linkedin, Loader2, FileUp, CircleDashed, CircleCheck, Circle, Pause } from "lucide-react";
+import { useDeals, useSources, useCreateDealWithUpload, useProcessDocsend, usePauseDeal, WORKFLOW_STEPS, type WorkflowStatus } from "@/hooks/useDeals";
+import { Button } from "@/components/ui/button";
 import { useDealChat } from "@/hooks/useDealChat";
 import { useGenerateMemo } from "@/hooks/useGenerateMemo";
 import { toast } from "sonner";
@@ -19,6 +20,7 @@ export default function DealWorkspace() {
   const { data: sources } = useSources(selectedDealId);
   const createDeal = useCreateDealWithUpload();
   const processDocsend = useProcessDocsend();
+  const pauseDeal = usePauseDeal();
   const generateMemo = useGenerateMemo();
 
   const activeDeal = deals?.find((d) => d.id === selectedDealId) ?? deals?.[0];
@@ -167,7 +169,6 @@ export default function DealWorkspace() {
                 const currentIndex = WORKFLOW_STEPS.findIndex(s => s.key === activeDeal.status);
                 const isCompleted = currentIndex > stepIndex;
                 const isActive = activeDeal.status === step.key;
-                const isPending = currentIndex < stepIndex;
 
                 return (
                   <div key={step.key} className="flex items-center gap-2">
@@ -186,6 +187,16 @@ export default function DealWorkspace() {
                   </div>
                 );
               })}
+              <Button
+                variant="outline"
+                size="sm"
+                className="mt-2 h-7 text-[11px] gap-1 px-2 w-fit"
+                onClick={() => activeDeal && pauseDeal.mutate(activeDeal.id)}
+                disabled={pauseDeal.isPending}
+              >
+                {pauseDeal.isPending ? <Loader2 className="h-3 w-3 animate-spin" /> : <Pause className="h-3 w-3" />}
+                Stop
+              </Button>
             </div>
           </div>
         )}
