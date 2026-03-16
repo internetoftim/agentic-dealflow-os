@@ -486,13 +486,13 @@ export default function SettingsPage() {
           <p className="text-xs text-muted-foreground mb-3">Choose which engine powers company deep research after deck extraction.</p>
           <div className="grid grid-cols-2 gap-2">
             {([
-              { value: "custom" as const, label: "Custom Agent", description: "Uses your selected AI model + Firecrawl search" },
-              { value: "firecrawl" as const, label: "Firecrawl Only", description: "Firecrawl search + scrape, no LLM extraction" },
+              { value: "custom" as const, label: "Custom Agent", description: "Uses your selected AI model + Firecrawl search", disabled: false },
+              { value: "firecrawl" as const, label: "Firecrawl Only", description: "Firecrawl search + scrape, no LLM extraction", disabled: true },
             ]).map((opt) => (
               <button
                 key={opt.value}
                 onClick={async () => {
-                  if (!user) return;
+                  if (!user || opt.disabled) return;
                   setDeepResearchProvider(opt.value);
                   const { error } = await supabase
                     .from("user_settings")
@@ -500,15 +500,19 @@ export default function SettingsPage() {
                   if (error) toast.error("Failed to save preference");
                   else toast.success(`Deep research set to ${opt.label}`);
                 }}
+                disabled={opt.disabled}
                 className={`text-left rounded-lg border p-3 transition-colors ${
-                  deepResearchProvider === opt.value
+                  opt.disabled
+                    ? "opacity-50 cursor-not-allowed border-border bg-muted/30"
+                    : deepResearchProvider === opt.value
                     ? "border-primary bg-primary/5"
                     : "border-border hover:border-primary/40 hover:bg-accent"
                 }`}
               >
                 <div className="flex items-center gap-2">
                   <span className="text-sm font-medium text-foreground">{opt.label}</span>
-                  {deepResearchProvider === opt.value && <Check className="h-3.5 w-3.5 text-primary ml-auto" />}
+                  {opt.disabled && <span className="ml-auto text-[9px] rounded bg-muted px-1.5 py-0.5 font-medium text-muted-foreground">Soon</span>}
+                  {!opt.disabled && deepResearchProvider === opt.value && <Check className="h-3.5 w-3.5 text-primary ml-auto" />}
                 </div>
                 <p className="text-xs text-muted-foreground mt-0.5">{opt.description}</p>
               </button>
