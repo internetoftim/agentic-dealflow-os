@@ -459,8 +459,9 @@ Deno.serve(async (req) => {
     let compressedPdf: Uint8Array;
     let pageCount: number;
     if (!shouldSkip("compressing")) {
-      if (await checkPaused(adminClient, dealId, "compressing")) {
-        return new Response(JSON.stringify({ success: true, paused: true, at: "compressing" }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      if (await checkAborted(adminClient, dealId, "compressing")) {
+        await processNextQueued(adminClient, userId, supabaseUrl, supabaseServiceKey);
+        return new Response(JSON.stringify({ success: true, cancelled: true, at: "compressing" }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
       }
       await setDealStatus(adminClient, dealId, "compressing");
 
