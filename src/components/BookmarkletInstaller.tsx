@@ -41,7 +41,7 @@ function generateBookmarklet(appOrigin: string): string {
 
   var targetDoc = findDoc();
   var canvas = findCanvas(document);
-  if (!canvas) { alert('AgenticVC: No canvas found. The deck may still be loading, or the viewer uses a non-canvas renderer. Please wait for the deck to fully load and try again.'); return; }
+  if (!canvas) { alert('EasyVC: No canvas found. The deck may still be loading, or the viewer uses a non-canvas renderer. Please wait for the deck to fully load and try again.'); return; }
 
   function findBtn(d){
     var selectors = [
