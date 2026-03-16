@@ -18,6 +18,7 @@ export default function DealWorkspace() {
   const { data: deals } = useDeals();
   const { data: sources } = useSources(selectedDealId);
   const createDeal = useCreateDealWithUpload();
+  const processDocsend = useProcessDocsend();
 
   const activeDeal = deals?.find((d) => d.id === selectedDealId) ?? deals?.[0];
   const { messages, isStreaming, send, stop } = useDealChat(activeDeal?.id);
