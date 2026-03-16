@@ -808,8 +808,9 @@ Deno.serve(async (req) => {
 
     // --- STEP 5: Sync to Google Drive ---
     if (!shouldSkip("syncing")) {
-      if (await checkPaused(adminClient, dealId, "syncing")) {
-        return new Response(JSON.stringify({ success: true, paused: true, at: "syncing" }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      if (await checkAborted(adminClient, dealId, "syncing")) {
+        await processNextQueued(adminClient, userId, supabaseUrl, supabaseServiceKey);
+        return new Response(JSON.stringify({ success: true, cancelled: true, at: "syncing" }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
       }
       await setDealStatus(adminClient, dealId, "syncing");
 
