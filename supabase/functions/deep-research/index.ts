@@ -174,7 +174,7 @@ Deno.serve(async (req) => {
 
       if (config.isComputerUse) {
         // GPT-5.4 Computer Use path — uses OpenAI Responses API with computer_use_preview tool
-        console.log("Using GPT-5.4 Computer Use agent for deep research");
+        console.log("Using GPT-5.4 with web_search for deep research");
 
         const cuPrompt = `You are a VC research analyst. Find the official website and LinkedIn company page for "${deal.name}" (sector: ${deal.sector || "unknown"}, stage: ${deal.stage || "unknown"}).
 
@@ -183,7 +183,7 @@ ${searchSummary}
 
 ${candidateWebsite ? `Candidate website: ${candidateWebsite}` : ""}
 
-Navigate to the most promising URLs to verify. Once verified, call the extract_company_research function with the results.`;
+Use web_search to verify URLs if needed. Once confident, call the extract_company_research function with verified results.`;
 
         const cuResponse = await fetch(`${OPENAI_BASE}/v1/responses`, {
           method: "POST",
@@ -192,14 +192,10 @@ Navigate to the most promising URLs to verify. Once verified, call the extract_c
             "Content-Type": "application/json",
           },
           body: JSON.stringify({
-            model: "computer-use-preview",
+            model: "gpt-5.4",
+            reasoning: { effort: "medium" },
             tools: [
-              {
-                type: "computer_use_preview",
-                display_width: 1024,
-                display_height: 768,
-                environment: "browser",
-              },
+              { type: "web_search", name: "web_search" },
               {
                 type: "function",
                 name: "extract_company_research",
@@ -221,9 +217,9 @@ Navigate to the most promising URLs to verify. Once verified, call the extract_c
                 },
               },
             ],
-            instructions: "You are a precise research analyst. Browse to verify company information. When confident, call extract_company_research.",
+            instructions: "You are a precise research analyst. Use web_search to verify company information. When confident, call extract_company_research.",
             input: [{ role: "user", content: cuPrompt }],
-            truncation: "auto",
+            max_output_tokens: 4096,
           }),
         });
 
