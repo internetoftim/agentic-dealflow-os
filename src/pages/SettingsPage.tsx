@@ -170,17 +170,26 @@ export default function SettingsPage() {
             {AI_MODELS.map((model) => (
               <button
                 key={model.value}
-                onClick={() => handleModelChange(model.value)}
-                disabled={savingModel}
+                onClick={() => !model.disabled && handleModelChange(model.value)}
+                disabled={savingModel || model.disabled}
                 className={`text-left rounded-lg border p-3 transition-colors ${
                   aiModel === model.value
                     ? "border-primary bg-primary/5"
-                    : "border-border hover:border-primary/40 hover:bg-accent"
+                    : model.disabled
+                      ? "border-border bg-muted/30 opacity-50 cursor-not-allowed"
+                      : "border-border hover:border-primary/40 hover:bg-accent"
                 }`}
               >
                 <div className="flex items-center gap-2">
-                  <span className="text-sm font-medium text-foreground">{model.label}</span>
+                  <span className={`text-sm font-medium ${model.disabled ? "text-muted-foreground" : "text-foreground"}`}>
+                    {model.label}
+                  </span>
                   {aiModel === model.value && <Check className="h-3.5 w-3.5 text-primary ml-auto" />}
+                  {model.disabled && aiModel !== model.value && (
+                    <span className="ml-auto text-[9px] font-medium uppercase tracking-wider text-muted-foreground bg-muted rounded px-1 py-0.5">
+                      Soon
+                    </span>
+                  )}
                 </div>
                 <p className="text-xs text-muted-foreground mt-0.5">{model.description}</p>
               </button>
