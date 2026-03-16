@@ -69,7 +69,7 @@ export function useDeals() {
     return () => { supabase.removeChannel(channel); };
   }, [user, queryClient]);
 
-  return useQuery({
+  const query = useQuery({
     queryKey: ["deals", user?.id],
     queryFn: async () => {
       const { data, error } = await supabase
@@ -81,6 +81,18 @@ export function useDeals() {
     },
     enabled: !!user,
   });
+
+  // Poll every 3s when any deal is actively processing (realtime can be unreliable)
+  const hasProcessing = query.data?.some((d) => PROCESSING_STATUSES.includes(d.status) || d.status === "queued");
+  useEffect(() => {
+    if (!hasProcessing) return;
+    const interval = setInterval(() => {
+      queryClient.invalidateQueries({ queryKey: ["deals", user?.id] });
+    }, 3000);
+    return () => clearInterval(interval);
+  }, [hasProcessing, queryClient, user?.id]);
+
+  return query;
 }
 
 export function useSources(dealId?: string) {
