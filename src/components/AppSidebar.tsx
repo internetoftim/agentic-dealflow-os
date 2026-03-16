@@ -27,6 +27,20 @@ export function AppSidebar() {
   const { state } = useSidebar();
   const collapsed = state === "collapsed";
   const location = useLocation();
+  const navigate = useNavigate();
+  const { user } = useAuth();
+
+  const email = user?.email ?? "";
+  const initial = email ? email[0].toUpperCase() : "?";
+
+  const handleSignOut = async () => {
+    const { error } = await supabase.auth.signOut();
+    if (error) {
+      toast.error("Sign out failed");
+    } else {
+      navigate("/login");
+    }
+  };
 
   return (
     <Sidebar collapsible="icon" className="border-r border-sidebar-border">
