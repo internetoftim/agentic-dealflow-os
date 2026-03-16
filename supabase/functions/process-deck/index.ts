@@ -329,11 +329,23 @@ Deno.serve(async (req) => {
       userId = user.id;
     }
 
-    const { dealId, storagePath, resumeFrom, localExtracted } = await req.json();
+    const body = await req.json();
+    const { dealId, storagePath, resumeFrom, localExtracted } = body;
     if (!dealId || !storagePath) {
       return new Response(JSON.stringify({ error: "Missing dealId or storagePath" }), {
         status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
+    }
+
+    // For service-role calls, resolve userId from the deal record
+    if (isServiceRole) {
+      const { data: dealRecord } = await adminClient.from("deals").select("user_id").eq("id", dealId).single();
+      if (!dealRecord) {
+        return new Response(JSON.stringify({ error: "Deal not found" }), {
+          status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+      userId = dealRecord.user_id;
     }
 
     // When resuming, clear the paused_at_step
