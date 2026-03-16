@@ -516,7 +516,7 @@ Deno.serve(async (req) => {
         if (extractedText) {
           await adminClient.from("sources")
             .update({ extracted_text: extractedText.slice(0, 100_000) })
-            .eq("deal_id", dealId).eq("user_id", user.id);
+            .eq("deal_id", dealId).eq("user_id", userId);
         }
       }
 
