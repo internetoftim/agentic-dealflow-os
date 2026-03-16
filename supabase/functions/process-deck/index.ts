@@ -306,15 +306,27 @@ Deno.serve(async (req) => {
     const OPENAI_BASE = "https://api.openai.com";
 
     const adminClient = createClient(supabaseUrl, supabaseServiceKey);
-    const userClient = createClient(supabaseUrl, supabaseAnonKey, {
-      global: { headers: { Authorization: authHeader } },
-    });
 
-    const { data: { user }, error: userError } = await userClient.auth.getUser();
-    if (userError || !user) {
-      return new Response(JSON.stringify({ error: "Unauthorized" }), {
-        status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" },
+    // Support two auth modes:
+    // 1. User JWT (from frontend) — resolves user via getUser()
+    // 2. Service-role key (from gmail-listener cron) — userId passed in request body
+    let userId: string;
+    const isServiceRole = authHeader === `Bearer ${supabaseServiceKey}`;
+
+    if (isServiceRole) {
+      // Service-role call: userId must be in the request body (set below after parsing)
+      userId = ""; // will be set after body parse
+    } else {
+      const userClient = createClient(supabaseUrl, supabaseAnonKey, {
+        global: { headers: { Authorization: authHeader } },
       });
+      const { data: { user }, error: userError } = await userClient.auth.getUser();
+      if (userError || !user) {
+        return new Response(JSON.stringify({ error: "Unauthorized" }), {
+          status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+      userId = user.id;
     }
 
     const { dealId, storagePath, resumeFrom, localExtracted } = await req.json();
