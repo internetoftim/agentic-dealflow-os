@@ -306,22 +306,46 @@ Deno.serve(async (req) => {
     const OPENAI_BASE = "https://api.openai.com";
 
     const adminClient = createClient(supabaseUrl, supabaseServiceKey);
-    const userClient = createClient(supabaseUrl, supabaseAnonKey, {
-      global: { headers: { Authorization: authHeader } },
-    });
 
-    const { data: { user }, error: userError } = await userClient.auth.getUser();
-    if (userError || !user) {
-      return new Response(JSON.stringify({ error: "Unauthorized" }), {
-        status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" },
+    // Support two auth modes:
+    // 1. User JWT (from frontend) — resolves user via getUser()
+    // 2. Service-role key (from gmail-listener cron) — userId passed in request body
+    let userId: string;
+    const isServiceRole = authHeader === `Bearer ${supabaseServiceKey}`;
+
+    if (isServiceRole) {
+      // Service-role call: userId must be in the request body (set below after parsing)
+      userId = ""; // will be set after body parse
+    } else {
+      const userClient = createClient(supabaseUrl, supabaseAnonKey, {
+        global: { headers: { Authorization: authHeader } },
       });
+      const { data: { user }, error: userError } = await userClient.auth.getUser();
+      if (userError || !user) {
+        return new Response(JSON.stringify({ error: "Unauthorized" }), {
+          status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+      userId = user.id;
     }
 
-    const { dealId, storagePath, resumeFrom, localExtracted } = await req.json();
+    const body = await req.json();
+    const { dealId, storagePath, resumeFrom, localExtracted } = body;
     if (!dealId || !storagePath) {
       return new Response(JSON.stringify({ error: "Missing dealId or storagePath" }), {
         status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
+    }
+
+    // For service-role calls, resolve userId from the deal record
+    if (isServiceRole) {
+      const { data: dealRecord } = await adminClient.from("deals").select("user_id").eq("id", dealId).single();
+      if (!dealRecord) {
+        return new Response(JSON.stringify({ error: "Deal not found" }), {
+          status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+      userId = dealRecord.user_id;
     }
 
     // When resuming, clear the paused_at_step
@@ -338,7 +362,7 @@ Deno.serve(async (req) => {
     const { data: settings } = await adminClient
       .from("user_settings")
       .select("ai_model, drive_sync_enabled, google_provider_token, naming_pattern, drive_folder")
-      .eq("user_id", user.id)
+      .eq("user_id", userId)
       .single();
     const model = settings?.ai_model ?? "gpt-4o";
 
@@ -445,7 +469,7 @@ Deno.serve(async (req) => {
         const { data: existingSource } = await adminClient.from("sources")
           .select("extracted_text")
           .eq("deal_id", dealId)
-          .eq("user_id", user.id)
+          .eq("user_id", userId)
           .single();
         extractedText = existingSource?.extracted_text ?? "";
         console.log(`Using locally-extracted text: ${extractedText.length} chars`);
@@ -492,7 +516,7 @@ Deno.serve(async (req) => {
         if (extractedText) {
           await adminClient.from("sources")
             .update({ extracted_text: extractedText.slice(0, 100_000) })
-            .eq("deal_id", dealId).eq("user_id", user.id);
+            .eq("deal_id", dealId).eq("user_id", userId);
         }
       }
 
@@ -634,7 +658,7 @@ Deno.serve(async (req) => {
       const { data: sourceData } = await adminClient.from("sources")
         .select("extracted_text")
         .eq("deal_id", dealId)
-        .eq("user_id", user.id)
+        .eq("user_id", userId)
         .single();
       const extractedContext = sourceData?.extracted_text ?? "";
 
