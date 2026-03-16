@@ -22,9 +22,9 @@ const DEFAULT_MEMO_PROMPT = `You are a VC analyst writing an internal investment
 Be concise, data-driven, and flag any missing information. Use bullet points where appropriate.`;
 
 const AI_MODELS = [
-  { value: "gpt-oss-202b", label: "GPT-OSS 202B", description: "Sapinsapin inference bridge — default" },
+  { value: "gpt-5-mini", label: "GPT-5 Mini", description: "Fast & cost-effective — default" },
+  { value: "gpt-oss-202b", label: "GPT-OSS 202B", description: "Sapinsapin inference bridge" },
   { value: "gpt-4o", label: "GPT-4o", description: "Best multimodal, strong reasoning" },
-  { value: "gpt-5-mini", label: "GPT-5 Mini", description: "Fast & cost-effective" },
   { value: "gpt-5", label: "GPT-5", description: "Most capable, complex tasks" },
   { value: "local-florence2", label: "Local — Gemma 3n E2B", description: "In-browser multimodal via MediaPipe WebGPU (~3.4GB)" },
 ] as const;
