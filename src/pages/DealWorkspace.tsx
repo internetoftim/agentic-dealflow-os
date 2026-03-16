@@ -199,6 +199,8 @@ export default function DealWorkspace() {
             </div>
           </div>
         )}
+
+        {deals && deals.length > 0 && (
           <div>
             <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-2.5">Deals</h3>
             <div className="flex flex-col gap-1">
