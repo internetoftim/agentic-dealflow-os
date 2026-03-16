@@ -658,7 +658,7 @@ Deno.serve(async (req) => {
       const { data: sourceData } = await adminClient.from("sources")
         .select("extracted_text")
         .eq("deal_id", dealId)
-        .eq("user_id", user.id)
+        .eq("user_id", userId)
         .single();
       const extractedContext = sourceData?.extracted_text ?? "";
 
