@@ -124,7 +124,7 @@ function generateBookmarklet(appOrigin: string): string {
           sourceUrl: window.location.href
         }, '${appOrigin}');
       } catch(e){}
-      if(attempts > 30){ clearInterval(timer); alert('AgenticVC: Relay page did not respond. Please try again.'); }
+      if(attempts > 30){ clearInterval(timer); alert('EasyVC: Relay page did not respond. Please try again.'); }
     }, 500);
 
     window.addEventListener('message', function handler(ev){
