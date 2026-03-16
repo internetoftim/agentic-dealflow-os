@@ -20,6 +20,7 @@ export default function DealWorkspace() {
   const { data: sources } = useSources(selectedDealId);
   const createDeal = useCreateDealWithUpload();
   const processDocsend = useProcessDocsend();
+  const pauseDeal = usePauseDeal();
   const generateMemo = useGenerateMemo();
 
   const activeDeal = deals?.find((d) => d.id === selectedDealId) ?? deals?.[0];
