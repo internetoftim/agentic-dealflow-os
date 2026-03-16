@@ -362,7 +362,7 @@ Deno.serve(async (req) => {
     const { data: settings } = await adminClient
       .from("user_settings")
       .select("ai_model, drive_sync_enabled, google_provider_token, naming_pattern, drive_folder")
-      .eq("user_id", user.id)
+      .eq("user_id", userId)
       .single();
     const model = settings?.ai_model ?? "gpt-4o";
 
