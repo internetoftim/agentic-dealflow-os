@@ -836,6 +836,9 @@ Deno.serve(async (req) => {
     // --- STEP 6: Final status ---
     await setDealStatus(adminClient, dealId, "memo-ready");
 
+    // Process next queued deal for this user
+    await processNextQueued(adminClient, userId, supabaseUrl, supabaseServiceKey);
+
     return new Response(
       JSON.stringify({ success: true, converted: isPptx }),
       { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
