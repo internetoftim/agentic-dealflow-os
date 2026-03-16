@@ -222,10 +222,45 @@ DEAL CONTEXT:
       try {
         const recapPattern = (settings as any)?.recap_naming_pattern || "<WEBSITE> recap <MonthYYYY> p<pages>";
         driveFileName = applyNamingPattern(recapPattern, deal);
+        const docTitle = driveFileName.replace(/\.pdf$/, "");
 
-        // Create a simple text-based PDF-like content (plain text upload as Google Doc)
-        // We'll upload the memo as a plain text file with .pdf naming for consistency
-        const memoBlob = new Blob([memoContent], { type: "text/plain" });
+        // Convert markdown memo to professionally styled HTML
+        const memoHtml = await marked.parse(memoContent);
+        const styledHtml = `<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+  body { font-family: 'Inter', Arial, sans-serif; color: #1a1a1a; line-height: 1.7; margin: 0; padding: 48px 56px; font-size: 11pt; }
+  h1 { font-size: 22pt; font-weight: 700; color: #111; margin: 0 0 8px 0; padding-bottom: 12px; border-bottom: 2px solid #111; }
+  h2 { font-size: 13pt; font-weight: 600; color: #222; margin: 32px 0 12px 0; padding-bottom: 6px; border-bottom: 1px solid #e0e0e0; text-transform: uppercase; letter-spacing: 0.5px; }
+  h3 { font-size: 11pt; font-weight: 600; color: #333; margin: 20px 0 8px 0; }
+  p { margin: 0 0 10px 0; }
+  ul, ol { margin: 0 0 12px 0; padding-left: 24px; }
+  li { margin-bottom: 4px; }
+  strong { font-weight: 600; }
+  code { background: #f4f4f5; padding: 2px 6px; border-radius: 3px; font-size: 10pt; }
+  table { border-collapse: collapse; width: 100%; margin: 12px 0; }
+  th, td { border: 1px solid #d4d4d8; padding: 8px 12px; text-align: left; font-size: 10pt; }
+  th { background: #f4f4f5; font-weight: 600; }
+  blockquote { border-left: 3px solid #d4d4d8; margin: 12px 0; padding: 8px 16px; color: #555; background: #fafafa; }
+  .header-meta { color: #666; font-size: 9pt; margin-bottom: 24px; }
+  hr { border: none; border-top: 1px solid #e0e0e0; margin: 24px 0; }
+</style>
+</head>
+<body>
+  <h1>${docTitle}</h1>
+  <div class="header-meta">
+    <strong>${deal.name}</strong> · ${deal.sector} · ${deal.stage}<br>
+    Generated ${new Date().toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" })}
+  </div>
+  <hr>
+  ${memoHtml}
+</body>
+</html>`;
+
+        const htmlBlob = new Blob([styledHtml], { type: "text/html" });
 
         // Resolve drive folder
         const folderPath = (settings as any)?.drive_folder || "WAITING ROOM";
@@ -269,34 +304,91 @@ DEAL CONTEXT:
           parentId = segmentId;
         }
 
-        // Upload memo as Google Doc (converts markdown to doc)
-        const metadata: Record<string, unknown> = {
-          name: driveFileName.replace(/\.pdf$/, ""),
+        // Step 5a: Upload styled HTML as temporary Google Doc
+        const tempMeta: Record<string, unknown> = {
+          name: `_temp_${docTitle}`,
           mimeType: "application/vnd.google-apps.document",
         };
-        if (parentId) metadata.parents = [parentId];
+        if (parentId) tempMeta.parents = [parentId];
 
-        const form = new FormData();
-        form.append("metadata", new Blob([JSON.stringify(metadata)], { type: "application/json" }));
-        form.append("file", memoBlob);
+        const tempForm = new FormData();
+        tempForm.append("metadata", new Blob([JSON.stringify(tempMeta)], { type: "application/json" }));
+        tempForm.append("file", htmlBlob);
 
-        const driveRes = await fetch(
-          "https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&convert=true",
+        const tempRes = await fetch(
+          "https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart",
           {
             method: "POST",
             headers: { Authorization: `Bearer ${settings.google_provider_token}` },
-            body: form,
+            body: tempForm,
           }
         );
 
-        if (driveRes.ok) {
-          const driveFile = await driveRes.json();
-          driveFileId = driveFile.id;
-          console.log(`Recap uploaded to Drive: ${driveFileName} (${driveFileId})`);
-        } else {
-          const errText = await driveRes.text();
-          console.error("Drive upload failed:", driveRes.status, errText);
+        if (!tempRes.ok) {
+          const errText = await tempRes.text();
+          console.error("Temp doc upload failed:", tempRes.status, errText);
+          throw new Error("Failed to create temporary Google Doc");
         }
+
+        const tempDoc = await tempRes.json();
+        const tempDocId = tempDoc.id;
+        console.log(`Temp Google Doc created: ${tempDocId}`);
+
+        // Step 5b: Export Google Doc as PDF
+        const exportRes = await fetch(
+          `https://www.googleapis.com/drive/v3/files/${tempDocId}/export?mimeType=application/pdf`,
+          { headers: { Authorization: `Bearer ${settings.google_provider_token}` } }
+        );
+
+        if (!exportRes.ok) {
+          const errText = await exportRes.text();
+          console.error("PDF export failed:", exportRes.status, errText);
+          // Clean up temp doc
+          await fetch(`https://www.googleapis.com/drive/v3/files/${tempDocId}`, {
+            method: "DELETE",
+            headers: { Authorization: `Bearer ${settings.google_provider_token}` },
+          });
+          throw new Error("Failed to export PDF from Google Docs");
+        }
+
+        const pdfBytes = await exportRes.arrayBuffer();
+        console.log(`PDF exported: ${pdfBytes.byteLength} bytes`);
+
+        // Step 5c: Upload the final PDF
+        const pdfMeta: Record<string, unknown> = {
+          name: driveFileName,
+          mimeType: "application/pdf",
+        };
+        if (parentId) pdfMeta.parents = [parentId];
+
+        const pdfForm = new FormData();
+        pdfForm.append("metadata", new Blob([JSON.stringify(pdfMeta)], { type: "application/json" }));
+        pdfForm.append("file", new Blob([pdfBytes], { type: "application/pdf" }));
+
+        const pdfUploadRes = await fetch(
+          "https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart",
+          {
+            method: "POST",
+            headers: { Authorization: `Bearer ${settings.google_provider_token}` },
+            body: pdfForm,
+          }
+        );
+
+        if (pdfUploadRes.ok) {
+          const pdfFile = await pdfUploadRes.json();
+          driveFileId = pdfFile.id;
+          console.log(`PDF recap uploaded to Drive: ${driveFileName} (${driveFileId})`);
+        } else {
+          const errText = await pdfUploadRes.text();
+          console.error("PDF upload failed:", pdfUploadRes.status, errText);
+        }
+
+        // Step 5d: Delete temporary Google Doc
+        await fetch(`https://www.googleapis.com/drive/v3/files/${tempDocId}`, {
+          method: "DELETE",
+          headers: { Authorization: `Bearer ${settings.google_provider_token}` },
+        }).catch((e) => console.warn("Failed to delete temp doc:", e));
+
       } catch (e) {
         console.error("Drive upload error (non-fatal):", e);
       }
