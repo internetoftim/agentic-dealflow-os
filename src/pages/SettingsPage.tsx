@@ -6,6 +6,7 @@ import { toast } from "sonner";
 // import { BookmarkletInstaller } from "@/components/BookmarkletInstaller";
 
 const DEFAULT_PATTERN = "<WEBSITE> deck <MonthYYYY> p<pages>.pdf";
+const DEFAULT_RECAP_PATTERN = "<WEBSITE> recap <MonthYYYY> p<pages>";
 
 const DEFAULT_MEMO_PROMPT = `You are a VC analyst writing an internal investment memo. Given the extracted deck content and any deep research data, produce a structured memo with the following sections:
 
@@ -22,9 +23,9 @@ const DEFAULT_MEMO_PROMPT = `You are a VC analyst writing an internal investment
 Be concise, data-driven, and flag any missing information. Use bullet points where appropriate.`;
 
 const AI_MODELS = [
-  { value: "gpt-oss-202b", label: "GPT-OSS 202B", description: "Sapinsapin inference bridge — default" },
+  { value: "gpt-5-mini", label: "GPT-5 Mini", description: "Fast & cost-effective — default" },
+  { value: "gpt-oss-202b", label: "GPT-OSS 202B", description: "Sapinsapin inference bridge" },
   { value: "gpt-4o", label: "GPT-4o", description: "Best multimodal, strong reasoning" },
-  { value: "gpt-5-mini", label: "GPT-5 Mini", description: "Fast & cost-effective" },
   { value: "gpt-5", label: "GPT-5", description: "Most capable, complex tasks" },
   { value: "local-florence2", label: "Local — Gemma 3n E2B", description: "In-browser multimodal via MediaPipe WebGPU (~3.4GB)" },
 ] as const;
@@ -54,10 +55,11 @@ export default function SettingsPage() {
   const [sampleFilename, setSampleFilename] = useState("novastar.ai deck Mar2026 p24.pdf");
   const [detectingPattern, setDetectingPattern] = useState(false);
   const [patternDetected, setPatternDetected] = useState(false);
-  const [aiModel, setAiModel] = useState("gpt-oss-202b");
+  const [aiModel, setAiModel] = useState("gpt-5-mini");
   const [deepResearchProvider, setDeepResearchProvider] = useState<"custom" | "firecrawl">("custom");
   const [driveFolder, setDriveFolder] = useState("WAITING ROOM");
   const [memoPrompt, setMemoPrompt] = useState(DEFAULT_MEMO_PROMPT);
+  const [recapPattern, setRecapPattern] = useState(DEFAULT_RECAP_PATTERN);
   const [savingModel, setSavingModel] = useState(false);
 
   // Load settings from DB
@@ -65,12 +67,12 @@ export default function SettingsPage() {
     if (!user) return;
     supabase
       .from("user_settings")
-      .select("ai_model, gmail_label_enabled, drive_sync_enabled, spam_filter_enabled, deep_research_provider, naming_pattern, naming_mode, drive_folder, memo_prompt")
+      .select("ai_model, gmail_label_enabled, drive_sync_enabled, spam_filter_enabled, deep_research_provider, naming_pattern, naming_mode, drive_folder, memo_prompt, recap_naming_pattern")
       .eq("user_id", user.id)
       .single()
       .then(({ data }) => {
         if (data) {
-          setAiModel(data.ai_model ?? "gpt-oss-202b");
+          setAiModel(data.ai_model ?? "gpt-5-mini");
           setGmailLabel(data.gmail_label_enabled ?? true);
           setDriveSync(data.drive_sync_enabled ?? true);
           setSpamFilter(data.spam_filter_enabled ?? true);
@@ -82,6 +84,9 @@ export default function SettingsPage() {
           }
           if (data.naming_mode) {
             setNamingTab(data.naming_mode as "auto" | "manual");
+          }
+          if ((data as any).recap_naming_pattern) {
+            setRecapPattern((data as any).recap_naming_pattern);
           }
         }
       });
@@ -501,6 +506,65 @@ export default function SettingsPage() {
               </p>
             </div>
           )}
+        </div>
+      </section>
+
+      {/* Recap Naming Pattern */}
+      <section className="mb-8">
+        <h2 className="text-sm font-semibold text-foreground mb-4 flex items-center gap-2">
+          <FileText className="h-4 w-4 text-muted-foreground" />
+          Recap File Naming
+        </h2>
+        <div className="rounded-lg border border-border bg-card p-5 space-y-3">
+          <p className="text-xs text-muted-foreground">
+            Pattern used when uploading generated memos to Google Drive. Same tokens as deck naming but defaults to "recap" instead of "deck".
+          </p>
+          <input
+            type="text"
+            value={recapPattern}
+            onChange={(e) => setRecapPattern(e.target.value)}
+            onBlur={async () => {
+              if (!user) return;
+              const { error } = await supabase
+                .from("user_settings")
+                .upsert({ user_id: user.id, recap_naming_pattern: recapPattern.trim() || DEFAULT_RECAP_PATTERN } as any, { onConflict: "user_id" });
+              if (error) toast.error("Failed to save recap pattern");
+              else toast.success("Recap naming pattern saved");
+            }}
+            className="w-full rounded-md border border-input bg-card px-3 py-2 text-sm font-mono outline-none placeholder:text-muted-foreground focus:ring-1 focus:ring-ring"
+          />
+          <div className="flex items-center justify-between">
+            <div className="flex flex-wrap gap-1.5">
+              {["<WEBSITE>", "<NAME>", "<MonthYYYY>", "<pages>", "<SECTOR>", "<STAGE>"].map((token) => (
+                <button
+                  key={token}
+                  onClick={() => setRecapPattern((p) => p + " " + token)}
+                  className="rounded bg-muted px-2 py-0.5 text-xs font-mono text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
+                >
+                  {token}
+                </button>
+              ))}
+            </div>
+            {recapPattern !== DEFAULT_RECAP_PATTERN && (
+              <button
+                onClick={async () => {
+                  setRecapPattern(DEFAULT_RECAP_PATTERN);
+                  if (!user) return;
+                  await supabase
+                    .from("user_settings")
+                    .upsert({ user_id: user.id, recap_naming_pattern: DEFAULT_RECAP_PATTERN } as any, { onConflict: "user_id" });
+                  toast.success("Recap pattern reset to default");
+                }}
+                className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
+              >
+                <RotateCcw className="h-3 w-3" />
+                Reset
+              </button>
+            )}
+          </div>
+          <p className="text-xs text-muted-foreground">
+            Default: <code className="bg-muted rounded px-1">{DEFAULT_RECAP_PATTERN}</code>
+          </p>
         </div>
       </section>
 

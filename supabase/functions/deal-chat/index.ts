@@ -58,7 +58,7 @@ Deno.serve(async (req) => {
       .eq("user_id", user.id)
       .single();
     // If local model selected, fall back to Sapinsapin for chat (chat requires a cloud model)
-    const model = (settings?.ai_model === "local-florence2") ? "gpt-oss-202b" : (settings?.ai_model ?? "gpt-4o");
+    const model = (settings?.ai_model === "local-florence2") ? "gpt-5-mini" : (settings?.ai_model ?? "gpt-5-mini");
 
     // Fetch deal context if dealId provided
     let dealContext = "";

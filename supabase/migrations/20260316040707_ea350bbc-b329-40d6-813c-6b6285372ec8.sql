@@ -1,0 +1,1 @@
+ALTER TABLE public.user_settings ADD COLUMN IF NOT EXISTS recap_naming_pattern text DEFAULT '<WEBSITE> recap <MonthYYYY> p<pages>';

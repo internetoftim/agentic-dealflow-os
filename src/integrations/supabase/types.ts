@@ -165,6 +165,7 @@ export type Database = {
           memo_prompt: string | null
           naming_mode: string | null
           naming_pattern: string | null
+          recap_naming_pattern: string | null
           spam_filter_enabled: boolean | null
           updated_at: string
           user_id: string
@@ -182,6 +183,7 @@ export type Database = {
           memo_prompt?: string | null
           naming_mode?: string | null
           naming_pattern?: string | null
+          recap_naming_pattern?: string | null
           spam_filter_enabled?: boolean | null
           updated_at?: string
           user_id: string
@@ -199,6 +201,7 @@ export type Database = {
           memo_prompt?: string | null
           naming_mode?: string | null
           naming_pattern?: string | null
+          recap_naming_pattern?: string | null
           spam_filter_enabled?: boolean | null
           updated_at?: string
           user_id?: string
