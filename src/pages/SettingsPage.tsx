@@ -240,7 +240,7 @@ export default function SettingsPage() {
           Deep Research Agent
         </h2>
         <div className="rounded-lg border border-border bg-card p-5">
-          <p className="text-xs text-muted-foreground mb-3">Choose which engine powers company deep research after deck extraction.</p>
+          <p className="text-xs text-muted-foreground mb-3">Choose which engine powers company deep research after deck extraction. Selecting GPT-5.4 as your AI model automatically enables Computer Use.</p>
           <div className="grid grid-cols-2 gap-2">
             {([
               { value: "custom" as const, label: "Custom Agent", description: "Uses your selected AI model + Firecrawl search" },
