@@ -165,6 +165,24 @@ export function useCreateDealWithUpload() {
 
       // If queued, still upload the file + create source but don't start processing
       if (hasActiveJob) {
+        const storagePath = `${user.id}/${deal.id}/${file.name}`;
+        const { error: uploadError } = await supabase.storage
+          .from("decks")
+          .upload(storagePath, file);
+        if (uploadError) throw uploadError;
+
+        await supabase.from("sources").insert({
+          deal_id: deal.id,
+          user_id: user.id,
+          file_name: file.name,
+          original_size: `${(file.size / (1024 * 1024)).toFixed(1)}MB`,
+          storage_path: storagePath,
+          source_type: "upload",
+          processing_status: "queued",
+        });
+
+        return deal;
+      }
 
       // 2. Compress (PDF) or pass-through (PPTX)
       await supabase.from("deals").update({ status: "compressing" }).eq("id", deal.id);
@@ -215,7 +233,6 @@ export function useCreateDealWithUpload() {
       if (sourceError) throw sourceError;
 
       // 6. Trigger processing pipeline (fire-and-forget)
-      // Pass flag so edge function knows text was already extracted locally
       supabase.functions
         .invoke("process-deck", {
           body: {
