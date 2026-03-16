@@ -148,19 +148,23 @@ export function useCreateDealWithUpload() {
         .single();
       const isLocalModel = settings?.ai_model === "local-florence2";
 
-      // 1. Create the deal with "uploading" status
+      // 1. Create the deal — if another job is active, set status to "queued"
+      const initialStatus = hasActiveJob ? "queued" : "uploading";
       const { data: deal, error: dealError } = await supabase
         .from("deals")
         .insert({
           user_id: user.id,
           name,
           source: "manual",
-          status: "uploading",
+          status: initialStatus,
           deck_size: `${(file.size / (1024 * 1024)).toFixed(1)}MB`,
         })
         .select()
         .single();
       if (dealError) throw dealError;
+
+      // If queued, still upload the file + create source but don't start processing
+      if (hasActiveJob) {
 
       // 2. Compress (PDF) or pass-through (PPTX)
       await supabase.from("deals").update({ status: "compressing" }).eq("id", deal.id);
