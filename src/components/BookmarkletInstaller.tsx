@@ -41,7 +41,7 @@ function generateBookmarklet(appOrigin: string): string {
 
   var targetDoc = findDoc();
   var canvas = findCanvas(document);
-  if (!canvas) { alert('AgenticVC: No canvas found. The deck may still be loading, or the viewer uses a non-canvas renderer. Please wait for the deck to fully load and try again.'); return; }
+  if (!canvas) { alert('EasyVC: No canvas found. The deck may still be loading, or the viewer uses a non-canvas renderer. Please wait for the deck to fully load and try again.'); return; }
 
   function findBtn(d){
     var selectors = [
@@ -93,7 +93,7 @@ function generateBookmarklet(appOrigin: string): string {
       var dataUrl = canvas.toDataURL('image/jpeg', 0.85);
       slides.push(dataUrl);
     } catch(e) {
-      alert('AgenticVC: Canvas is tainted (cross-origin restriction). Cloud fallback required.');
+      alert('EasyVC: Canvas is tainted (cross-origin restriction). Cloud fallback required.');
       sendToRelay();
       return;
     }
@@ -109,9 +109,9 @@ function generateBookmarklet(appOrigin: string): string {
   }
 
   function sendToRelay(){
-    if(slides.length === 0){ alert('AgenticVC: No slides captured.'); return; }
+    if(slides.length === 0){ alert('EasyVC: No slides captured.'); return; }
     var w = window.open(RELAY_URL, '_blank');
-    if(!w){ alert('AgenticVC: Popup blocked. Please allow popups for this site.'); return; }
+    if(!w){ alert('EasyVC: Popup blocked. Please allow popups for this site.'); return; }
 
     var attempts = 0;
     var timer = setInterval(function(){
@@ -124,19 +124,19 @@ function generateBookmarklet(appOrigin: string): string {
           sourceUrl: window.location.href
         }, '${appOrigin}');
       } catch(e){}
-      if(attempts > 30){ clearInterval(timer); alert('AgenticVC: Relay page did not respond. Please try again.'); }
+      if(attempts > 30){ clearInterval(timer); alert('EasyVC: Relay page did not respond. Please try again.'); }
     }, 500);
 
     window.addEventListener('message', function handler(ev){
       if(ev.data && ev.data.type === 'DECK_INGESTION_ACK'){
         clearInterval(timer);
         window.removeEventListener('message', handler);
-        alert('AgenticVC: ' + slides.length + ' slides sent successfully!');
+        alert('EasyVC: ' + slides.length + ' slides sent successfully!');
       }
     });
   }
 
-  var ok = confirm('AgenticVC Bookmarklet\\n\\nReady to capture ' + getTotalPages() + ' slides from this deck.\\n\\nClick OK to start.');
+  var ok = confirm('EasyVC Bookmarklet\\n\\nReady to capture ' + getTotalPages() + ' slides from this deck.\\n\\nClick OK to start.');
   if(ok) captureSlide();
 })();
 `.trim();

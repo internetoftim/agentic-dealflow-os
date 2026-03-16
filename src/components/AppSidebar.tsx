@@ -33,7 +33,7 @@ export function AppSidebar() {
             <Zap className="h-4 w-4 text-primary-foreground" />
           </div>
           {!collapsed && (
-            <span className="text-base font-semibold text-foreground tracking-tight">AgenticVC</span>
+            <span className="text-base font-semibold text-foreground tracking-tight">EasyVC</span>
           )}
         </div>
 
