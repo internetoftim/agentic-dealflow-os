@@ -42,8 +42,8 @@ const App = () => (
                 <ProtectedRoute>
                   <AppLayout>
                     <Routes>
-                      <Route path="/" element={<KanbanPipeline />} />
-                      <Route path="/workspace" element={<DealWorkspace />} />
+                      <Route path="/" element={<DealWorkspace />} />
+                      <Route path="/pipeline" element={<KanbanPipeline />} />
                       <Route path="/data-room" element={<DataRoom />} />
                       <Route path="/settings" element={<SettingsPage />} />
                       <Route path="*" element={<NotFound />} />
