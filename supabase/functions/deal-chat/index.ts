@@ -110,7 +110,7 @@ CURRENT DEAL CONTEXT:
       }
     }
 
-    const systemPrompt = `You are a senior VC analyst assistant called AgenticVC. You help venture capital investors analyze startup pitch decks and deals.
+    const systemPrompt = `You are a senior VC analyst assistant called EasyVC. You help venture capital investors analyze startup pitch decks and deals.
 
 You have access to the deal data extracted from pitch decks AND the full text content of uploaded deck slides/pages. Use this content to answer detailed questions about the deal, provide analysis, and help draft investment memos.
 

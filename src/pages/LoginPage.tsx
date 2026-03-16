@@ -17,7 +17,7 @@ export default function LoginPage() {
   return (
     <div className="min-h-screen flex items-center justify-center bg-background">
       <div className="w-full max-w-sm rounded-xl border border-border bg-card p-8 text-center">
-        <h1 className="text-2xl font-semibold text-foreground mb-2">AgenticVC</h1>
+        <h1 className="text-2xl font-semibold text-foreground mb-2">EasyVC</h1>
         <p className="text-sm text-muted-foreground mb-6">
           Sign in to access your deal pipeline
         </p>

@@ -136,7 +136,7 @@ function generateBookmarklet(appOrigin: string): string {
     });
   }
 
-  var ok = confirm('AgenticVC Bookmarklet\\n\\nReady to capture ' + getTotalPages() + ' slides from this deck.\\n\\nClick OK to start.');
+  var ok = confirm('EasyVC Bookmarklet\\n\\nReady to capture ' + getTotalPages() + ' slides from this deck.\\n\\nClick OK to start.');
   if(ok) captureSlide();
 })();
 `.trim();
