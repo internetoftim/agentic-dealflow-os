@@ -12,10 +12,12 @@ const OPENAI_BASE = "https://api.openai.com";
 
 function getAiConfig(model: string) {
   const isSapinsapin = model === "gpt-oss-202b";
+  const isComputerUse = model === "gpt-5.4";
   return {
     isSapinsapin,
+    isComputerUse,
     baseUrl: isSapinsapin ? SAPINSAPIN_BASE : OPENAI_BASE,
-    modelName: isSapinsapin ? SAPINSAPIN_MODEL : model,
+    modelName: isComputerUse ? "computer-use-preview" : isSapinsapin ? SAPINSAPIN_MODEL : model,
     envKey: isSapinsapin ? "APOLLO_API_KEY" : "OPENAI_API_KEY",
   };
 }
