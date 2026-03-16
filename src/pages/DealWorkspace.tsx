@@ -12,7 +12,6 @@ export default function DealWorkspace() {
   const [chatInput, setChatInput] = useState("");
   const [docSendUrl, setDocSendUrl] = useState("");
   const [selectedDealId, setSelectedDealId] = useState<string | undefined>();
-  const [selectedDealId, setSelectedDealId] = useState<string | undefined>();
   const chatEndRef = useRef<HTMLDivElement>(null);
 
   const { data: deals } = useDeals();
