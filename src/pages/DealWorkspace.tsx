@@ -1,6 +1,6 @@
 import { useState, useCallback, useRef, useEffect } from "react";
 import { Upload, Link, Cog, Check, Search, Send, FileText, Globe, Layers, Square, Linkedin } from "lucide-react";
-import { useDeals, useSources, useCreateDealWithUpload } from "@/hooks/useDeals";
+import { useDeals, useSources, useCreateDealWithUpload, useProcessDocsend } from "@/hooks/useDeals";
 import { useDealChat } from "@/hooks/useDealChat";
 import { toast } from "sonner";
 import ReactMarkdown from "react-markdown";
