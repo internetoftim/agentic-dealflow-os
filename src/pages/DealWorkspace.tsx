@@ -111,10 +111,18 @@ export default function DealWorkspace() {
                 type="text"
                 placeholder="Paste DocSend / PandaDoc URL"
                 className="flex-1 text-xs bg-transparent outline-none placeholder:text-muted-foreground"
+                value={docSendUrl}
+                onChange={(e) => setDocSendUrl(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && handleFetchUrl()}
+                disabled={processDocsend.isPending}
               />
             </div>
-            <button className="px-3 py-2 rounded-md bg-primary text-primary-foreground text-xs font-medium hover:opacity-90 transition-opacity">
-              Fetch
+            <button
+              onClick={handleFetchUrl}
+              disabled={processDocsend.isPending || !docSendUrl.trim()}
+              className="px-3 py-2 rounded-md bg-primary text-primary-foreground text-xs font-medium hover:opacity-90 transition-opacity disabled:opacity-50"
+            >
+              {processDocsend.isPending ? "Fetching…" : "Fetch"}
             </button>
           </div>
         </div>
