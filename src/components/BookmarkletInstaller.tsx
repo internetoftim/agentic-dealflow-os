@@ -131,7 +131,7 @@ function generateBookmarklet(appOrigin: string): string {
       if(ev.data && ev.data.type === 'DECK_INGESTION_ACK'){
         clearInterval(timer);
         window.removeEventListener('message', handler);
-        alert('AgenticVC: ' + slides.length + ' slides sent successfully!');
+        alert('EasyVC: ' + slides.length + ' slides sent successfully!');
       }
     });
   }
