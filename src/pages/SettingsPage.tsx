@@ -24,6 +24,7 @@ Be concise, data-driven, and flag any missing information. Use bullet points whe
 
 const AI_MODELS = [
   { value: "gpt-5-mini", label: "GPT-5 Mini", description: "Fast & cost-effective — default", disabled: false },
+  { value: "gpt-5.4", label: "GPT-5.4", description: "Native computer-use option for browser automation", disabled: false },
   { value: "gpt-oss-202b", label: "GPT-OSS 202B", description: "SapinsapinAI Sovereign AI stack", disabled: true },
   { value: "gpt-4o", label: "GPT-4o", description: "Best multimodal, strong reasoning", disabled: true },
   { value: "gpt-5", label: "GPT-5", description: "Most capable, complex tasks", disabled: true },
