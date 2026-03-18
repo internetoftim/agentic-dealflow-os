@@ -108,21 +108,24 @@ export default function DealWorkspace() {
             </p>
             <input type="file" accept=".pdf,.ppt,.pptx" className="hidden" onChange={handleFileSelect} />
           </label>
-          <div className="flex gap-2 opacity-50 pointer-events-none" title="DocSend ingestion coming soon">
-            <div className="flex-1 flex items-center gap-2 rounded-md border border-input bg-muted px-3 py-2">
+          <div className="flex gap-2">
+            <div className="flex-1 flex items-center gap-2 rounded-md border border-input bg-background px-3 py-2">
               <Link className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
               <input
                 type="text"
-                placeholder="DocSend / PandaDoc — coming soon"
-                className="flex-1 text-xs bg-transparent outline-none placeholder:text-muted-foreground cursor-not-allowed"
-                disabled
+                placeholder="Paste DocSend / PandaDoc link…"
+                value={docSendUrl}
+                onChange={(e) => setDocSendUrl(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && handleFetchUrl()}
+                className="flex-1 text-xs bg-transparent outline-none placeholder:text-muted-foreground"
               />
             </div>
             <button
-              disabled
+              onClick={handleFetchUrl}
+              disabled={!docSendUrl.trim() || processDocsend.isPending}
               className="px-3 py-2 rounded-md bg-primary text-primary-foreground text-xs font-medium disabled:opacity-50"
             >
-              Fetch
+              {processDocsend.isPending ? "Fetching…" : "Fetch"}
             </button>
           </div>
         </div>
