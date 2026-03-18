@@ -1,4 +1,4 @@
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { createClient, type SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -9,9 +9,9 @@ const corsHeaders = {
 /**
  * Process DocSend Link Edge Function
  *
- * Accepts a DocSend (or PandaDoc) URL, uses Firecrawl to scrape the page
- * content and capture a screenshot, creates a deal record and source,
- * then stores extracted text for downstream analysis.
+ * Accepts a DocSend (or PandaDoc) URL and attempts a headless-browser capture
+ * flow first (OpenAI Responses + computer_use_preview). If that fails, it
+ * falls back to Firecrawl scrape + screenshot.
  */
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
@@ -31,14 +31,8 @@ Deno.serve(async (req) => {
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const supabaseAnonKey = Deno.env.get("SUPABASE_ANON_KEY")!;
-    const firecrawlApiKey = Deno.env.get("FIRECRAWL_API_KEY");
-
-    if (!firecrawlApiKey) {
-      return new Response(JSON.stringify({ error: "FIRECRAWL_API_KEY is not configured" }), {
-        status: 500,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
+    const firecrawlApiKey = Deno.env.get("FIRECRAWL_API_KEY")?.trim();
+    const openaiApiKey = Deno.env.get("OPENAI_API_KEY")?.trim();
 
     const adminClient = createClient(supabaseUrl, supabaseServiceKey);
     const userClient = createClient(supabaseUrl, supabaseAnonKey, {
@@ -104,7 +98,20 @@ Deno.serve(async (req) => {
         .update({ status: "scraping", updated_at: new Date().toISOString() })
         .eq("id", deal.id);
 
-      const scrapeResult = await scrapeWithFirecrawl(firecrawlApiKey, normalizedUrl);
+      // Fetch user model preference early so we can pick the capture engine
+      const { data: settings } = await adminClient
+        .from("user_settings")
+        .select("ai_model")
+        .eq("user_id", user.id)
+        .single();
+      const aiModel = settings?.ai_model ?? "gpt-5-mini";
+
+      const scrapeResult = await scrapeDocsendOrPandadoc({
+        url: normalizedUrl,
+        model: aiModel,
+        openaiApiKey,
+        firecrawlApiKey,
+      });
 
       console.log(
         `Firecrawl returned ${scrapeResult.markdown.length} chars markdown, ` +
@@ -225,6 +232,141 @@ async function scrapeWithFirecrawl(
   };
 }
 
+type ScrapeResult = { markdown: string; screenshotUrl: string | null; title: string | null };
+type ComputerUseOutputItem = {
+  type?: string;
+  name?: string;
+  arguments?: string;
+};
+
+async function scrapeDocsendOrPandadoc(params: {
+  url: string;
+  model: string;
+  openaiApiKey?: string | null;
+  firecrawlApiKey?: string | null;
+}): Promise<ScrapeResult> {
+  const { url, model, openaiApiKey, firecrawlApiKey } = params;
+
+  // Preferred path: headless browser driven by model computer use.
+  if (openaiApiKey) {
+    try {
+      console.log(`Trying headless computer-use capture with model ${model}`);
+      return await scrapeWithComputerUse(openaiApiKey, url, model);
+    } catch (e) {
+      console.warn("Computer-use capture failed, falling back to Firecrawl:", e);
+    }
+  } else {
+    console.warn("OPENAI_API_KEY missing — cannot run computer-use capture");
+  }
+
+  if (!firecrawlApiKey) {
+    throw new Error("No extraction engine available: missing OPENAI_API_KEY and FIRECRAWL_API_KEY");
+  }
+
+  return await scrapeWithFirecrawl(firecrawlApiKey, url);
+}
+
+async function scrapeWithComputerUse(apiKey: string, url: string, preferredModel: string): Promise<ScrapeResult> {
+  const model = normalizeComputerUseModel(preferredModel);
+  const prompt = `Open this deck URL in a headless browser: ${url}
+
+Important:
+1) Pass any view gate that only requires standard web interaction.
+2) Navigate slide-by-slide using the page controls (next arrow / right key) until the end.
+3) Capture visible text from each page.
+4) Take screenshots while navigating pages.
+5) Call submit_docsend_capture with:
+   - markdown: consolidated notes per page in markdown
+   - page_count: total pages visited
+   - title: best-effort deck title
+   - screenshot_count: number of screenshots captured
+
+If blocked by an auth wall that cannot be passed, still call submit_docsend_capture with best effort content and explain the blocker in markdown.`;
+
+  const res = await fetch("https://api.openai.com/v1/responses", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      model,
+      reasoning: { effort: "medium" },
+      truncation: "auto",
+      tools: [
+        {
+          type: "computer_use_preview",
+          display_width: 1366,
+          display_height: 768,
+          environment: "browser",
+        },
+        {
+          type: "function",
+          name: "submit_docsend_capture",
+          description: "Return extracted deck content after browsing and screenshotting pages.",
+          parameters: {
+            type: "object",
+            properties: {
+              title: { type: ["string", "null"] },
+              markdown: { type: "string" },
+              page_count: { type: "number" },
+              screenshot_count: { type: "number" },
+            },
+            required: ["markdown", "page_count", "screenshot_count", "title"],
+            additionalProperties: false,
+          },
+        },
+      ],
+      instructions:
+        "You are a meticulous VC data extraction agent. Navigate deck pages carefully, capture content, and always finish by calling submit_docsend_capture.",
+      input: [{ role: "user", content: prompt }],
+      max_output_tokens: 8000,
+    }),
+  });
+
+  if (!res.ok) {
+    throw new Error(`Computer use API failed [${res.status}]: ${await res.text()}`);
+  }
+
+  const data = await res.json();
+  const outputItems: ComputerUseOutputItem[] = Array.isArray(data.output) ? data.output : [];
+  const toolCall = outputItems.find(
+    (item) => item.type === "function_call" && item.name === "submit_docsend_capture"
+  );
+
+  if (!toolCall?.arguments) {
+    throw new Error("Computer use response did not include submit_docsend_capture");
+  }
+
+  const capture = JSON.parse(toolCall.arguments);
+  const markdown = String(capture?.markdown || "").trim();
+
+  if (!markdown) {
+    throw new Error("Computer use capture returned empty markdown");
+  }
+
+  const pageCount = Number.isFinite(capture?.page_count) ? Math.max(1, Math.round(capture.page_count)) : 0;
+  const screenshotCount = Number.isFinite(capture?.screenshot_count)
+    ? Math.max(0, Math.round(capture.screenshot_count))
+    : 0;
+  console.log(
+    `Computer-use capture complete — model=${model}, pages=${pageCount}, screenshots=${screenshotCount}`
+  );
+
+  return {
+    markdown,
+    screenshotUrl: null,
+    title: capture?.title ?? null,
+  };
+}
+
+function normalizeComputerUseModel(model: string): string {
+  // Keep gpt-5-mini as default workflow; allow gpt-5.4 as explicit advanced option.
+  if (model === "gpt-5.4") return "gpt-5.4";
+  if (model === "gpt-5-mini" || model === "gpt-5") return model;
+  return "gpt-5-mini";
+}
+
 /** Derive a deal name from a DocSend/PandaDoc URL */
 function deriveDealName(url: string): string {
   // Try to extract slug: docsend.com/view/abc123 → "abc123"
@@ -257,7 +399,7 @@ function estimatePages(markdown: string): number {
 
 /** Use the configured AI model to extract metadata from scraped text */
 async function extractMetadata(
-  adminClient: any,
+  adminClient: SupabaseClient,
   dealId: string,
   userId: string,
   text: string
@@ -268,7 +410,7 @@ async function extractMetadata(
     .select("ai_model")
     .eq("user_id", userId)
     .single();
-  const model = settings?.ai_model ?? "gpt-oss-202b";
+  const model = settings?.ai_model ?? "gpt-5-mini";
 
   const isSapinsapin = model === "gpt-oss-202b";
   const sapinsapinModel = "/models/gpt-oss-20b-balitanlp-cpt";
