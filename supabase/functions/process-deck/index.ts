@@ -443,7 +443,7 @@ Deno.serve(async (req) => {
 
       const { error: pdfUploadError } = await adminClient.storage
         .from("decks")
-        .upload(pdfStoragePath, new Blob([conversionResult.pdfBytes], { type: "application/pdf" }), {
+        .upload(pdfStoragePath, new Blob([conversionResult.pdfBytes as BlobPart], { type: "application/pdf" }), {
           upsert: true,
         });
       if (pdfUploadError) {
