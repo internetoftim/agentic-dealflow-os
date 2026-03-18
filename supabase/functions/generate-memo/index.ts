@@ -269,16 +269,16 @@ DEAL CONTEXT:
 
         for (const segment of folderSegments) {
           const escapedName = segment.replace(/'/g, "\\'");
-          const parentQuery = parentId ? ` and '${parentId}' in parents` : "";
-          const q = `name='${escapedName}' and mimeType='application/vnd.google-apps.folder' and trashed=false${parentQuery}`;
-          const folderSearchRes = await fetch(
+          const parentQuery: string = parentId ? ` and '${parentId}' in parents` : "";
+          const q: string = `name='${escapedName}' and mimeType='application/vnd.google-apps.folder' and trashed=false${parentQuery}`;
+          const folderSearchRes: Response = await fetch(
             `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(q)}&fields=files(id)`,
             { headers: { Authorization: `Bearer ${settings.google_provider_token}` } }
           );
 
           let segmentId: string | null = null;
           if (folderSearchRes.ok) {
-            const folderData = await folderSearchRes.json();
+            const folderData: any = await folderSearchRes.json();
             if (folderData.files?.length > 0) segmentId = folderData.files[0].id;
           }
 

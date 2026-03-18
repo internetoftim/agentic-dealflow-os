@@ -472,7 +472,7 @@ Deno.serve(async (req) => {
 
       const { error: compressUploadError } = await adminClient.storage
         .from("decks")
-        .upload(pdfStoragePath, new Blob([compressedPdf], { type: "application/pdf" }), { upsert: true });
+        .upload(pdfStoragePath, new Blob([compressedPdf as BlobPart], { type: "application/pdf" }), { upsert: true });
       if (compressUploadError) console.warn("Failed to upload compressed PDF:", compressUploadError.message);
 
       await adminClient.from("deals").update({

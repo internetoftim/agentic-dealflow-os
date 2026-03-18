@@ -290,7 +290,7 @@ Deno.serve(async (req) => {
                 .from("decks")
                 .upload(
                   storagePath,
-                  new Blob([fileBytes], { type: mimeType }),
+                  new Blob([fileBytes as BlobPart], { type: mimeType }),
                   { upsert: true }
                 );
 
