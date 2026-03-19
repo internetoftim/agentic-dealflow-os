@@ -159,7 +159,7 @@ export default function DealWorkspace() {
         </div>
 
         {/* Processing Pipeline Status */}
-        {activeDeal && activeDeal.status !== "inbox" && activeDeal.status !== "memo-ready" && activeDeal.status !== "cancelled" && (
+        {activeDeal && activeDeal.status !== "inbox" && activeDeal.status !== "memo-ready" && activeDeal.status !== "cancelled" && activeDeal.status !== "error" && (
           <div>
             <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-2.5">Pipeline Status</h3>
             <div className="rounded-md border border-border bg-card p-3 flex flex-col gap-1.5">
@@ -215,6 +215,16 @@ export default function DealWorkspace() {
             <div className="rounded-md border border-border bg-card p-3 flex items-center gap-2">
               <Pause className="h-3.5 w-3.5 text-destructive shrink-0" />
               <span className="text-xs font-medium text-destructive">Cancelled</span>
+            </div>
+          </div>
+        )}
+
+        {activeDeal && activeDeal.status === "error" && (
+          <div>
+            <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-2.5">Pipeline Status</h3>
+            <div className="rounded-md border border-destructive/30 bg-destructive/5 p-3 flex items-center gap-2">
+              <CircleDashed className="h-3.5 w-3.5 text-destructive shrink-0" />
+              <span className="text-xs font-medium text-destructive">Processing failed</span>
             </div>
           </div>
         )}
