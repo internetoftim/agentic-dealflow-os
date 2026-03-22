@@ -21,6 +21,7 @@ export default function DealWorkspace() {
   const createDeal = useCreateDealWithUpload();
   const processDocsend = useProcessDocsend();
   const cancelDeal = useCancelDeal();
+  const retryDeal = useRetryDeal();
   const generateMemo = useGenerateMemo();
 
   const activeDeal = deals?.find((d) => d.id === selectedDealId) ?? deals?.[0];
