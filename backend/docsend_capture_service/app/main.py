@@ -1,9 +1,16 @@
 import base64
 import io
 import json
+import logging
 import os
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
+
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+logger = logging.getLogger(__name__)
+
+from dotenv import load_dotenv
+load_dotenv()
 
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, HttpUrl, Field
@@ -11,6 +18,7 @@ from PIL import Image
 from reportlab.lib.pagesizes import letter
 from reportlab.pdfgen import canvas
 from playwright.async_api import async_playwright, Page
+from playwright_stealth import Stealth
 
 try:
     # AG2 package name depends on distribution; this import works for pyautogen/ag2 installs.
@@ -114,18 +122,28 @@ class DocsendWebAgent:
     async def capture(self, url: str) -> Dict[str, Any]:
         screenshots: List[Dict[str, Any]] = []
         notes: List[str] = []
+        logger.info("Starting capture: %s (max_pages=%d)", url, self.max_pages)
 
         async with async_playwright() as p:
             browser = await p.chromium.launch(headless=True)
-            context = await browser.new_context(viewport={"width": 1440, "height": 900})
+            context = await browser.new_context(
+                viewport={"width": 1440, "height": 900},
+                user_agent=(
+                    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+                    "AppleWebKit/537.36 (KHTML, like Gecko) "
+                    "Chrome/124.0.0.0 Safari/537.36"
+                ),
+            )
             page = await context.new_page()
+            await Stealth().apply_stealth_async(page)
             await page.goto(url, wait_until="domcontentloaded", timeout=120000)
-            await page.wait_for_timeout(3000)
+            await page.wait_for_timeout(5000)
 
             title = await page.title()
 
             for i in range(1, self.max_pages + 1):
-                await page.wait_for_timeout(1200)
+                logger.info("Capturing page %d", i)
+                await page.wait_for_timeout(3000)
                 text = (await page.locator("body").inner_text())[:6000]
                 notes.append(f"## Page {i}\n\n{text.strip()}\n")
 
@@ -141,6 +159,7 @@ class DocsendWebAgent:
             await context.close()
             await browser.close()
 
+        logger.info("Capture complete: %d pages", len(screenshots))
         pdf_base64 = build_pdf_base64(screenshots)
         markdown = "\n\n".join(notes)
 
