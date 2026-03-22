@@ -593,9 +593,73 @@ Deno.serve(async (req) => {
         const supportsFileInput = !isSapinsapin && (model === "gpt-4o" || model === "gpt-5" || model === "gpt-5-mini");
 
         if (supportsFileInput) {
-          const base64 = btoa(new Uint8Array(compressedPdf).reduce((data, byte) => data + String.fromCharCode(byte), ""));
-          userContent.push({ type: "file", file: { filename: "deck.pdf", file_data: `data:application/pdf;base64,${base64}` } });
-          userContent.push({ type: "text", text: "Analyze this pitch deck and extract metadata using the extract_deck_metadata tool." });
+          // --- PAGE-BY-PAGE extraction to avoid memory limits ---
+          // Split PDF into single-page PDFs, send each one individually
+          const BATCH_SIZE = 4; // pages per batch to stay under memory limits
+          const totalPages = actualPageCount || pageCount;
+          const pageTexts: string[] = [];
+
+          console.log(`Processing ${totalPages} pages in batches of ${BATCH_SIZE}...`);
+
+          for (let batchStart = 0; batchStart < totalPages; batchStart += BATCH_SIZE) {
+            const batchEnd = Math.min(batchStart + BATCH_SIZE, totalPages);
+
+            // Create a mini PDF with just this batch of pages
+            const srcDoc = await PDFDocument.load(compressedPdf, { ignoreEncryption: true });
+            const batchDoc = await PDFDocument.create();
+            const pageIndices = Array.from({ length: batchEnd - batchStart }, (_, i) => batchStart + i);
+            const copiedPages = await batchDoc.copyPages(srcDoc, pageIndices);
+            for (const p of copiedPages) batchDoc.addPage(p);
+            const batchBytes = await batchDoc.save({ useObjectStreams: true });
+            const base64 = btoa(new Uint8Array(batchBytes).reduce((data, byte) => data + String.fromCharCode(byte), ""));
+
+            const batchContent: unknown[] = [
+              { type: "file", file: { filename: `deck_p${batchStart + 1}-${batchEnd}.pdf`, file_data: `data:application/pdf;base64,${base64}` } },
+              { type: "text", text: `Extract ALL text content from pages ${batchStart + 1}-${batchEnd} of this pitch deck. Return the raw text for each page, prefixed with [Page N].` },
+            ];
+
+            const ocrPayload = {
+              model: isSapinsapin ? sapinsapinModel : model,
+              messages: [
+                { role: "system", content: "You are an OCR assistant. Extract all visible text from the provided PDF pages accurately. Preserve layout and structure." },
+                { role: "user", content: batchContent },
+              ],
+            };
+
+            try {
+              const ocrRes = await fetch(`${baseUrl}/v1/chat/completions`, {
+                method: "POST",
+                headers: aiHeaders,
+                body: JSON.stringify(ocrPayload),
+              });
+              if (ocrRes.ok) {
+                const ocrResult = await ocrRes.json();
+                const pageText = ocrResult.choices?.[0]?.message?.content ?? "";
+                pageTexts.push(pageText);
+                console.log(`Batch ${batchStart + 1}-${batchEnd}: extracted ${pageText.length} chars`);
+              } else {
+                console.warn(`Batch ${batchStart + 1}-${batchEnd} failed: ${ocrRes.status}`);
+              }
+            } catch (e) {
+              console.warn(`Batch ${batchStart + 1}-${batchEnd} error:`, e);
+            }
+          }
+
+          // Combine all page texts and use as extracted text for metadata call
+          const combinedText = pageTexts.join("\n\n");
+          console.log(`Total extracted via vision: ${combinedText.length} chars from ${totalPages} pages`);
+
+          // Save extracted text to sources
+          if (combinedText.length > 0) {
+            extractedText = combinedText;
+            await adminClient.from("sources")
+              .update({ extracted_text: combinedText.slice(0, 100_000) })
+              .eq("deal_id", dealId).eq("user_id", userId);
+          }
+
+          // Now do metadata extraction with the combined text
+          const textForMeta = (combinedText.length > 0 ? combinedText : extractedText).slice(0, 50_000);
+          userContent.push({ type: "text", text: `Here is the full text content of the pitch deck:\n\n${textForMeta}\n\nAnalyze this pitch deck and extract metadata using the extract_deck_metadata tool. Return null for fields you cannot determine.` });
         } else {
           const textToSend = extractedText.length > 0 ? extractedText.slice(0, 50_000) : "No text could be extracted from the deck file.";
           userContent.push({ type: "text", text: `Here is the full text content of the pitch deck:\n\n${textToSend}\n\nAnalyze this pitch deck and extract metadata using the extract_deck_metadata tool. Return null for fields you cannot determine.` });
@@ -640,21 +704,6 @@ Deno.serve(async (req) => {
           headers: aiHeaders,
           body: JSON.stringify(aiPayload),
         });
-
-        // Fallback: if file-based request fails, retry with text-only
-        if (!aiResponse.ok && supportsFileInput && extractedText.length > 0) {
-          console.warn(`File-based AI call failed (${aiResponse.status}), falling back to text-only extraction`);
-          const textToSend = extractedText.slice(0, 50_000);
-          aiPayload.messages = [
-            { role: "system", content: "You are a VC analyst assistant. Analyze startup pitch decks and extract structured metadata. Be precise. Return null for missing fields." },
-            { role: "user", content: [{ type: "text", text: `Here is the full text content of the pitch deck:\n\n${textToSend}\n\nAnalyze this pitch deck and extract metadata using the extract_deck_metadata tool. Return null for fields you cannot determine.` }] },
-          ];
-          aiResponse = await fetch(`${baseUrl}/v1/chat/completions`, {
-            method: "POST",
-            headers: aiHeaders,
-            body: JSON.stringify(aiPayload),
-          });
-        }
 
         if (!aiResponse.ok) {
           const errText = await aiResponse.text();
