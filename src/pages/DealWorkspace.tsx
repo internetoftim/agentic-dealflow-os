@@ -220,12 +220,31 @@ export default function DealWorkspace() {
           </div>
         )}
 
-        {activeDeal && activeDeal.status === "error" && (
+        {activeDeal && (activeDeal.status === "error" || activeDeal.status === "cancelled") && (
           <div>
             <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-2.5">Pipeline Status</h3>
-            <div className="rounded-md border border-destructive/30 bg-destructive/5 p-3 flex items-center gap-2">
-              <CircleDashed className="h-3.5 w-3.5 text-destructive shrink-0" />
-              <span className="text-xs font-medium text-destructive">Processing failed</span>
+            <div className="rounded-md border border-destructive/30 bg-destructive/5 p-3 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <CircleDashed className="h-3.5 w-3.5 text-destructive shrink-0" />
+                <span className="text-xs font-medium text-destructive">
+                  {activeDeal.status === "error" ? "Processing failed" : "Cancelled"}
+                </span>
+              </div>
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-6 text-xs px-2"
+                disabled={retryDeal.isPending}
+                onClick={() => {
+                  toast.promise(retryDeal.mutateAsync(activeDeal.id), {
+                    loading: "Re-triggering…",
+                    success: "Processing restarted",
+                    error: (err) => `Retry failed: ${err.message}`,
+                  });
+                }}
+              >
+                {retryDeal.isPending ? "Retrying…" : "Retry"}
+              </Button>
             </div>
           </div>
         )}
