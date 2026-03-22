@@ -409,14 +409,14 @@ async function scrapeWithCaptureService(
           ): item is { page?: number; data_url?: string; url?: string } =>
             !!item && typeof item === "object",
         )
-        .map((item, i) => ({
+        .map((item: { page?: number; data_url?: string; url?: string }, i: number) => ({
           page:
             Number.isFinite(item.page) && Number(item.page) > 0
               ? Math.round(Number(item.page))
               : i + 1,
           url: String(item.data_url ?? item.url ?? ""),
         }))
-        .filter((s) => !!s.url)
+        .filter((s: { url: string }) => !!s.url)
     : [];
 
   let pdfBytes: Uint8Array | null = null;
