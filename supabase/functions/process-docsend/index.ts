@@ -159,7 +159,7 @@ Deno.serve(async (req) => {
           .from("decks")
           .upload(
             pdfStoragePath,
-            new Blob([fallbackPdf], { type: "application/pdf" }),
+            new Blob([fallbackPdf as BlobPart], { type: "application/pdf" }),
             { upsert: true },
           );
         if (uploadError)
