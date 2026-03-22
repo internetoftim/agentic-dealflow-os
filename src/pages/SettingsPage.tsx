@@ -57,7 +57,7 @@ export default function SettingsPage() {
   const [patternDetected, setPatternDetected] = useState(false);
   const [aiModel, setAiModel] = useState("gpt-5-mini");
   const [deepResearchProvider, setDeepResearchProvider] = useState<"custom" | "firecrawl">("custom");
-  const [driveFolder, setDriveFolder] = useState("WAITING ROOM");
+  const [driveFolder, setDriveFolder] = useState("My Drive/WAIT ROOM");
   const [memoPrompt, setMemoPrompt] = useState(DEFAULT_MEMO_PROMPT);
   const [recapPattern, setRecapPattern] = useState(DEFAULT_RECAP_PATTERN);
   const [savingModel, setSavingModel] = useState(false);
