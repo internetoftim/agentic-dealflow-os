@@ -77,7 +77,7 @@ export default function SettingsPage() {
           setDriveSync(data.drive_sync_enabled ?? true);
           setSpamFilter(data.spam_filter_enabled ?? true);
           setDeepResearchProvider((data as any).deep_research_provider ?? "custom");
-          setDriveFolder((data as any).drive_folder ?? "WAITING ROOM");
+          setDriveFolder((data as any).drive_folder ?? "My Drive/WAIT ROOM");
           if ((data as any).memo_prompt) setMemoPrompt((data as any).memo_prompt);
           if (data.naming_pattern) {
             setNamingPattern(data.naming_pattern);
