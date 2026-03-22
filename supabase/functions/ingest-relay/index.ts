@@ -113,7 +113,7 @@ serve(async (req) => {
   } catch (e) {
     console.error("ingest-relay error:", e);
     return new Response(
-      JSON.stringify({ error: (e as Error).message || "Internal error" }),
+      JSON.stringify({ error: e.message || "Internal error" }),
       {
         status: 500,
         headers: { ...corsHeaders, "Content-Type": "application/json" },

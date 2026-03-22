@@ -35,14 +35,13 @@ export interface Deal {
 }
 
 /** Active processing statuses (not terminal) */
-export const PROCESSING_STATUSES = ["uploading", "converting", "compressing", "scraping", "extracting", "searching-website", "syncing"];
+export const PROCESSING_STATUSES = ["uploading", "converting", "compressing", "extracting", "searching-website", "syncing"];
 
 /** Workflow steps in order */
 export const WORKFLOW_STEPS = [
   { key: "uploading", label: "Uploading" },
   { key: "converting", label: "Converting to PDF" },
   { key: "compressing", label: "Compressing" },
-  { key: "scraping", label: "Scraping Link" },
   { key: "extracting", label: "Extracting" },
   { key: "searching-website", label: "Finding Website" },
   { key: "syncing", label: "Syncing to Drive" },
@@ -122,44 +121,6 @@ export function useCancelDeal() {
         .update({ status: "cancelled" })
         .eq("id", dealId);
       if (error) throw error;
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["deals"] });
-    },
-  });
-}
-
-export function useRetryDeal() {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: async (dealId: string) => {
-      // Get the source record to find the storage path
-      const { data: sources } = await supabase
-        .from("sources")
-        .select("storage_path, extracted_text")
-        .eq("deal_id", dealId)
-        .limit(1)
-        .single();
-
-      const storagePath = sources?.storage_path;
-      if (!storagePath) throw new Error("No source file found for this deal");
-
-      // Reset deal status to extracting
-      const { error } = await supabase
-        .from("deals")
-        .update({ status: "extracting" })
-        .eq("id", dealId);
-      if (error) throw error;
-
-      // Re-trigger the processing pipeline
-      const { error: fnError } = await supabase.functions.invoke("process-deck", {
-        body: {
-          dealId,
-          storagePath,
-          localExtracted: !!sources?.extracted_text,
-        },
-      });
-      if (fnError) throw fnError;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["deals"] });

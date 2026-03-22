@@ -132,18 +132,18 @@ Deno.serve(async (req) => {
     for (const segment of folderSegments) {
       // Search for existing folder (properly escape single quotes in folder names)
       const escapedName = segment.replace(/'/g, "\\'");
-      const parentQuery: string = parentId
+      const parentQuery = parentId
         ? ` and '${parentId}' in parents`
         : "";
-      const q: string = `name='${escapedName}' and mimeType='application/vnd.google-apps.folder' and trashed=false${parentQuery}`;
-      const folderSearchRes: Response = await fetch(
+      const q = `name='${escapedName}' and mimeType='application/vnd.google-apps.folder' and trashed=false${parentQuery}`;
+      const folderSearchRes = await fetch(
         `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(q)}&fields=files(id)`,
         { headers: { Authorization: `Bearer ${settings.google_provider_token}` } }
       );
 
       let segmentId: string | null = null;
       if (folderSearchRes.ok) {
-        const folderData: any = await folderSearchRes.json();
+        const folderData = await folderSearchRes.json();
         if (folderData.files?.length > 0) {
           segmentId = folderData.files[0].id;
         }

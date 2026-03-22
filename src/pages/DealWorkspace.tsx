@@ -1,6 +1,6 @@
 import { useState, useCallback, useRef, useEffect } from "react";
 import { Upload, Link, Cog, Check, Search, Send, FileText, Globe, Layers, Square, Linkedin, Loader2, FileUp, CircleDashed, CircleCheck, Circle, Pause, Clock } from "lucide-react";
-import { useDeals, useSources, useCreateDealWithUpload, useProcessDocsend, useCancelDeal, useRetryDeal, WORKFLOW_STEPS, PROCESSING_STATUSES, type WorkflowStatus } from "@/hooks/useDeals";
+import { useDeals, useSources, useCreateDealWithUpload, useProcessDocsend, useCancelDeal, WORKFLOW_STEPS, PROCESSING_STATUSES, type WorkflowStatus } from "@/hooks/useDeals";
 import { Button } from "@/components/ui/button";
 import { useDealChat } from "@/hooks/useDealChat";
 import { useGenerateMemo } from "@/hooks/useGenerateMemo";
@@ -21,7 +21,6 @@ export default function DealWorkspace() {
   const createDeal = useCreateDealWithUpload();
   const processDocsend = useProcessDocsend();
   const cancelDeal = useCancelDeal();
-  const retryDeal = useRetryDeal();
   const generateMemo = useGenerateMemo();
 
   const activeDeal = deals?.find((d) => d.id === selectedDealId) ?? deals?.[0];
@@ -109,24 +108,21 @@ export default function DealWorkspace() {
             </p>
             <input type="file" accept=".pdf,.ppt,.pptx" className="hidden" onChange={handleFileSelect} />
           </label>
-          <div className="flex gap-2">
-            <div className="flex-1 flex items-center gap-2 rounded-md border border-input bg-background px-3 py-2">
+          <div className="flex gap-2 opacity-50 pointer-events-none" title="DocSend ingestion coming soon">
+            <div className="flex-1 flex items-center gap-2 rounded-md border border-input bg-muted px-3 py-2">
               <Link className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
               <input
                 type="text"
-                placeholder="Paste DocSend / PandaDoc link…"
-                value={docSendUrl}
-                onChange={(e) => setDocSendUrl(e.target.value)}
-                onKeyDown={(e) => e.key === "Enter" && handleFetchUrl()}
-                className="flex-1 text-xs bg-transparent outline-none placeholder:text-muted-foreground"
+                placeholder="DocSend / PandaDoc — coming soon"
+                className="flex-1 text-xs bg-transparent outline-none placeholder:text-muted-foreground cursor-not-allowed"
+                disabled
               />
             </div>
             <button
-              onClick={handleFetchUrl}
-              disabled={!docSendUrl.trim() || processDocsend.isPending}
+              disabled
               className="px-3 py-2 rounded-md bg-primary text-primary-foreground text-xs font-medium disabled:opacity-50"
             >
-              {processDocsend.isPending ? "Fetching…" : "Fetch"}
+              Fetch
             </button>
           </div>
         </div>
@@ -160,7 +156,7 @@ export default function DealWorkspace() {
         </div>
 
         {/* Processing Pipeline Status */}
-        {activeDeal && activeDeal.status !== "inbox" && activeDeal.status !== "memo-ready" && activeDeal.status !== "cancelled" && activeDeal.status !== "error" && (
+        {activeDeal && activeDeal.status !== "inbox" && activeDeal.status !== "memo-ready" && activeDeal.status !== "cancelled" && (
           <div>
             <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-2.5">Pipeline Status</h3>
             <div className="rounded-md border border-border bg-card p-3 flex flex-col gap-1.5">
@@ -210,32 +206,12 @@ export default function DealWorkspace() {
           </div>
         )}
 
-
-        {activeDeal && (activeDeal.status === "error" || activeDeal.status === "cancelled") && (
+        {activeDeal && activeDeal.status === "cancelled" && (
           <div>
             <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-2.5">Pipeline Status</h3>
-            <div className="rounded-md border border-destructive/30 bg-destructive/5 p-3 flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <CircleDashed className="h-3.5 w-3.5 text-destructive shrink-0" />
-                <span className="text-xs font-medium text-destructive">
-                  {activeDeal.status === "error" ? "Processing failed" : "Cancelled"}
-                </span>
-              </div>
-              <Button
-                size="sm"
-                variant="outline"
-                className="h-6 text-xs px-2"
-                disabled={retryDeal.isPending}
-                onClick={() => {
-                  toast.promise(retryDeal.mutateAsync(activeDeal.id), {
-                    loading: "Re-triggering…",
-                    success: "Processing restarted",
-                    error: (err) => `Retry failed: ${err.message}`,
-                  });
-                }}
-              >
-                {retryDeal.isPending ? "Retrying…" : "Retry"}
-              </Button>
+            <div className="rounded-md border border-border bg-card p-3 flex items-center gap-2">
+              <Pause className="h-3.5 w-3.5 text-destructive shrink-0" />
+              <span className="text-xs font-medium text-destructive">Cancelled</span>
             </div>
           </div>
         )}
