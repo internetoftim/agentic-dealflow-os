@@ -397,7 +397,7 @@ export default function SettingsPage() {
                 if (!user) return;
                 const { error } = await supabase
                   .from("user_settings")
-                  .upsert({ user_id: user.id, drive_folder: driveFolder.trim() || "WAITING ROOM" } as any, { onConflict: "user_id" });
+                  .upsert({ user_id: user.id, drive_folder: driveFolder.trim() || "My Drive/WAIT ROOM" } as any, { onConflict: "user_id" });
                 if (error) toast.error("Failed to save folder");
                 else toast.success("Drive folder saved");
               }}
