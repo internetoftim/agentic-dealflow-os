@@ -129,6 +129,44 @@ export function useCancelDeal() {
   });
 }
 
+export function useRetryDeal() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (dealId: string) => {
+      // Get the source record to find the storage path
+      const { data: sources } = await supabase
+        .from("sources")
+        .select("storage_path, extracted_text")
+        .eq("deal_id", dealId)
+        .limit(1)
+        .single();
+
+      const storagePath = sources?.storage_path;
+      if (!storagePath) throw new Error("No source file found for this deal");
+
+      // Reset deal status to extracting
+      const { error } = await supabase
+        .from("deals")
+        .update({ status: "extracting" })
+        .eq("id", dealId);
+      if (error) throw error;
+
+      // Re-trigger the processing pipeline
+      const { error: fnError } = await supabase.functions.invoke("process-deck", {
+        body: {
+          dealId,
+          storagePath,
+          localExtracted: !!sources?.extracted_text,
+        },
+      });
+      if (fnError) throw fnError;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["deals"] });
+    },
+  });
+}
+
 export function useCreateDealWithUpload() {
   const queryClient = useQueryClient();
   const { user } = useAuth();
