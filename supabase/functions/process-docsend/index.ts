@@ -330,6 +330,16 @@ async function scrapeDocsendOrPandadoc(params: {
   }
 > {
   const { url, model, openaiApiKey, firecrawlApiKey } = params;
+  const captureServiceUrl = Deno.env.get("DOCSEND_CAPTURE_SERVICE_URL")?.trim();
+
+  if (captureServiceUrl) {
+    try {
+      console.log(`Trying external capture service: ${captureServiceUrl}`);
+      return await scrapeWithCaptureService(captureServiceUrl, url);
+    } catch (e) {
+      console.warn("External capture service failed, falling back:", e);
+    }
+  }
 
   // Preferred path: headless browser driven by model computer use.
   if (openaiApiKey) {
@@ -360,6 +370,73 @@ async function scrapeDocsendOrPandadoc(params: {
       ? [{ url: fallback.screenshotUrl, page: 1 }]
       : [],
     pdfBytes: null,
+  };
+}
+
+async function scrapeWithCaptureService(
+  serviceBaseUrl: string,
+  url: string,
+): Promise<
+  ScrapeResult & {
+    pageCount: number;
+    screenshotRefs: ScreenshotRef[];
+    pdfBytes: Uint8Array | null;
+  }
+> {
+  const targetPages = getTargetPageCount(url);
+  const res = await fetch(`${serviceBaseUrl.replace(/\/$/, "")}/capture`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ url, max_pages: targetPages }),
+  });
+  if (!res.ok) {
+    throw new Error(
+      `Capture service failed [${res.status}]: ${await res.text()}`,
+    );
+  }
+
+  const data = await res.json();
+  const markdown = String(data?.markdown ?? "").trim();
+  const pageCount = Number.isFinite(data?.page_count)
+    ? Math.max(1, Math.round(data.page_count))
+    : estimatePages(markdown);
+  const title = typeof data?.title === "string" ? data.title : null;
+  const screenshotRefs = Array.isArray(data?.screenshots)
+    ? data.screenshots
+        .filter(
+          (
+            item: unknown,
+          ): item is { page?: number; data_url?: string; url?: string } =>
+            !!item && typeof item === "object",
+        )
+        .map((item, i) => ({
+          page:
+            Number.isFinite(item.page) && Number(item.page) > 0
+              ? Math.round(Number(item.page))
+              : i + 1,
+          url: String(item.data_url ?? item.url ?? ""),
+        }))
+        .filter((s) => !!s.url)
+    : [];
+
+  let pdfBytes: Uint8Array | null = null;
+  if (typeof data?.pdf_base64 === "string" && data.pdf_base64.length > 0) {
+    pdfBytes = decodeBase64(data.pdf_base64);
+  } else {
+    pdfBytes = await buildPdfFromScreenshotRefs(screenshotRefs);
+  }
+
+  if (!markdown) {
+    throw new Error("Capture service returned empty markdown");
+  }
+
+  return {
+    markdown,
+    screenshotUrl: screenshotRefs[0]?.url ?? null,
+    title,
+    pageCount,
+    screenshotRefs,
+    pdfBytes,
   };
 }
 
