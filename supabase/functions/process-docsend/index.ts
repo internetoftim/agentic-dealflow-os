@@ -139,7 +139,7 @@ Deno.serve(async (req) => {
           .from("decks")
           .upload(
             pdfStoragePath,
-            new Blob([scrapeResult.pdfBytes], { type: "application/pdf" }),
+            new Blob([scrapeResult.pdfBytes as BlobPart], { type: "application/pdf" }),
             {
               upsert: true,
             },
