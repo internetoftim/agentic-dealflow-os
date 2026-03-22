@@ -263,7 +263,7 @@ DEAL CONTEXT:
         const htmlBlob = new Blob([styledHtml], { type: "text/html" });
 
         // Resolve drive folder
-        const folderPath = (settings as any)?.drive_folder || "WAITING ROOM";
+        const folderPath = (settings as any)?.drive_folder || "WAIT ROOM";
         const folderSegments = folderPath.split("/").map((s: string) => s.trim()).filter(Boolean);
         let parentId: string | null = null;
 

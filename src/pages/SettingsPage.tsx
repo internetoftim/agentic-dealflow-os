@@ -401,17 +401,17 @@ export default function SettingsPage() {
                 if (error) toast.error("Failed to save folder");
                 else toast.success("Drive folder saved");
               }}
-              placeholder="WAITING ROOM"
+              placeholder="My Drive/WAIT ROOM"
               className="flex-1 rounded-md border border-input bg-card px-3 py-2 text-sm outline-none placeholder:text-muted-foreground focus:ring-1 focus:ring-ring"
             />
-            {driveFolder !== "WAITING ROOM" && (
+            {driveFolder !== "My Drive/WAIT ROOM" && (
               <button
                 onClick={async () => {
-                  setDriveFolder("WAITING ROOM");
+                  setDriveFolder("My Drive/WAIT ROOM");
                   if (!user) return;
                   await supabase
                     .from("user_settings")
-                    .upsert({ user_id: user.id, drive_folder: "WAITING ROOM" } as any, { onConflict: "user_id" });
+                    .upsert({ user_id: user.id, drive_folder: "My Drive/WAIT ROOM" } as any, { onConflict: "user_id" });
                   toast.success("Folder reset to default");
                 }}
                 className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
@@ -422,7 +422,7 @@ export default function SettingsPage() {
             )}
           </div>
           <p className="text-xs text-muted-foreground">
-            Default: <code className="bg-muted rounded px-1">WAITING ROOM</code>
+            Default: <code className="bg-muted rounded px-1">My Drive/WAIT ROOM</code>
           </p>
         </div>
       </section>

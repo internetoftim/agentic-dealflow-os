@@ -123,7 +123,7 @@ Deno.serve(async (req) => {
     }
 
     // Resolve or create the target Drive folder (supports nested paths like "Folder/Sub Folder")
-    const folderPath = settings.drive_folder || "WAITING ROOM";
+    const folderPath = settings.drive_folder || "WAIT ROOM";
     const folderSegments = folderPath.split("/").map((s: string) => s.trim()).filter(Boolean);
     let folderId: string | null = null;
 
