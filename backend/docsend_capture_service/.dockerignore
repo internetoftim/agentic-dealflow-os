@@ -1,0 +1,7 @@
+.env
+__pycache__
+*.pyc
+*.pyo
+.git
+ngrok_tunnel.py
+Dockerfile.frontend

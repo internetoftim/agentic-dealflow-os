@@ -13,8 +13,22 @@ logger = logging.getLogger(__name__)
 from dotenv import load_dotenv
 load_dotenv()
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Security
+from fastapi.security.api_key import APIKeyHeader
 from pydantic import BaseModel, HttpUrl, Field
+
+API_KEY_NAME = "X-API-Key"
+_api_key_header = APIKeyHeader(name=API_KEY_NAME, auto_error=True)
+
+def _get_api_key() -> str:
+    key = os.getenv("SERVICE_API_KEY", "")
+    if not key:
+        raise RuntimeError("SERVICE_API_KEY not set")
+    return key
+
+async def verify_api_key(header_key: str = Security(_api_key_header)) -> None:
+    if header_key != _get_api_key():
+        raise HTTPException(status_code=403, detail="Invalid API key")
 from PIL import Image
 from reportlab.lib.pagesizes import letter
 from reportlab.pdfgen import canvas
@@ -226,7 +240,7 @@ async def health() -> Dict[str, str]:
     return {"status": "ok"}
 
 
-@app.post("/capture", response_model=CaptureResponse)
+@app.post("/capture", response_model=CaptureResponse, dependencies=[Security(verify_api_key)])
 async def capture_docsend(req: CaptureRequest) -> CaptureResponse:
     try:
         agent = DocsendWebAgent(max_pages=req.max_pages)

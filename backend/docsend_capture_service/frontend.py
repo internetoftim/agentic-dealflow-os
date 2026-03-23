@@ -1,6 +1,9 @@
 import base64
+import os
 import streamlit as st
 import requests
+
+BACKEND_URL = os.getenv("BACKEND_URL", "http://127.0.0.1:8080")
 
 st.set_page_config(page_title="DocSend Capture Agent", layout="wide")
 
@@ -12,7 +15,7 @@ max_pages = st.slider("Max pages", min_value=1, max_value=100, value=20)
 
 def capture(url, max_pages):
     response = requests.post(
-        "http://127.0.0.1:8080/capture",
+        f"{BACKEND_URL}/capture",
         json={"url": url, "max_pages": max_pages},
     )
     if response.status_code == 200:

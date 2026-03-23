@@ -64,6 +64,53 @@ This project is built with:
 
 Simply open [Lovable](https://lovable.dev/projects/REPLACE_WITH_PROJECT_ID) and click on Share -> Publish.
 
+## Backend Deployment (Cloud Run)
+
+### Prerequisites
+
+- `gcloud` CLI installed and authenticated
+- `.env` file at `backend/docsend_capture_service/.env` with `OPENAI_API_KEY`, `AG2_MODEL`, and optionally `SERVICE_API_KEY`
+
+### Deploy
+
+```bash
+./deploy.sh
+```
+
+Builds and deploys the backend and frontend to GCP Cloud Run. Stores `OPENAI_API_KEY` and `SERVICE_API_KEY` in Secret Manager. Generates `SERVICE_API_KEY` automatically if not set in `.env`.
+
+### Undeploy
+
+```bash
+./undeploy.sh
+```
+
+Deletes both Cloud Run services, container images, IAM bindings, and Secret Manager secrets.
+
+## CI/CD — GitHub Actions
+
+Pushes to `main` that touch `backend/` automatically trigger a Cloud Run deployment via `.github/workflows/deploy.yml`.
+
+### First-time setup
+
+Requires [gh CLI](https://cli.github.com/) installed and authenticated.
+
+```bash
+brew install gh
+gh auth login
+./setup-github-secrets.sh
+```
+
+Creates a `github-actions-deployer` GCP service account, assigns required roles, and loads all secrets from `.env` into GitHub Actions secrets.
+
+### Teardown CI/CD
+
+```bash
+./teardown-github-secrets.sh
+```
+
+Deletes the service account, all its keys, IAM bindings, and all GitHub Actions secrets.
+
 ## Can I connect a custom domain to my Lovable project?
 
 Yes, you can!
