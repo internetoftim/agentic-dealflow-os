@@ -49,6 +49,16 @@ class CaptureRequest(BaseModel):
     max_pages: int = Field(default=20, ge=1, le=100)
 
 
+class CaptureAsyncRequest(BaseModel):
+    url: HttpUrl
+    max_pages: int = Field(default=20, ge=1, le=100)
+    callback_url: str
+    job_id: str
+    deal_id: str
+    user_id: str
+    service_role_key: str
+
+
 class ScreenshotItem(BaseModel):
     page: int
     data_url: str
