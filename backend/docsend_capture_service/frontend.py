@@ -7,13 +7,25 @@ BACKEND_URL = os.getenv("BACKEND_URL", "http://127.0.0.1:8080")
 
 st.set_page_config(page_title="DocSend Capture Agent", layout="wide")
 
+if "authenticated" not in st.session_state:
+    st.session_state.authenticated = False
+
+if not st.session_state.authenticated:
+    pwd = st.text_input("Password", type="password")
+    if st.button("Login"):
+        if pwd == os.getenv("APP_PASSWORD", "hackmenow"):
+            st.session_state.authenticated = True
+            st.rerun()
+        else:
+            st.error("Incorrect password")
+    st.stop()
+
 st.title("DocSend Capture Agent")
 
 url_input = st.text_input("Enter DocSend / PandaDoc URL:", key="url_input")
-max_pages = st.slider("Max pages", min_value=1, max_value=100, value=20)
 
 
-def capture(url, max_pages):
+def capture(url, max_pages=100):
     response = requests.post(
         f"{BACKEND_URL}/capture",
         json={"url": url, "max_pages": max_pages},
@@ -28,7 +40,7 @@ if st.button("Capture"):
         loading = st.empty()
         loading.subheader("🌐 Capturing...")
 
-        result = capture(url_input, max_pages)
+        result = capture(url_input, 100)
         loading.empty()
 
         if "error" in result:
