@@ -261,6 +261,43 @@ async def capture_docsend(req: CaptureRequest) -> CaptureResponse:
         raise HTTPException(status_code=500, detail=f"Capture failed: {exc}") from exc
 
 
+async def _run_capture_and_callback(req: CaptureAsyncRequest) -> None:
+    """Background task: run capture and POST results to callback URL."""
+    import httpx
+
+    payload: Dict[str, Any] = {
+        "job_id": req.job_id,
+        "deal_id": req.deal_id,
+        "user_id": req.user_id,
+        "service_role_key": req.service_role_key,
+    }
+
+    try:
+        agent = DocsendWebAgent(max_pages=req.max_pages)
+        result = await agent.capture(str(req.url))
+        payload["pdf_base64"] = result["pdf_base64"]
+        payload["markdown"] = result["markdown"]
+        payload["page_count"] = result["page_count"]
+    except Exception as exc:
+        logger.error("Async capture failed for job %s: %s", req.job_id, exc)
+        payload["error"] = str(exc)
+
+    try:
+        async with httpx.AsyncClient(timeout=30) as client:
+            resp = await client.post(req.callback_url, json=payload)
+            logger.info("Callback response for job %s: %s", req.job_id, resp.status_code)
+    except Exception as exc:
+        logger.error("Failed to send callback for job %s: %s", req.job_id, exc)
+
+
+@app.post("/capture-async", dependencies=[Security(verify_api_key)])
+async def capture_docsend_async(req: CaptureAsyncRequest, background_tasks: BackgroundTasks) -> Dict[str, str]:
+    """Accept a capture request and process it in the background. Results are POSTed to callback_url."""
+    background_tasks.add_task(_run_capture_and_callback, req)
+    logger.info("Queued async capture for job %s (deal %s)", req.job_id, req.deal_id)
+    return {"status": "accepted", "job_id": req.job_id}
+
+
 if __name__ == "__main__":
     import uvicorn
 
