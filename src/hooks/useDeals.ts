@@ -35,13 +35,14 @@ export interface Deal {
 }
 
 /** Active processing statuses (not terminal) */
-export const PROCESSING_STATUSES = ["uploading", "converting", "compressing", "extracting", "searching-website", "syncing"];
+export const PROCESSING_STATUSES = ["uploading", "converting", "compressing", "scraping", "extracting", "searching-website", "syncing"];
 
 /** Workflow steps in order */
 export const WORKFLOW_STEPS = [
   { key: "uploading", label: "Uploading" },
   { key: "converting", label: "Converting to PDF" },
   { key: "compressing", label: "Compressing" },
+  { key: "scraping", label: "Scraping Link" },
   { key: "extracting", label: "Extracting" },
   { key: "searching-website", label: "Finding Website" },
   { key: "syncing", label: "Syncing to Drive" },
