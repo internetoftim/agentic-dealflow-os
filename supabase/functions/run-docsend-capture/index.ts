@@ -7,11 +7,11 @@ const corsHeaders = {
 };
 
 /**
- * Run DocSend Capture — Step 2 (heavy work)
+ * Run DocSend Capture — Queue-based
  *
- * Called by the frontend after process-docsend creates the deal.
- * Calls the Playwright capture service, stores the PDF, and hands off to process-deck.
- * Runs synchronously — the frontend polls deal status via realtime/polling.
+ * Inserts a capture job into the queue and fires off an async capture request
+ * to the capture service (with a callback URL). Returns immediately.
+ * The capture service will POST results to docsend-callback when done.
  */
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
@@ -65,106 +65,63 @@ Deno.serve(async (req) => {
       );
     }
 
-    const isDocSend = /docsend\.com/i.test(url);
-    const sourceType = isDocSend ? "docsend" : "pandadoc";
-
-    // Step 1: Call capture service
-    console.log(`Calling capture service for deal ${dealId}`);
-    const captureRes = await fetch(`${captureServiceUrl}/capture`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "X-API-Key": captureServiceApiKey!,
-      },
-      body: JSON.stringify({ url, max_pages: 50 }),
-    });
-
-    if (!captureRes.ok) {
-      const errText = await captureRes.text();
-      throw new Error(`Capture service failed [${captureRes.status}]: ${errText}`);
-    }
-
-    const captureData = await captureRes.json();
-    const pdfBase64: string | null = captureData.pdf_base64 || null;
-    const markdown: string = captureData.markdown || "";
-    const pageCount = captureData.page_count || 0;
-
-    console.log(`Capture complete: ${pageCount} pages, ${markdown.length} chars markdown`);
-
-    if (!pdfBase64) {
-      throw new Error("Capture service returned no PDF");
-    }
-
-    // Step 2: Store PDF in Supabase Storage
-    const pdfBytes = Uint8Array.from(atob(pdfBase64), (c) => c.charCodeAt(0));
-    const storagePath = `${user.id}/${dealId}/deck.pdf`;
-
-    const { error: uploadError } = await adminClient.storage
-      .from("decks")
-      .upload(storagePath, new Blob([pdfBytes], { type: "application/pdf" }), {
-        upsert: true,
-      });
-
-    if (uploadError) {
-      throw new Error(`Failed to upload PDF: ${uploadError.message}`);
-    }
-
-    const sizeMB = (pdfBytes.length / (1024 * 1024)).toFixed(1);
-    console.log(`Stored PDF (${sizeMB}MB) at ${storagePath}`);
-
-    // Update deal with size info and page count
-    await adminClient
-      .from("deals")
-      .update({
-        deck_size: `${sizeMB}MB`,
-        pages: pageCount,
-        updated_at: new Date().toISOString(),
+    // Insert capture job into queue
+    const { data: job, error: jobError } = await adminClient
+      .from("capture_jobs")
+      .insert({
+        deal_id: dealId,
+        user_id: user.id,
+        url,
+        status: "pending",
       })
-      .eq("id", dealId);
+      .select()
+      .single();
 
-    // Create source record
-    const slug = extractSlug(url);
-    await adminClient.from("sources").insert({
-      deal_id: dealId,
-      user_id: user.id,
-      file_name: `${sourceType}-${slug}.pdf`,
-      original_size: `${sizeMB}MB`,
-      storage_path: storagePath,
-      source_type: sourceType,
-      processing_status: "pending",
-      extracted_text: markdown.slice(0, 100_000),
-    });
-
-    // Step 3: Hand off to process-deck
-    console.log(`Handing off deal ${dealId} to process-deck`);
-    const deckRes = await fetch(`${supabaseUrl}/functions/v1/process-deck`, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${supabaseServiceKey}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ dealId, storagePath }),
-    });
-
-    if (!deckRes.ok) {
-      const errText = await deckRes.text();
-      console.error(`process-deck failed [${deckRes.status}]: ${errText}`);
-      await adminClient.from("deals").update({ status: "error", updated_at: new Date().toISOString() }).eq("id", dealId);
-      return new Response(
-        JSON.stringify({ error: `process-deck failed: ${errText}` }),
-        { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
+    if (jobError) {
+      throw new Error(`Failed to create capture job: ${jobError.message}`);
     }
 
-    console.log(`process-deck accepted deal ${dealId}`);
+    console.log(`Created capture job ${job.id} for deal ${dealId}`);
+
+    // Build callback URL pointing to docsend-callback edge function
+    const callbackUrl = `${supabaseUrl}/functions/v1/docsend-callback`;
+
+    // Fire async capture request (don't await the full capture — just send it)
+    // The capture service will POST to callbackUrl when done.
+    fetch(`${captureServiceUrl}/capture-async`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-API-Key": captureServiceApiKey,
+      },
+      body: JSON.stringify({
+        url,
+        max_pages: 50,
+        callback_url: callbackUrl,
+        job_id: job.id,
+        deal_id: dealId,
+        user_id: user.id,
+        service_role_key: supabaseServiceKey,
+      }),
+    }).catch((err) => {
+      console.error(`Failed to fire async capture for job ${job.id}:`, err);
+    });
+
+    // Update job status to processing
+    await adminClient
+      .from("capture_jobs")
+      .update({ status: "processing", updated_at: new Date().toISOString() })
+      .eq("id", job.id);
+
+    console.log(`Fired async capture for job ${job.id}, returning immediately`);
+
     return new Response(
-      JSON.stringify({ success: true, dealId, pageCount, sizeMB }),
+      JSON.stringify({ success: true, dealId, jobId: job.id }),
       { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
   } catch (error) {
     console.error("run-docsend-capture error:", error);
 
-    // Try to mark deal as error
     try {
       const { dealId } = await req.clone().json().catch(() => ({ dealId: null }));
       if (dealId) {
@@ -180,13 +137,3 @@ Deno.serve(async (req) => {
     });
   }
 });
-
-function extractSlug(url: string): string {
-  try {
-    const u = new URL(url);
-    const parts = u.pathname.split("/").filter(Boolean);
-    return parts[parts.length - 1] || "unknown";
-  } catch {
-    return "unknown";
-  }
-}
