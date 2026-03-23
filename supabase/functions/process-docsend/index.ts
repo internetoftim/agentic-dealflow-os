@@ -37,7 +37,7 @@ Deno.serve(async (req) => {
     const supabaseAnonKey = Deno.env.get("SUPABASE_ANON_KEY")!;
     const captureServiceUrl = Deno.env.get("DOCSEND_CAPTURE_SERVICE_URL");
     const captureServiceApiKey = Deno.env.get("DOCSEND_CAPTURE_SERVICE_API_KEY");
-    const firecrawlApiKey = Deno.env.get("FIRECRAWL_API_KEY");
+    
 
     const adminClient = createClient(supabaseUrl, supabaseServiceKey);
     const userClient = createClient(supabaseUrl, supabaseAnonKey, {
