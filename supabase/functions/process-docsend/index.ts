@@ -9,9 +9,13 @@ const corsHeaders = {
 /**
  * Process DocSend Link Edge Function
  *
- * Accepts a DocSend (or PandaDoc) URL, uses Firecrawl to scrape the page
- * content and capture a screenshot, creates a deal record and source,
- * then stores extracted text for downstream analysis.
+ * 1. Creates a deal immediately (status = scraping) so the UI shows progress.
+ * 2. Calls the external DocSend Capture Service (Playwright-based, async/slow).
+ * 3. Stores the resulting PDF + extracted markdown.
+ * 4. Runs metadata extraction via LLM.
+ *
+ * The capture service can take 30-120+ seconds for multi-page decks,
+ * so the frontend relies on realtime subscriptions / polling to track progress.
  */
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
@@ -31,14 +35,9 @@ Deno.serve(async (req) => {
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const supabaseAnonKey = Deno.env.get("SUPABASE_ANON_KEY")!;
+    const captureServiceUrl = Deno.env.get("DOCSEND_CAPTURE_SERVICE_URL");
+    const captureServiceApiKey = Deno.env.get("DOCSEND_CAPTURE_SERVICE_API_KEY");
     const firecrawlApiKey = Deno.env.get("FIRECRAWL_API_KEY");
-
-    if (!firecrawlApiKey) {
-      return new Response(JSON.stringify({ error: "FIRECRAWL_API_KEY is not configured" }), {
-        status: 500,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
 
     const adminClient = createClient(supabaseUrl, supabaseServiceKey);
     const userClient = createClient(supabaseUrl, supabaseAnonKey, {
@@ -64,7 +63,6 @@ Deno.serve(async (req) => {
       });
     }
 
-    // Validate URL format
     const normalizedUrl = url.trim();
     const isDocSend = /docsend\.com/i.test(normalizedUrl);
     const isPandaDoc = /pandadoc\.com/i.test(normalizedUrl);
@@ -77,7 +75,7 @@ Deno.serve(async (req) => {
 
     const sourceType = isDocSend ? "docsend" : "pandadoc";
 
-    // --- Step 1: Create deal record immediately (status = scraping) ---
+    // --- Step 1: Create deal immediately (status = scraping) ---
     const dealName = deriveDealName(normalizedUrl);
     const { data: deal, error: dealError } = await adminClient
       .from("deals")
@@ -97,88 +95,147 @@ Deno.serve(async (req) => {
 
     console.log(`Created deal ${deal.id} for ${sourceType} URL: ${normalizedUrl}`);
 
-    // --- Step 2: Scrape with Firecrawl ---
-    try {
-      await adminClient
-        .from("deals")
-        .update({ status: "scraping", updated_at: new Date().toISOString() })
-        .eq("id", deal.id);
+    // Return immediately so the frontend doesn't hang.
+    // Processing continues in the background via waitUntil-style pattern.
+    const responsePromise = new Response(
+      JSON.stringify({ success: true, dealId: deal.id, status: "scraping" }),
+      { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+    );
 
-      const scrapeResult = await scrapeWithFirecrawl(firecrawlApiKey, normalizedUrl);
+    // --- Background processing (runs after response is sent) ---
+    const backgroundWork = (async () => {
+      try {
+        let markdown = "";
+        let pdfBase64: string | null = null;
+        let pageCount = 0;
+        let storagePath: string | null = null;
 
-      console.log(
-        `Firecrawl returned ${scrapeResult.markdown.length} chars markdown, ` +
-          `screenshot: ${scrapeResult.screenshotUrl ? "yes" : "no"}`
-      );
+        // Use DocSend Capture Service for DocSend links (Playwright-based, handles JS viewer)
+        // Falls back to Firecrawl for PandaDoc or if capture service is not configured
+        const useCaptureService = isDocSend && captureServiceUrl && captureServiceApiKey;
 
-      // --- Step 3: Store screenshot in Supabase Storage (if available) ---
-      let storagePath: string | null = null;
-      if (scrapeResult.screenshotUrl) {
-        try {
-          const imgRes = await fetch(scrapeResult.screenshotUrl);
-          if (imgRes.ok) {
-            const imgBytes = new Uint8Array(await imgRes.arrayBuffer());
-            storagePath = `${user.id}/${deal.id}/screenshot.png`;
-            const { error: uploadError } = await adminClient.storage
-              .from("decks")
-              .upload(storagePath, new Blob([imgBytes], { type: "image/png" }), {
-                upsert: true,
-              });
-            if (uploadError) {
-              console.warn("Screenshot upload failed:", uploadError.message);
-              storagePath = null;
+        if (useCaptureService) {
+          console.log(`Using DocSend Capture Service for deal ${deal.id}`);
+
+          const captureRes = await fetch(`${captureServiceUrl}/capture`, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "X-API-Key": captureServiceApiKey!,
+            },
+            body: JSON.stringify({ url: normalizedUrl, max_pages: 50 }),
+          });
+
+          if (!captureRes.ok) {
+            const errText = await captureRes.text();
+            throw new Error(`Capture service failed [${captureRes.status}]: ${errText}`);
+          }
+
+          const captureData = await captureRes.json();
+          markdown = captureData.markdown || "";
+          pdfBase64 = captureData.pdf_base64 || null;
+          pageCount = captureData.page_count || estimatePages(markdown);
+
+          console.log(`Capture service returned ${pageCount} pages, ${markdown.length} chars markdown`);
+
+          // Store the PDF from capture service
+          if (pdfBase64) {
+            try {
+              const pdfBytes = Uint8Array.from(atob(pdfBase64), (c) => c.charCodeAt(0));
+              storagePath = `${user.id}/${deal.id}/deck.pdf`;
+              const { error: uploadError } = await adminClient.storage
+                .from("decks")
+                .upload(storagePath, new Blob([pdfBytes], { type: "application/pdf" }), {
+                  upsert: true,
+                });
+              if (uploadError) {
+                console.warn("PDF upload failed:", uploadError.message);
+                storagePath = null;
+              } else {
+                const sizeMB = (pdfBytes.length / (1024 * 1024)).toFixed(1);
+                await adminClient
+                  .from("deals")
+                  .update({ deck_size: `${sizeMB}MB`, compressed_size: `${sizeMB}MB` })
+                  .eq("id", deal.id);
+              }
+            } catch (e) {
+              console.warn("Failed to store PDF:", e);
             }
           }
-        } catch (e) {
-          console.warn("Failed to download screenshot:", e);
+        } else if (firecrawlApiKey) {
+          // Fallback: Firecrawl for PandaDoc or if capture service unavailable
+          console.log(`Using Firecrawl for deal ${deal.id}`);
+
+          const scrapeResult = await scrapeWithFirecrawl(firecrawlApiKey, normalizedUrl);
+          markdown = scrapeResult.markdown;
+          pageCount = estimatePages(markdown);
+
+          // Store screenshot if available
+          if (scrapeResult.screenshotUrl) {
+            try {
+              const imgRes = await fetch(scrapeResult.screenshotUrl);
+              if (imgRes.ok) {
+                const imgBytes = new Uint8Array(await imgRes.arrayBuffer());
+                storagePath = `${user.id}/${deal.id}/screenshot.png`;
+                const { error: uploadError } = await adminClient.storage
+                  .from("decks")
+                  .upload(storagePath, new Blob([imgBytes], { type: "image/png" }), {
+                    upsert: true,
+                  });
+                if (uploadError) {
+                  console.warn("Screenshot upload failed:", uploadError.message);
+                  storagePath = null;
+                }
+              }
+            } catch (e) {
+              console.warn("Failed to download screenshot:", e);
+            }
+          }
+        } else {
+          throw new Error("No scraping service configured (need DOCSEND_CAPTURE_SERVICE_URL or FIRECRAWL_API_KEY)");
         }
+
+        // --- Update deal: scraping done, move to extracting ---
+        await adminClient
+          .from("deals")
+          .update({
+            pages: pageCount,
+            status: "extracting",
+            updated_at: new Date().toISOString(),
+          })
+          .eq("id", deal.id);
+
+        // --- Create source record ---
+        await adminClient.from("sources").insert({
+          deal_id: deal.id,
+          user_id: user.id,
+          file_name: `${sourceType}-${extractSlug(normalizedUrl)}.md`,
+          original_size: `${(markdown.length / 1024).toFixed(0)}KB`,
+          storage_path: storagePath,
+          source_type: sourceType,
+          processing_status: "extracted",
+          extracted_text: markdown.slice(0, 100_000),
+        });
+
+        // --- Extract metadata via LLM ---
+        await extractMetadata(adminClient, deal.id, user.id, markdown);
+
+        console.log(`DocSend processing complete for deal ${deal.id}`);
+      } catch (bgError) {
+        console.error(`Background processing failed for deal ${deal.id}:`, bgError);
+        await adminClient
+          .from("deals")
+          .update({ status: "error", updated_at: new Date().toISOString() })
+          .eq("id", deal.id);
       }
+    })();
 
-      // --- Step 4: Create source record ---
-      await adminClient.from("sources").insert({
-        deal_id: deal.id,
-        user_id: user.id,
-        file_name: `${sourceType}-${extractSlug(normalizedUrl)}.md`,
-        original_size: `${(scrapeResult.markdown.length / 1024).toFixed(0)}KB`,
-        storage_path: storagePath,
-        source_type: sourceType,
-        processing_status: "extracted",
-        extracted_text: scrapeResult.markdown.slice(0, 100_000),
-      });
+    // Use respondWith pattern: return response immediately, let background work continue
+    // In Deno Deploy / Supabase Edge Functions, the runtime keeps the function alive
+    // until all promises settle, even after the response is sent.
+    backgroundWork.catch((e) => console.error("Unhandled background error:", e));
 
-      // --- Step 5: Update deal with page count estimate and extracted metadata ---
-      const pageEstimate = estimatePages(scrapeResult.markdown);
-      await adminClient
-        .from("deals")
-        .update({
-          pages: pageEstimate,
-          status: "extracting",
-          updated_at: new Date().toISOString(),
-        })
-        .eq("id", deal.id);
-
-      // --- Step 6: Extract metadata via LLM ---
-      await extractMetadata(adminClient, deal.id, user.id, scrapeResult.markdown);
-
-      console.log(`DocSend processing complete for deal ${deal.id}`);
-
-      return new Response(
-        JSON.stringify({ success: true, dealId: deal.id }),
-        { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
-    } catch (scrapeError) {
-      console.error(`Scrape failed for deal ${deal.id}:`, scrapeError);
-      await adminClient
-        .from("deals")
-        .update({ status: "error", updated_at: new Date().toISOString() })
-        .eq("id", deal.id);
-
-      const message = scrapeError instanceof Error ? scrapeError.message : "Scrape failed";
-      return new Response(
-        JSON.stringify({ error: message, dealId: deal.id }),
-        { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
-    }
+    return responsePromise;
   } catch (error) {
     console.error("process-docsend error:", error);
     const message = error instanceof Error ? error.message : "Unknown error";
@@ -191,7 +248,7 @@ Deno.serve(async (req) => {
 
 // ─── Helpers ───────────────────────────────────────────────
 
-/** Scrape a URL using Firecrawl and return markdown + screenshot URL */
+/** Scrape a URL using Firecrawl (fallback for PandaDoc or when capture service unavailable) */
 async function scrapeWithFirecrawl(
   apiKey: string,
   url: string
@@ -205,7 +262,7 @@ async function scrapeWithFirecrawl(
     body: JSON.stringify({
       url,
       formats: ["markdown", "screenshot"],
-      waitFor: 5000, // DocSend pages load slowly
+      waitFor: 5000,
       timeout: 30000,
     }),
   });
@@ -225,32 +282,25 @@ async function scrapeWithFirecrawl(
   };
 }
 
-/** Derive a deal name from a DocSend/PandaDoc URL */
 function deriveDealName(url: string): string {
-  // Try to extract slug: docsend.com/view/abc123 → "abc123"
   const slug = extractSlug(url);
-  // Clean up the slug to make it more readable
   return slug
     .replace(/[-_]/g, " ")
     .replace(/\b\w/g, (c) => c.toUpperCase())
     .trim() || "DocSend Import";
 }
 
-/** Extract the slug/ID from a DocSend or PandaDoc URL */
 function extractSlug(url: string): string {
   try {
     const u = new URL(url);
     const parts = u.pathname.split("/").filter(Boolean);
-    // docsend.com/view/SLUG or app.pandadoc.com/s/SLUG
     return parts[parts.length - 1] || "unknown";
   } catch {
     return "unknown";
   }
 }
 
-/** Rough page count estimate from markdown length */
 function estimatePages(markdown: string): number {
-  // ~500 words per slide, ~5 chars per word
   const wordCount = markdown.split(/\s+/).length;
   return Math.max(1, Math.round(wordCount / 500));
 }
@@ -262,7 +312,6 @@ async function extractMetadata(
   userId: string,
   text: string
 ): Promise<void> {
-  // Fetch user's AI model preference
   const { data: settings } = await adminClient
     .from("user_settings")
     .select("ai_model")
@@ -371,9 +420,8 @@ async function extractMetadata(
     const meta = JSON.parse(toolCall.function.arguments);
     console.log(`Extracted metadata: ${meta.startup_name} (${meta.sector}, ${meta.stage})`);
 
-    // Update deal with extracted metadata
     const updatePayload: Record<string, unknown> = {
-      name: meta.startup_name || deriveDealNameFallback(dealId),
+      name: meta.startup_name || `DocSend Import ${dealId.slice(0, 6)}`,
       stage: meta.stage || "Unknown",
       sector: meta.sector || "Unknown",
       status: "memo-ready",
@@ -394,8 +442,4 @@ async function extractMetadata(
       .update({ status: "memo-ready", updated_at: new Date().toISOString() })
       .eq("id", dealId);
   }
-}
-
-function deriveDealNameFallback(dealId: string): string {
-  return `DocSend Import ${dealId.slice(0, 6)}`;
 }

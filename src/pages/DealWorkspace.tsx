@@ -76,8 +76,8 @@ export default function DealWorkspace() {
     toast.promise(
       processDocsend.mutateAsync(trimmed).then(() => setDocSendUrl("")),
       {
-        loading: "Fetching deck from link…",
-        success: "Deal created from link!",
+        loading: "Starting deck capture…",
+        success: "Capture started — this may take a minute. Progress will update automatically.",
         error: (err) => `Fetch failed: ${err.message}`,
       }
     );
