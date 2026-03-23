@@ -1,3 +1,4 @@
+import asyncio
 import base64
 import io
 import json
@@ -13,7 +14,7 @@ logger = logging.getLogger(__name__)
 from dotenv import load_dotenv
 load_dotenv()
 
-from fastapi import FastAPI, HTTPException, Security
+from fastapi import BackgroundTasks, FastAPI, HTTPException, Security
 from fastapi.security.api_key import APIKeyHeader
 from pydantic import BaseModel, HttpUrl, Field
 
@@ -46,6 +47,16 @@ except Exception:  # noqa: BLE001
 class CaptureRequest(BaseModel):
     url: HttpUrl
     max_pages: int = Field(default=20, ge=1, le=100)
+
+
+class CaptureAsyncRequest(BaseModel):
+    url: HttpUrl
+    max_pages: int = Field(default=20, ge=1, le=100)
+    callback_url: str
+    job_id: str
+    deal_id: str
+    user_id: str
+    service_role_key: str
 
 
 class ScreenshotItem(BaseModel):
@@ -248,6 +259,43 @@ async def capture_docsend(req: CaptureRequest) -> CaptureResponse:
         return CaptureResponse(**result)
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=500, detail=f"Capture failed: {exc}") from exc
+
+
+async def _run_capture_and_callback(req: CaptureAsyncRequest) -> None:
+    """Background task: run capture and POST results to callback URL."""
+    import httpx
+
+    payload: Dict[str, Any] = {
+        "job_id": req.job_id,
+        "deal_id": req.deal_id,
+        "user_id": req.user_id,
+        "service_role_key": req.service_role_key,
+    }
+
+    try:
+        agent = DocsendWebAgent(max_pages=req.max_pages)
+        result = await agent.capture(str(req.url))
+        payload["pdf_base64"] = result["pdf_base64"]
+        payload["markdown"] = result["markdown"]
+        payload["page_count"] = result["page_count"]
+    except Exception as exc:
+        logger.error("Async capture failed for job %s: %s", req.job_id, exc)
+        payload["error"] = str(exc)
+
+    try:
+        async with httpx.AsyncClient(timeout=30) as client:
+            resp = await client.post(req.callback_url, json=payload)
+            logger.info("Callback response for job %s: %s", req.job_id, resp.status_code)
+    except Exception as exc:
+        logger.error("Failed to send callback for job %s: %s", req.job_id, exc)
+
+
+@app.post("/capture-async", dependencies=[Security(verify_api_key)])
+async def capture_docsend_async(req: CaptureAsyncRequest, background_tasks: BackgroundTasks) -> Dict[str, str]:
+    """Accept a capture request and process it in the background. Results are POSTed to callback_url."""
+    background_tasks.add_task(_run_capture_and_callback, req)
+    logger.info("Queued async capture for job %s (deal %s)", req.job_id, req.deal_id)
+    return {"status": "accepted", "job_id": req.job_id}
 
 
 if __name__ == "__main__":

@@ -14,6 +14,47 @@ export type Database = {
   }
   public: {
     Tables: {
+      capture_jobs: {
+        Row: {
+          created_at: string
+          deal_id: string
+          error_message: string | null
+          id: string
+          status: string
+          updated_at: string
+          url: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          deal_id: string
+          error_message?: string | null
+          id?: string
+          status?: string
+          updated_at?: string
+          url: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          deal_id?: string
+          error_message?: string | null
+          id?: string
+          status?: string
+          updated_at?: string
+          url?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "capture_jobs_deal_id_fkey"
+            columns: ["deal_id"]
+            isOneToOne: false
+            referencedRelation: "deals"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       deals: {
         Row: {
           ask_amount: string | null

@@ -26,3 +26,9 @@ verify_jwt = false
 
 [functions.generate-memo]
 verify_jwt = false
+
+[functions.run-docsend-capture]
+verify_jwt = false
+
+[functions.docsend-callback]
+verify_jwt = false
