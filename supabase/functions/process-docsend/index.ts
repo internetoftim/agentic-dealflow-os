@@ -218,40 +218,6 @@ Deno.serve(async (req) => {
 
 // ─── Helpers ───────────────────────────────────────────────
 
-/** Scrape a URL using Firecrawl (fallback for PandaDoc or when capture service unavailable) */
-async function scrapeWithFirecrawl(
-  apiKey: string,
-  url: string
-): Promise<{ markdown: string; screenshotUrl: string | null; title: string | null }> {
-  const res = await fetch("https://api.firecrawl.dev/v1/scrape", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      url,
-      formats: ["markdown", "screenshot"],
-      waitFor: 5000,
-      timeout: 30000,
-    }),
-  });
-
-  if (!res.ok) {
-    const errText = await res.text();
-    throw new Error(`Firecrawl scrape failed [${res.status}]: ${errText}`);
-  }
-
-  const data = await res.json();
-  const result = data.data || data;
-
-  return {
-    markdown: result.markdown || "",
-    screenshotUrl: result.screenshot || null,
-    title: result.metadata?.title || null,
-  };
-}
-
 function deriveDealName(url: string): string {
   const slug = extractSlug(url);
   return slug
