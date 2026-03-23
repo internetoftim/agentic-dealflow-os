@@ -37,7 +37,7 @@ Deno.serve(async (req) => {
     const supabaseAnonKey = Deno.env.get("SUPABASE_ANON_KEY")!;
     const captureServiceUrl = Deno.env.get("DOCSEND_CAPTURE_SERVICE_URL");
     const captureServiceApiKey = Deno.env.get("DOCSEND_CAPTURE_SERVICE_API_KEY");
-    const firecrawlApiKey = Deno.env.get("FIRECRAWL_API_KEY");
+    
 
     const adminClient = createClient(supabaseUrl, supabaseServiceKey);
     const userClient = createClient(supabaseUrl, supabaseAnonKey, {
@@ -110,12 +110,13 @@ Deno.serve(async (req) => {
         let pageCount = 0;
         let storagePath: string | null = null;
 
-        // Use DocSend Capture Service for DocSend links (Playwright-based, handles JS viewer)
-        // Falls back to Firecrawl for PandaDoc or if capture service is not configured
-        const useCaptureService = isDocSend && captureServiceUrl && captureServiceApiKey;
+        // Use DocSend Capture Service (Playwright-based) for all links
+        if (!captureServiceUrl || !captureServiceApiKey) {
+          throw new Error("DOCSEND_CAPTURE_SERVICE_URL and DOCSEND_CAPTURE_SERVICE_API_KEY must be configured");
+        }
 
-        if (useCaptureService) {
-          console.log(`Using DocSend Capture Service for deal ${deal.id}`);
+        console.log(`Using DocSend Capture Service for deal ${deal.id}`);
+        {
 
           const captureRes = await fetch(`${captureServiceUrl}/capture`, {
             method: "POST",
@@ -162,37 +163,6 @@ Deno.serve(async (req) => {
               console.warn("Failed to store PDF:", e);
             }
           }
-        } else if (firecrawlApiKey) {
-          // Fallback: Firecrawl for PandaDoc or if capture service unavailable
-          console.log(`Using Firecrawl for deal ${deal.id}`);
-
-          const scrapeResult = await scrapeWithFirecrawl(firecrawlApiKey, normalizedUrl);
-          markdown = scrapeResult.markdown;
-          pageCount = estimatePages(markdown);
-
-          // Store screenshot if available
-          if (scrapeResult.screenshotUrl) {
-            try {
-              const imgRes = await fetch(scrapeResult.screenshotUrl);
-              if (imgRes.ok) {
-                const imgBytes = new Uint8Array(await imgRes.arrayBuffer());
-                storagePath = `${user.id}/${deal.id}/screenshot.png`;
-                const { error: uploadError } = await adminClient.storage
-                  .from("decks")
-                  .upload(storagePath, new Blob([imgBytes], { type: "image/png" }), {
-                    upsert: true,
-                  });
-                if (uploadError) {
-                  console.warn("Screenshot upload failed:", uploadError.message);
-                  storagePath = null;
-                }
-              }
-            } catch (e) {
-              console.warn("Failed to download screenshot:", e);
-            }
-          }
-        } else {
-          throw new Error("No scraping service configured (need DOCSEND_CAPTURE_SERVICE_URL or FIRECRAWL_API_KEY)");
         }
 
         // --- Update deal: scraping done, move to extracting ---
@@ -247,40 +217,6 @@ Deno.serve(async (req) => {
 });
 
 // ─── Helpers ───────────────────────────────────────────────
-
-/** Scrape a URL using Firecrawl (fallback for PandaDoc or when capture service unavailable) */
-async function scrapeWithFirecrawl(
-  apiKey: string,
-  url: string
-): Promise<{ markdown: string; screenshotUrl: string | null; title: string | null }> {
-  const res = await fetch("https://api.firecrawl.dev/v1/scrape", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      url,
-      formats: ["markdown", "screenshot"],
-      waitFor: 5000,
-      timeout: 30000,
-    }),
-  });
-
-  if (!res.ok) {
-    const errText = await res.text();
-    throw new Error(`Firecrawl scrape failed [${res.status}]: ${errText}`);
-  }
-
-  const data = await res.json();
-  const result = data.data || data;
-
-  return {
-    markdown: result.markdown || "",
-    screenshotUrl: result.screenshot || null,
-    title: result.metadata?.title || null,
-  };
-}
 
 function deriveDealName(url: string): string {
   const slug = extractSlug(url);
