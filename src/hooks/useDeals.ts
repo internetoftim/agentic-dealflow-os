@@ -272,12 +272,29 @@ export function useProcessDocsend() {
     mutationFn: async (url: string) => {
       if (!user) throw new Error("Not authenticated");
 
+      // Step 1: Create deal (fast)
       const { data, error } = await supabase.functions.invoke("process-docsend", {
         body: { url },
       });
 
       if (error) throw error;
       if (data?.error) throw new Error(data.error);
+
+      const dealId = data.dealId;
+      queryClient.invalidateQueries({ queryKey: ["deals"] });
+
+      // Step 2: Fire capture in background (don't await — frontend polls status)
+      supabase.functions.invoke("run-docsend-capture", {
+        body: { dealId, url: data.url },
+      }).then((res) => {
+        if (res.error) console.error("run-docsend-capture error:", res.error);
+        if (res.data?.error) console.error("run-docsend-capture error:", res.data.error);
+        queryClient.invalidateQueries({ queryKey: ["deals"] });
+      }).catch((err) => {
+        console.error("run-docsend-capture failed:", err);
+        queryClient.invalidateQueries({ queryKey: ["deals"] });
+      });
+
       return data;
     },
     onSuccess: () => {
