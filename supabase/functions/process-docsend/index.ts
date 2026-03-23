@@ -110,12 +110,13 @@ Deno.serve(async (req) => {
         let pageCount = 0;
         let storagePath: string | null = null;
 
-        // Use DocSend Capture Service for DocSend links (Playwright-based, handles JS viewer)
-        // Falls back to Firecrawl for PandaDoc or if capture service is not configured
-        const useCaptureService = isDocSend && captureServiceUrl && captureServiceApiKey;
+        // Use DocSend Capture Service (Playwright-based) for all links
+        if (!captureServiceUrl || !captureServiceApiKey) {
+          throw new Error("DOCSEND_CAPTURE_SERVICE_URL and DOCSEND_CAPTURE_SERVICE_API_KEY must be configured");
+        }
 
-        if (useCaptureService) {
-          console.log(`Using DocSend Capture Service for deal ${deal.id}`);
+        console.log(`Using DocSend Capture Service for deal ${deal.id}`);
+        {
 
           const captureRes = await fetch(`${captureServiceUrl}/capture`, {
             method: "POST",
