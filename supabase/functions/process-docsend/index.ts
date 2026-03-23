@@ -163,37 +163,6 @@ Deno.serve(async (req) => {
               console.warn("Failed to store PDF:", e);
             }
           }
-        } else if (firecrawlApiKey) {
-          // Fallback: Firecrawl for PandaDoc or if capture service unavailable
-          console.log(`Using Firecrawl for deal ${deal.id}`);
-
-          const scrapeResult = await scrapeWithFirecrawl(firecrawlApiKey, normalizedUrl);
-          markdown = scrapeResult.markdown;
-          pageCount = estimatePages(markdown);
-
-          // Store screenshot if available
-          if (scrapeResult.screenshotUrl) {
-            try {
-              const imgRes = await fetch(scrapeResult.screenshotUrl);
-              if (imgRes.ok) {
-                const imgBytes = new Uint8Array(await imgRes.arrayBuffer());
-                storagePath = `${user.id}/${deal.id}/screenshot.png`;
-                const { error: uploadError } = await adminClient.storage
-                  .from("decks")
-                  .upload(storagePath, new Blob([imgBytes], { type: "image/png" }), {
-                    upsert: true,
-                  });
-                if (uploadError) {
-                  console.warn("Screenshot upload failed:", uploadError.message);
-                  storagePath = null;
-                }
-              }
-            } catch (e) {
-              console.warn("Failed to download screenshot:", e);
-            }
-          }
-        } else {
-          throw new Error("No scraping service configured (need DOCSEND_CAPTURE_SERVICE_URL or FIRECRAWL_API_KEY)");
         }
 
         // --- Update deal: scraping done, move to extracting ---
