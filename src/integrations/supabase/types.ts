@@ -199,6 +199,7 @@ export type Database = {
           deep_research_provider: string
           drive_folder: string | null
           drive_sync_enabled: boolean | null
+          gmail_history_id: string | null
           gmail_label_enabled: boolean | null
           google_provider_refresh_token: string | null
           google_provider_token: string | null
@@ -217,6 +218,7 @@ export type Database = {
           deep_research_provider?: string
           drive_folder?: string | null
           drive_sync_enabled?: boolean | null
+          gmail_history_id?: string | null
           gmail_label_enabled?: boolean | null
           google_provider_refresh_token?: string | null
           google_provider_token?: string | null
@@ -235,6 +237,7 @@ export type Database = {
           deep_research_provider?: string
           drive_folder?: string | null
           drive_sync_enabled?: boolean | null
+          gmail_history_id?: string | null
           gmail_label_enabled?: boolean | null
           google_provider_refresh_token?: string | null
           google_provider_token?: string | null

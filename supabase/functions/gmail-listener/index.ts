@@ -9,6 +9,52 @@ const corsHeaders = {
 /** Gmail label name to watch for deck submissions */
 const DECK_LABEL_NAME = "deck";
 
+/** Refresh a Google access token using the refresh token */
+async function refreshAccessToken(refreshToken: string): Promise<string | null> {
+  const clientId = Deno.env.get("GOOGLE_CLIENT_ID");
+  const clientSecret = Deno.env.get("GOOGLE_CLIENT_SECRET");
+  if (!clientId || !clientSecret) {
+    console.error("Missing GOOGLE_CLIENT_ID or GOOGLE_CLIENT_SECRET");
+    return null;
+  }
+  const res = await fetch("https://oauth2.googleapis.com/token", {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
+      client_id: clientId,
+      client_secret: clientSecret,
+      refresh_token: refreshToken,
+      grant_type: "refresh_token",
+    }),
+  });
+  if (!res.ok) {
+    console.error("Token refresh failed:", await res.text());
+    return null;
+  }
+  return (await res.json()).access_token;
+}
+
+/** Get a valid token, refreshing if expired */
+async function getValidToken(
+  adminClient: any,
+  userId: string,
+  currentToken: string | null,
+  refreshToken: string | null
+): Promise<string | null> {
+  if (currentToken) {
+    const testRes = await fetch("https://gmail.googleapis.com/gmail/v1/users/me/profile", {
+      headers: { Authorization: `Bearer ${currentToken}` },
+    });
+    if (testRes.ok) return currentToken;
+  }
+  if (!refreshToken) return null;
+  const newToken = await refreshAccessToken(refreshToken);
+  if (newToken) {
+    await adminClient.from("user_settings").update({ google_provider_token: newToken }).eq("user_id", userId);
+  }
+  return newToken;
+}
+
 /** Get or create the Gmail label ID for the given name */
 async function getOrCreateLabelId(
   token: string,
@@ -183,9 +229,8 @@ Deno.serve(async (req) => {
     // Fetch all users with gmail_label_enabled and a valid Google token
     const { data: eligibleUsers, error: usersError } = await adminClient
       .from("user_settings")
-      .select("user_id, google_provider_token")
-      .eq("gmail_label_enabled", true)
-      .not("google_provider_token", "is", null);
+      .select("user_id, google_provider_token, google_provider_refresh_token")
+      .eq("gmail_label_enabled", true);
 
     if (usersError) throw usersError;
     if (!eligibleUsers || eligibleUsers.length === 0) {
@@ -200,18 +245,30 @@ Deno.serve(async (req) => {
     let totalProcessed = 0;
 
     for (const userSettings of eligibleUsers) {
-      const { user_id, google_provider_token } = userSettings;
+      const { user_id } = userSettings;
 
       try {
+        // 0. Get valid token (refresh if needed)
+        const token = await getValidToken(
+          adminClient,
+          user_id,
+          userSettings.token,
+          userSettings.google_provider_refresh_token
+        );
+        if (!token) {
+          console.warn(`No valid token for user ${user_id}`);
+          continue;
+        }
+
         // 1. Get or create the "deck" label
-        const labelId = await getOrCreateLabelId(google_provider_token, DECK_LABEL_NAME);
+        const labelId = await getOrCreateLabelId(token, DECK_LABEL_NAME);
         if (!labelId) {
           console.warn(`Could not find/create label for user ${user_id}`);
           continue;
         }
 
         // 2. Fetch unread messages with that label
-        const messages = await getUnreadMessages(google_provider_token, labelId);
+        const messages = await getUnreadMessages(token, labelId);
         if (messages.length === 0) {
           console.log(`No unread deck emails for user ${user_id}`);
           continue;
@@ -222,7 +279,7 @@ Deno.serve(async (req) => {
         for (const msg of messages) {
           try {
             // 3. Get full message details
-            const fullMessage = await getMessage(google_provider_token, msg.id);
+            const fullMessage = await getMessage(token, msg.id);
             if (!fullMessage) continue;
 
             const headers = fullMessage.payload?.headers || [];
@@ -234,7 +291,7 @@ Deno.serve(async (req) => {
 
             if (attachments.length === 0) {
               console.log(`No deck attachments in email "${subject}" — skipping`);
-              await markAsRead(google_provider_token, msg.id);
+              await markAsRead(token, msg.id);
               continue;
             }
 
@@ -243,7 +300,7 @@ Deno.serve(async (req) => {
             for (const attachment of attachments) {
               // 5. Download attachment
               const fileBytes = await getAttachment(
-                google_provider_token,
+                token,
                 msg.id,
                 attachment.attachmentId
               );
@@ -342,11 +399,11 @@ Deno.serve(async (req) => {
             }
 
             // 11. Mark email as read after processing all attachments
-            await markAsRead(google_provider_token, msg.id);
+            await markAsRead(token, msg.id);
           } catch (msgError) {
             console.error(`Error processing message ${msg.id}:`, msgError);
             // Mark as read even on error to avoid reprocessing loops
-            await markAsRead(google_provider_token, msg.id).catch(() => {});
+            await markAsRead(token, msg.id).catch(() => {});
           }
         }
       } catch (userError) {
