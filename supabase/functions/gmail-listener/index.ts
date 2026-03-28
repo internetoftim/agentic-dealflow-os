@@ -229,9 +229,8 @@ Deno.serve(async (req) => {
     // Fetch all users with gmail_label_enabled and a valid Google token
     const { data: eligibleUsers, error: usersError } = await adminClient
       .from("user_settings")
-      .select("user_id, google_provider_token")
-      .eq("gmail_label_enabled", true)
-      .not("google_provider_token", "is", null);
+      .select("user_id, google_provider_token, google_provider_refresh_token")
+      .eq("gmail_label_enabled", true);
 
     if (usersError) throw usersError;
     if (!eligibleUsers || eligibleUsers.length === 0) {
