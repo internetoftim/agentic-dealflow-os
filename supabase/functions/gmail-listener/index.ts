@@ -245,11 +245,23 @@ Deno.serve(async (req) => {
     let totalProcessed = 0;
 
     for (const userSettings of eligibleUsers) {
-      const { user_id, google_provider_token } = userSettings;
+      const { user_id } = userSettings;
 
       try {
+        // 0. Get valid token (refresh if needed)
+        const token = await getValidToken(
+          adminClient,
+          user_id,
+          userSettings.google_provider_token,
+          userSettings.google_provider_refresh_token
+        );
+        if (!token) {
+          console.warn(`No valid token for user ${user_id}`);
+          continue;
+        }
+
         // 1. Get or create the "deck" label
-        const labelId = await getOrCreateLabelId(google_provider_token, DECK_LABEL_NAME);
+        const labelId = await getOrCreateLabelId(token, DECK_LABEL_NAME);
         if (!labelId) {
           console.warn(`Could not find/create label for user ${user_id}`);
           continue;
