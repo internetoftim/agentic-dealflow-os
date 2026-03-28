@@ -252,7 +252,7 @@ Deno.serve(async (req) => {
         const token = await getValidToken(
           adminClient,
           user_id,
-          userSettings.google_provider_token,
+          userSettings.token,
           userSettings.google_provider_refresh_token
         );
         if (!token) {
@@ -268,7 +268,7 @@ Deno.serve(async (req) => {
         }
 
         // 2. Fetch unread messages with that label
-        const messages = await getUnreadMessages(google_provider_token, labelId);
+        const messages = await getUnreadMessages(token, labelId);
         if (messages.length === 0) {
           console.log(`No unread deck emails for user ${user_id}`);
           continue;
@@ -279,7 +279,7 @@ Deno.serve(async (req) => {
         for (const msg of messages) {
           try {
             // 3. Get full message details
-            const fullMessage = await getMessage(google_provider_token, msg.id);
+            const fullMessage = await getMessage(token, msg.id);
             if (!fullMessage) continue;
 
             const headers = fullMessage.payload?.headers || [];
@@ -291,7 +291,7 @@ Deno.serve(async (req) => {
 
             if (attachments.length === 0) {
               console.log(`No deck attachments in email "${subject}" — skipping`);
-              await markAsRead(google_provider_token, msg.id);
+              await markAsRead(token, msg.id);
               continue;
             }
 
@@ -300,7 +300,7 @@ Deno.serve(async (req) => {
             for (const attachment of attachments) {
               // 5. Download attachment
               const fileBytes = await getAttachment(
-                google_provider_token,
+                token,
                 msg.id,
                 attachment.attachmentId
               );
@@ -399,11 +399,11 @@ Deno.serve(async (req) => {
             }
 
             // 11. Mark email as read after processing all attachments
-            await markAsRead(google_provider_token, msg.id);
+            await markAsRead(token, msg.id);
           } catch (msgError) {
             console.error(`Error processing message ${msg.id}:`, msgError);
             // Mark as read even on error to avoid reprocessing loops
-            await markAsRead(google_provider_token, msg.id).catch(() => {});
+            await markAsRead(token, msg.id).catch(() => {});
           }
         }
       } catch (userError) {
