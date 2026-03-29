@@ -71,11 +71,30 @@ async function getOrCreateLabelId(token: string, labelName: string): Promise<str
   const listRes = await fetch("https://gmail.googleapis.com/gmail/v1/users/me/labels", {
     headers: { Authorization: `Bearer ${token}` },
   });
-  if (!listRes.ok) return null;
+  if (!listRes.ok) {
+    console.error("Failed to list labels:", await listRes.text());
+    return null;
+  }
   const { labels } = await listRes.json();
+  const allNames = labels?.map((l: any) => l.name) || [];
+  console.log(`Available labels: ${JSON.stringify(allNames)}`);
   const match = labels?.find((l: any) => l.name.toLowerCase() === labelName.toLowerCase());
   if (match) return match.id;
-  return null;
+
+  // Create the label if it doesn't exist
+  console.log(`Label "${labelName}" not found, creating it...`);
+  const createRes = await fetch("https://gmail.googleapis.com/gmail/v1/users/me/labels", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ name: labelName, labelListVisibility: "labelShow", messageListVisibility: "show" }),
+  });
+  if (!createRes.ok) {
+    console.error("Failed to create label:", await createRes.text());
+    return null;
+  }
+  const created = await createRes.json();
+  console.log(`Created label "${labelName}" with id ${created.id}`);
+  return created.id;
 }
 
 function isDeckFile(filename: string): boolean {
