@@ -19,6 +19,8 @@ export default function DealWorkspace() {
 
   const { data: deals } = useDeals();
   const { data: sources } = useSources(selectedDealId);
+  const activeDealForUrl = deals?.find((d) => d.id === selectedDealId) ?? deals?.[0];
+  const { data: docsendUrl } = useDocsendUrl(activeDealForUrl?.id, activeDealForUrl?.source);
   const createDeal = useCreateDealWithUpload();
   const processDocsend = useProcessDocsend();
   const cancelDeal = useCancelDeal();
