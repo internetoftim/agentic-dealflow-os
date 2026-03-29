@@ -255,15 +255,16 @@ Deno.serve(async (req) => {
       const errText = await historyRes.text();
       console.error(`History list failed (${historyRes.status}):`, errText);
       if (historyRes.status === 404) {
-      // historyId too old — fall back to listing unread messages with label
-      console.log("History expired, falling back to unread messages");
-      const listUrl = `https://gmail.googleapis.com/gmail/v1/users/me/messages?labelIds=${labelId}&q=is:unread&maxResults=10`;
-      const listRes = await fetch(listUrl, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (listRes.ok) {
-        const listData = await listRes.json();
-        messageIds = (listData.messages || []).map((m: any) => m.id);
+        // historyId too old — fall back to listing unread messages with label
+        console.log("History expired, falling back to unread messages");
+        const listUrl = `https://gmail.googleapis.com/gmail/v1/users/me/messages?labelIds=${labelId}&q=is:unread&maxResults=10`;
+        const listRes = await fetch(listUrl, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (listRes.ok) {
+          const listData = await listRes.json();
+          messageIds = (listData.messages || []).map((m: any) => m.id);
+        }
       }
     }
 
