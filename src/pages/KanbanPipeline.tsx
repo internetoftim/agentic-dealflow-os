@@ -11,10 +11,6 @@ const columns = [
 
 const sourceConfig: Record<string, { label: string; colorClass: string; bgClass: string }> = {
   ...mockSourceConfig,
-  manual: { label: "Manual Upload", colorClass: "text-badge-amber", bgClass: "bg-badge-amber-muted" },
-  "deal-desk": { label: "Deal Desk", colorClass: "text-badge-purple", bgClass: "bg-badge-purple-muted" },
-  "personal-gmail": { label: "Personal Gmail", colorClass: "text-badge-blue", bgClass: "bg-badge-blue-muted" },
-  docusend: { label: "DocSend", colorClass: "text-badge-green", bgClass: "bg-badge-green-muted" },
 };
 
 const stepIcons: Record<string, React.ElementType> = {

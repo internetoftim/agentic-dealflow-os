@@ -26,9 +26,11 @@ export const mockDeals: Deal[] = [
   { id: "8", name: "Orbital Labs", stage: "Seed", sector: "SpaceTech", source: "manual", autoIngested: false, status: "extracting", deckSize: "67MB" },
 ];
 
-export const sourceConfig: Record<DealSource, { label: string; colorClass: string; bgClass: string }> = {
+export const sourceConfig: Record<string, { label: string; colorClass: string; bgClass: string }> = {
   "deal-desk": { label: "Deal Desk", colorClass: "text-badge-purple", bgClass: "bg-badge-purple-muted" },
   "personal-gmail": { label: "Personal Gmail", colorClass: "text-badge-blue", bgClass: "bg-badge-blue-muted" },
   "manual": { label: "Manual Upload", colorClass: "text-badge-amber", bgClass: "bg-badge-amber-muted" },
   "docusend": { label: "DocSend", colorClass: "text-badge-green", bgClass: "bg-badge-green-muted" },
+  "docsend": { label: "DocSend", colorClass: "text-badge-green", bgClass: "bg-badge-green-muted" },
+  "email": { label: "Email", colorClass: "text-badge-blue", bgClass: "bg-badge-blue-muted" },
 };

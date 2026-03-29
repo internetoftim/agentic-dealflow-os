@@ -1,12 +1,13 @@
 import { useState, useCallback, useRef, useEffect } from "react";
-import { Upload, Link, Cog, Check, Search, Send, FileText, Globe, Layers, Square, Linkedin, Loader2, FileUp, CircleDashed, CircleCheck, Circle, Pause, Clock } from "lucide-react";
-import { useDeals, useSources, useCreateDealWithUpload, useProcessDocsend, useCancelDeal, WORKFLOW_STEPS, PROCESSING_STATUSES, type WorkflowStatus } from "@/hooks/useDeals";
+import { Upload, Link, Cog, Check, Search, Send, FileText, Globe, Layers, Square, Linkedin, Loader2, FileUp, CircleDashed, CircleCheck, Circle, Pause, Clock, Download, Mail, ExternalLink } from "lucide-react";
+import { useDeals, useSources, useDocsendUrl, useCreateDealWithUpload, useProcessDocsend, useCancelDeal, WORKFLOW_STEPS, PROCESSING_STATUSES, type WorkflowStatus } from "@/hooks/useDeals";
 import { Button } from "@/components/ui/button";
 import { useDealChat } from "@/hooks/useDealChat";
 import { useGenerateMemo } from "@/hooks/useGenerateMemo";
 import { toast } from "sonner";
 import ReactMarkdown from "react-markdown";
-
+import { supabase } from "@/integrations/supabase/client";
+import { sourceConfig } from "@/data/mockDeals";
 const quickActions = ["Extract Cap Table", "Calculate Burn Rate", "Team Background", "Market Size"];
 
 export default function DealWorkspace() {
@@ -18,6 +19,8 @@ export default function DealWorkspace() {
 
   const { data: deals } = useDeals();
   const { data: sources } = useSources(selectedDealId);
+  const activeDealForUrl = deals?.find((d) => d.id === selectedDealId) ?? deals?.[0];
+  const { data: docsendUrl } = useDocsendUrl(activeDealForUrl?.id, activeDealForUrl?.source);
   const createDeal = useCreateDealWithUpload();
   const processDocsend = useProcessDocsend();
   const cancelDeal = useCancelDeal();
@@ -255,9 +258,49 @@ export default function DealWorkspace() {
       <div className="flex-1 flex flex-col min-w-0">
         {/* Quick Facts bar */}
         <div className="flex items-center gap-2 px-5 py-3 border-b border-border bg-card shrink-0 flex-wrap">
+          {/* Source badge */}
+          {activeDeal && (() => {
+            const src = sourceConfig[activeDeal.source] ?? sourceConfig.manual;
+            return (
+              <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium ${src.bgClass} ${src.colorClass}`}>
+                {activeDeal.source === "email" ? <Mail className="h-3 w-3" /> : 
+                 activeDeal.source === "docsend" ? <ExternalLink className="h-3 w-3" /> :
+                 <Upload className="h-3 w-3" />}
+                {src.label}
+              </span>
+            );
+          })()}
           <span className="inline-flex items-center gap-1.5 rounded-full bg-muted px-2.5 py-1 text-xs font-medium text-foreground">
             <FileText className="h-3 w-3 text-muted-foreground" /> Pages: {activeDeal?.pages ?? "—"}
           </span>
+          {/* Download raw file */}
+          {loadedSources.length > 0 && loadedSources[0]?.storage_path && (
+            <button
+              onClick={async () => {
+                const path = loadedSources[0].storage_path;
+                const { data, error } = await supabase.storage.from("decks").createSignedUrl(path, 60);
+                if (error || !data?.signedUrl) {
+                  toast.error("Failed to get download link");
+                  return;
+                }
+                window.open(data.signedUrl, "_blank");
+              }}
+              className="inline-flex items-center gap-1.5 rounded-full bg-muted px-2.5 py-1 text-xs font-medium text-foreground hover:bg-accent transition-colors cursor-pointer"
+            >
+              <Download className="h-3 w-3 text-muted-foreground" /> Download Deck
+            </button>
+          )}
+          {/* DocSend source link */}
+          {activeDeal?.source === "docsend" && docsendUrl && (
+            <a
+              href={docsendUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1.5 rounded-full bg-badge-green-muted px-2.5 py-1 text-xs font-medium text-badge-green hover:underline"
+            >
+              <ExternalLink className="h-3 w-3" /> DocSend Link
+            </a>
+          )}
           {activeDeal?.website ? (
             <a
               href={activeDeal.website}
