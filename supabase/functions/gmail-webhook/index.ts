@@ -228,7 +228,7 @@ Deno.serve(async (req) => {
 
     // Use history.list to get changes since last historyId
     const startHistoryId = settings.gmail_history_id || newHistoryId;
-    const historyUrl = `https://gmail.googleapis.com/gmail/v1/users/me/history?startHistoryId=${startHistoryId}&labelId=${labelId}&historyTypes=messageAdded&historyTypes=labelsAdded`;
+    const historyUrl = `https://gmail.googleapis.com/gmail/v1/users/me/history?startHistoryId=${startHistoryId}&labelId=${labelId}&historyTypes=messageAdded&historyTypes=labelAdded`;
     const historyRes = await fetch(historyUrl, {
       headers: { Authorization: `Bearer ${token}` },
     });
@@ -237,6 +237,7 @@ Deno.serve(async (req) => {
 
     if (historyRes.ok) {
       const historyData = await historyRes.json();
+      console.log(`History response: ${JSON.stringify(historyData).slice(0, 500)}`);
       const histories = historyData.history || [];
       for (const h of histories) {
         for (const added of h.messagesAdded || []) {
@@ -250,16 +251,20 @@ Deno.serve(async (req) => {
           }
         }
       }
-    } else if (historyRes.status === 404) {
-      // historyId too old — fall back to listing unread messages with label
-      console.log("History expired, falling back to unread messages");
-      const listUrl = `https://gmail.googleapis.com/gmail/v1/users/me/messages?labelIds=${labelId}&q=is:unread&maxResults=10`;
-      const listRes = await fetch(listUrl, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (listRes.ok) {
-        const listData = await listRes.json();
-        messageIds = (listData.messages || []).map((m: any) => m.id);
+    } else {
+      const errText = await historyRes.text();
+      console.error(`History list failed (${historyRes.status}):`, errText);
+      if (historyRes.status === 404) {
+        // historyId too old — fall back to listing unread messages with label
+        console.log("History expired, falling back to unread messages");
+        const listUrl = `https://gmail.googleapis.com/gmail/v1/users/me/messages?labelIds=${labelId}&q=is:unread&maxResults=10`;
+        const listRes = await fetch(listUrl, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (listRes.ok) {
+          const listData = await listRes.json();
+          messageIds = (listData.messages || []).map((m: any) => m.id);
+        }
       }
     }
 
