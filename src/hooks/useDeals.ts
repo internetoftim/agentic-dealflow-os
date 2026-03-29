@@ -113,6 +113,24 @@ export function useSources(dealId?: string) {
   });
 }
 
+export function useDocsendUrl(dealId?: string, source?: string) {
+  const { user } = useAuth();
+  return useQuery({
+    queryKey: ["capture-job-url", dealId],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("capture_jobs")
+        .select("url")
+        .eq("deal_id", dealId!)
+        .limit(1)
+        .single();
+      if (error) return null;
+      return data?.url ?? null;
+    },
+    enabled: !!user && !!dealId && source === "docsend",
+  });
+}
+
 export function useCancelDeal() {
   const queryClient = useQueryClient();
   return useMutation({
