@@ -228,7 +228,7 @@ Deno.serve(async (req) => {
 
     // Use history.list to get changes since last historyId
     const startHistoryId = settings.gmail_history_id || newHistoryId;
-    const historyUrl = `https://gmail.googleapis.com/gmail/v1/users/me/history?startHistoryId=${startHistoryId}&labelId=${labelId}&historyTypes=messageAdded&historyTypes=labelsAdded`;
+    const historyUrl = `https://gmail.googleapis.com/gmail/v1/users/me/history?startHistoryId=${startHistoryId}&labelId=${labelId}&historyTypes=messageAdded&historyTypes=labelAdded`;
     const historyRes = await fetch(historyUrl, {
       headers: { Authorization: `Bearer ${token}` },
     });
