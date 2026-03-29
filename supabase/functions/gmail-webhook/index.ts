@@ -240,16 +240,18 @@ Deno.serve(async (req) => {
       console.log(`History response: ${JSON.stringify(historyData).slice(0, 500)}`);
       const histories = historyData.history || [];
       for (const h of histories) {
-        for (const added of h.messagesAdded || []) {
-          if (added.message?.id) {
-            messageIds.push(added.message.id);
-          }
-        }
-        for (const labeled of h.labelsAdded || []) {
-          if (labeled.message?.id) {
-            messageIds.push(labeled.message.id);
-          }
-        }
+      // Extract from messagesAdded
+      for (const added of h.messagesAdded || []) {
+        if (added.message?.id) messageIds.push(added.message.id);
+      }
+      // Extract from labelsAdded
+      for (const labeled of h.labelsAdded || []) {
+        if (labeled.message?.id) messageIds.push(labeled.message.id);
+      }
+      // Fallback: extract from top-level messages array
+      for (const msg of h.messages || []) {
+        if (msg.id) messageIds.push(msg.id);
+      }
       }
     } else {
       const errText = await historyRes.text();
