@@ -291,20 +291,16 @@ export default function DealWorkspace() {
             </button>
           )}
           {/* DocSend source link */}
-          {activeDeal?.source === "docsend" && (() => {
-            const captureSource = loadedSources.find(s => s.source_type === "docsend" || s.source_type === "capture");
-            const sourceUrl = captureSource?.file_name;
-            return sourceUrl ? (
-              <a
-                href={sourceUrl.startsWith("http") ? sourceUrl : `https://${sourceUrl}`}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex items-center gap-1.5 rounded-full bg-badge-green-muted px-2.5 py-1 text-xs font-medium text-badge-green hover:underline"
-              >
-                <ExternalLink className="h-3 w-3" /> DocSend Link
-              </a>
-            ) : null;
-          })()}
+          {activeDeal?.source === "docsend" && docsendUrl && (
+            <a
+              href={docsendUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1.5 rounded-full bg-badge-green-muted px-2.5 py-1 text-xs font-medium text-badge-green hover:underline"
+            >
+              <ExternalLink className="h-3 w-3" /> DocSend Link
+            </a>
+          )}
           {activeDeal?.website ? (
             <a
               href={activeDeal.website}
