@@ -244,6 +244,11 @@ Deno.serve(async (req) => {
             messageIds.push(added.message.id);
           }
         }
+        for (const labeled of h.labelsAdded || []) {
+          if (labeled.message?.id) {
+            messageIds.push(labeled.message.id);
+          }
+        }
       }
     } else if (historyRes.status === 404) {
       // historyId too old — fall back to listing unread messages with label
