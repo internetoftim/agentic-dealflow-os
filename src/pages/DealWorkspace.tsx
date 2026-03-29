@@ -1,12 +1,13 @@
 import { useState, useCallback, useRef, useEffect } from "react";
-import { Upload, Link, Cog, Check, Search, Send, FileText, Globe, Layers, Square, Linkedin, Loader2, FileUp, CircleDashed, CircleCheck, Circle, Pause, Clock } from "lucide-react";
+import { Upload, Link, Cog, Check, Search, Send, FileText, Globe, Layers, Square, Linkedin, Loader2, FileUp, CircleDashed, CircleCheck, Circle, Pause, Clock, Download, Mail, ExternalLink } from "lucide-react";
 import { useDeals, useSources, useCreateDealWithUpload, useProcessDocsend, useCancelDeal, WORKFLOW_STEPS, PROCESSING_STATUSES, type WorkflowStatus } from "@/hooks/useDeals";
 import { Button } from "@/components/ui/button";
 import { useDealChat } from "@/hooks/useDealChat";
 import { useGenerateMemo } from "@/hooks/useGenerateMemo";
 import { toast } from "sonner";
 import ReactMarkdown from "react-markdown";
-
+import { supabase } from "@/integrations/supabase/client";
+import { sourceConfig } from "@/data/mockDeals";
 const quickActions = ["Extract Cap Table", "Calculate Burn Rate", "Team Background", "Market Size"];
 
 export default function DealWorkspace() {
