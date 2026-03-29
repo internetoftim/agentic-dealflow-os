@@ -256,9 +256,53 @@ export default function DealWorkspace() {
       <div className="flex-1 flex flex-col min-w-0">
         {/* Quick Facts bar */}
         <div className="flex items-center gap-2 px-5 py-3 border-b border-border bg-card shrink-0 flex-wrap">
+          {/* Source badge */}
+          {activeDeal && (() => {
+            const src = sourceConfig[activeDeal.source] ?? sourceConfig.manual;
+            return (
+              <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium ${src.bgClass} ${src.colorClass}`}>
+                {activeDeal.source === "email" ? <Mail className="h-3 w-3" /> : 
+                 activeDeal.source === "docsend" ? <ExternalLink className="h-3 w-3" /> :
+                 <Upload className="h-3 w-3" />}
+                {src.label}
+              </span>
+            );
+          })()}
           <span className="inline-flex items-center gap-1.5 rounded-full bg-muted px-2.5 py-1 text-xs font-medium text-foreground">
             <FileText className="h-3 w-3 text-muted-foreground" /> Pages: {activeDeal?.pages ?? "—"}
           </span>
+          {/* Download raw file */}
+          {loadedSources.length > 0 && loadedSources[0]?.storage_path && (
+            <button
+              onClick={async () => {
+                const path = loadedSources[0].storage_path;
+                const { data, error } = await supabase.storage.from("decks").createSignedUrl(path, 60);
+                if (error || !data?.signedUrl) {
+                  toast.error("Failed to get download link");
+                  return;
+                }
+                window.open(data.signedUrl, "_blank");
+              }}
+              className="inline-flex items-center gap-1.5 rounded-full bg-muted px-2.5 py-1 text-xs font-medium text-foreground hover:bg-accent transition-colors cursor-pointer"
+            >
+              <Download className="h-3 w-3 text-muted-foreground" /> Download Deck
+            </button>
+          )}
+          {/* DocSend source link */}
+          {activeDeal?.source === "docsend" && (() => {
+            const captureSource = loadedSources.find(s => s.source_type === "docsend" || s.source_type === "capture");
+            const sourceUrl = captureSource?.file_name;
+            return sourceUrl ? (
+              <a
+                href={sourceUrl.startsWith("http") ? sourceUrl : `https://${sourceUrl}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1.5 rounded-full bg-badge-green-muted px-2.5 py-1 text-xs font-medium text-badge-green hover:underline"
+              >
+                <ExternalLink className="h-3 w-3" /> DocSend Link
+              </a>
+            ) : null;
+          })()}
           {activeDeal?.website ? (
             <a
               href={activeDeal.website}
