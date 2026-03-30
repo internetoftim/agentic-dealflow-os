@@ -450,7 +450,7 @@ Extract the company's official website URL and LinkedIn company page URL using t
       .eq("user_id", user.id);
 
     return new Response(
-      JSON.stringify({ success: true, provider, research }),
+      JSON.stringify({ success: true, provider, research, crunchbase: { crunchbaseUrl, fundingTotal, lastFundingRound, numEmployees } }),
       { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
   } catch (error) {
