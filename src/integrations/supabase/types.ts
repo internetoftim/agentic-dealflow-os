@@ -61,15 +61,19 @@ export type Database = {
           auto_ingested: boolean
           compressed_size: string | null
           created_at: string
+          crunchbase_url: string | null
           deck_size: string | null
           deep_research_status: string
+          funding_total: string | null
           gdrive_file_id: string | null
           growth: string | null
           id: string
+          last_funding_round: string | null
           linkedin_url: string | null
           memo_draft: string | null
           name: string
           nrr: string | null
+          num_employees: string | null
           pages: number | null
           paused_at_step: string | null
           revenue: string | null
@@ -89,15 +93,19 @@ export type Database = {
           auto_ingested?: boolean
           compressed_size?: string | null
           created_at?: string
+          crunchbase_url?: string | null
           deck_size?: string | null
           deep_research_status?: string
+          funding_total?: string | null
           gdrive_file_id?: string | null
           growth?: string | null
           id?: string
+          last_funding_round?: string | null
           linkedin_url?: string | null
           memo_draft?: string | null
           name: string
           nrr?: string | null
+          num_employees?: string | null
           pages?: number | null
           paused_at_step?: string | null
           revenue?: string | null
@@ -117,15 +125,19 @@ export type Database = {
           auto_ingested?: boolean
           compressed_size?: string | null
           created_at?: string
+          crunchbase_url?: string | null
           deck_size?: string | null
           deep_research_status?: string
+          funding_total?: string | null
           gdrive_file_id?: string | null
           growth?: string | null
           id?: string
+          last_funding_round?: string | null
           linkedin_url?: string | null
           memo_draft?: string | null
           name?: string
           nrr?: string | null
+          num_employees?: string | null
           pages?: number | null
           paused_at_step?: string | null
           revenue?: string | null
