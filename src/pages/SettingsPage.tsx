@@ -521,31 +521,42 @@ export default function SettingsPage() {
         </div>
       </section>
 
-      {/* Workspace Auth */}
-      <section className="mb-8 opacity-40 pointer-events-none select-none">
+      {/* Google Email & Drive Sync */}
+      <section className="mb-8">
         <h2 className="text-sm font-semibold text-foreground mb-4 flex items-center gap-2">
           <Mail className="h-4 w-4 text-muted-foreground" />
-          Workspace Auth
-          <span className="ml-auto text-[10px] font-medium uppercase tracking-wider text-muted-foreground bg-muted rounded px-1.5 py-0.5">Coming Soon</span>
+          Google Email & Drive Sync
         </h2>
         <div className="rounded-lg border border-border bg-card p-5 space-y-4">
-          <button className="flex items-center gap-3 rounded-md border border-border px-4 py-2.5 text-sm font-medium" disabled>
-            <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" alt="Google" className="h-4 w-4" />
-            Connect Google Workspace
-          </button>
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-sm text-foreground">Listen to Gmail label: <code className="rounded bg-muted px-1.5 py-0.5 text-xs">deck</code></p>
-              <p className="text-xs text-muted-foreground">Auto-ingest decks tagged with this label</p>
+              <p className="text-sm text-foreground">Gmail Auto-Ingest</p>
+              <p className="text-xs text-muted-foreground">Listen to Gmail label <code className="rounded bg-muted px-1.5 py-0.5 text-xs">deck</code> and auto-ingest attached decks</p>
             </div>
-            <Toggle checked={gmailLabel} onChange={() => {}} />
+            <Toggle checked={gmailLabel} onChange={async (v) => {
+              if (!user) return;
+              setGmailLabel(v);
+              const { error } = await supabase
+                .from("user_settings")
+                .upsert({ user_id: user.id, gmail_label_enabled: v } as any, { onConflict: "user_id" });
+              if (error) toast.error("Failed to save");
+              else toast.success(v ? "Gmail auto-ingest enabled" : "Gmail auto-ingest disabled");
+            }} />
           </div>
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-sm text-foreground">Sync Memos to Drive</p>
-              <p className="text-xs text-muted-foreground">Automatically upload completed memos</p>
+              <p className="text-sm text-foreground">Drive Sync</p>
+              <p className="text-xs text-muted-foreground">Automatically sync processed decks and memos to Google Drive</p>
             </div>
-            <Toggle checked={driveSync} onChange={() => {}} />
+            <Toggle checked={driveSync} onChange={async (v) => {
+              if (!user) return;
+              setDriveSync(v);
+              const { error } = await supabase
+                .from("user_settings")
+                .upsert({ user_id: user.id, drive_sync_enabled: v } as any, { onConflict: "user_id" });
+              if (error) toast.error("Failed to save");
+              else toast.success(v ? "Drive sync enabled" : "Drive sync disabled");
+            }} />
           </div>
         </div>
       </section>
