@@ -315,6 +315,16 @@ export default function DealWorkspace() {
               <Search className="h-3 w-3 animate-pulse" /> Deep searching web…
             </span>
           ) : null}
+          {(activeDeal as any)?.crunchbase_url && (
+            <a
+              href={(activeDeal as any).crunchbase_url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1.5 rounded-full bg-accent px-2.5 py-1 text-xs font-medium text-accent-foreground hover:underline"
+            >
+              <Globe className="h-3 w-3" /> Crunchbase
+            </a>
+          )}
           {(activeDeal as any)?.linkedin_url && (
             <a
               href={(activeDeal as any).linkedin_url}
