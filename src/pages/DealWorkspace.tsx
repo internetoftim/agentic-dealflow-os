@@ -335,6 +335,21 @@ export default function DealWorkspace() {
               <Linkedin className="h-3 w-3" /> LinkedIn
             </a>
           )}
+          {(activeDeal as any)?.funding_total && (
+            <span className="inline-flex items-center gap-1.5 rounded-full bg-muted px-2.5 py-1 text-xs font-medium text-foreground">
+              💰 Funding: {(activeDeal as any).funding_total}
+            </span>
+          )}
+          {(activeDeal as any)?.last_funding_round && (
+            <span className="inline-flex items-center gap-1.5 rounded-full bg-muted px-2.5 py-1 text-xs font-medium text-foreground">
+              🏷️ {(activeDeal as any).last_funding_round}
+            </span>
+          )}
+          {(activeDeal as any)?.num_employees && (
+            <span className="inline-flex items-center gap-1.5 rounded-full bg-muted px-2.5 py-1 text-xs font-medium text-foreground">
+              👥 {(activeDeal as any).num_employees} employees
+            </span>
+          )}
           {(activeDeal as any)?.deep_research_status === "researching" && (
             <span className="inline-flex items-center gap-1.5 rounded-full bg-warning-muted px-2.5 py-1 text-xs font-medium text-warning">
               <Search className="h-3 w-3 animate-pulse" /> Deep researching…
