@@ -427,6 +427,21 @@ Extract the company's official website URL and LinkedIn company page URL using t
     if (research.linkedin_url) {
       updatePayload.linkedin_url = research.linkedin_url;
     }
+    if (crunchbaseUrl) {
+      updatePayload.crunchbase_url = crunchbaseUrl;
+    }
+    if (fundingTotal) {
+      updatePayload.funding_total = fundingTotal;
+    }
+    if (lastFundingRound) {
+      updatePayload.last_funding_round = lastFundingRound;
+    }
+    if (numEmployees && !deal.team_size) {
+      updatePayload.team_size = numEmployees;
+    }
+    if (numEmployees) {
+      updatePayload.num_employees = numEmployees;
+    }
 
     await adminClient
       .from("deals")
