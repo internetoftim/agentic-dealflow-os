@@ -147,10 +147,99 @@ Deno.serve(async (req) => {
       }
     }
 
+    // Step 3: Crunchbase search + scrape via Firecrawl
+    let crunchbaseUrl: string | null = null;
+    let fundingTotal: string | null = null;
+    let lastFundingRound: string | null = null;
+    let numEmployees: string | null = null;
+
+    // Check if any initial search result already has a Crunchbase URL
+    const cbFromSearch = searchResults.find((r: any) =>
+      r.url?.includes("crunchbase.com/organization")
+    );
+    if (cbFromSearch) {
+      crunchbaseUrl = cbFromSearch.url;
+    }
+
+    // If not found, do a dedicated Crunchbase search
+    if (!crunchbaseUrl) {
+      try {
+        const cbSearchQuery = `site:crunchbase.com/organization ${deal.name}`;
+        console.log("Crunchbase search query:", cbSearchQuery);
+        const cbSearchResponse = await fetch("https://api.firecrawl.dev/v1/search", {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${firecrawlApiKey}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ query: cbSearchQuery, limit: 3 }),
+        });
+
+        if (cbSearchResponse.ok) {
+          const cbSearchData = await cbSearchResponse.json();
+          const cbResults = cbSearchData.data || cbSearchData.results || [];
+          const cbResult = cbResults.find((r: any) =>
+            r.url?.includes("crunchbase.com/organization")
+          );
+          if (cbResult) {
+            crunchbaseUrl = cbResult.url;
+          }
+        }
+      } catch (e) {
+        console.error("Crunchbase search failed (non-fatal):", e);
+      }
+    }
+
+    // Scrape the Crunchbase page for structured data
+    if (crunchbaseUrl) {
+      try {
+        console.log("Scraping Crunchbase:", crunchbaseUrl);
+        const cbScrapeResponse = await fetch("https://api.firecrawl.dev/v1/scrape", {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${firecrawlApiKey}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ url: crunchbaseUrl, formats: ["markdown"], onlyMainContent: true }),
+        });
+
+        if (cbScrapeResponse.ok) {
+          const cbScrapeData = await cbScrapeResponse.json();
+          const cbMarkdown = (cbScrapeData.data?.markdown || cbScrapeData.markdown || "");
+          console.log(`Scraped ${cbMarkdown.length} chars from Crunchbase`);
+
+          // Extract data from Crunchbase markdown using regex patterns
+          const fundingMatch = cbMarkdown.match(/Total Funding[:\s]*\$?([\d,.]+[BMKbmk]?)/i)
+            || cbMarkdown.match(/Funding Total[:\s]*\$?([\d,.]+[BMKbmk]?)/i)
+            || cbMarkdown.match(/\$(\d[\d,.]*[BMK])\s*(total|funding)/i);
+          if (fundingMatch) {
+            fundingTotal = fundingMatch[1].trim();
+            if (!fundingTotal.startsWith("$")) fundingTotal = "$" + fundingTotal;
+          }
+
+          const roundMatch = cbMarkdown.match(/Last Funding[:\s]*(Series [A-Z\d]+|Seed|Pre-Seed|Grant|Debt|Convertible|Angel|IPO|Venture)/i)
+            || cbMarkdown.match(/(Series [A-Z\d]+|Seed|Pre-Seed)\s*[-–—]\s/i);
+          if (roundMatch) {
+            lastFundingRound = roundMatch[1].trim();
+          }
+
+          const empMatch = cbMarkdown.match(/(?:Number of )?Employees?[:\s]*([\d,]+(?:\s*-\s*[\d,]+)?)/i)
+            || cbMarkdown.match(/(\d[\d,]*\s*-\s*\d[\d,]*)\s*employees/i)
+            || cbMarkdown.match(/(\d[\d,]+)\s*employees/i);
+          if (empMatch) {
+            numEmployees = empMatch[1].trim();
+          }
+
+          console.log("Crunchbase extraction:", JSON.stringify({ crunchbaseUrl, fundingTotal, lastFundingRound, numEmployees }));
+        }
+      } catch (e) {
+        console.error("Crunchbase scrape failed (non-fatal):", e);
+      }
+    }
+
     let research: { website: string | null; linkedin_url: string | null };
 
     if (provider === "firecrawl") {
-      // Firecrawl-only mode: extract URLs heuristically from search results
       const websiteUrl = candidateWebsite || null;
       const linkedinResult = searchResults.find((r: any) =>
         r.url?.includes("linkedin.com/company")
