@@ -161,8 +161,8 @@ DEAL CONTEXT:
 `;
 
     // Step 3: Generate memo via AI
-    const aiModel = settings?.ai_model ?? "gpt-5-mini";
-    const effectiveModel = aiModel === "local-florence2" ? "gpt-5-mini" : aiModel;
+    const aiModel = settings?.ai_model ?? "gpt-5.4";
+    const effectiveModel = aiModel === "local-florence2" ? "gpt-5.4" : aiModel;
     const isSapinsapin = effectiveModel === "gpt-oss-202b";
     const baseUrl = isSapinsapin ? SAPINSAPIN_BASE : OPENAI_BASE;
     const envKey = isSapinsapin ? "APOLLO_API_KEY" : "OPENAI_API_KEY";

@@ -86,7 +86,7 @@ Deno.serve(async (req) => {
       .single();
 
     const provider = "firecrawl";
-    const aiModel = settings?.ai_model ?? "gpt-5-mini";
+    const aiModel = settings?.ai_model ?? "gpt-5.4";
 
     // Mark as researching
     await adminClient

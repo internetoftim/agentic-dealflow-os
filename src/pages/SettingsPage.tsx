@@ -73,7 +73,7 @@ export default function SettingsPage() {
       .single()
       .then(({ data }) => {
         if (data) {
-          setAiModel(data.ai_model ?? "gpt-5-mini");
+          setAiModel(data.ai_model ?? "gpt-5.4");
           setGmailLabel(data.gmail_label_enabled ?? true);
           setDriveSync(data.drive_sync_enabled ?? true);
           setSpamFilter(data.spam_filter_enabled ?? true);
