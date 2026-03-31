@@ -231,7 +231,30 @@ Deno.serve(async (req) => {
             numEmployees = empMatch[1].trim();
           }
 
-          console.log("Crunchbase extraction:", JSON.stringify({ crunchbaseUrl, fundingTotal, lastFundingRound, numEmployees }));
+          // Extract investors
+          // Common patterns: "Investors: A, B, C" or "Notable Investors" section or "Funded by"
+          const investorPatterns = [
+            /(?:Notable )?Investors?[:\s]*([^\n]+)/i,
+            /(?:Funded|Backed)\s+by[:\s]*([^\n]+)/i,
+            /(?:Lead )?Investor[s]?[:\s]*\[?([^\]\n]+)\]?/i,
+          ];
+          for (const pat of investorPatterns) {
+            const invMatch = cbMarkdown.match(pat);
+            if (invMatch) {
+              const raw = invMatch[1].trim();
+              // Clean up: remove markdown links, extra whitespace
+              const cleaned = raw
+                .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1") // [text](url) → text
+                .replace(/\s{2,}/g, " ")
+                .trim();
+              if (cleaned.length > 2 && cleaned.length < 500) {
+                investors = cleaned;
+                break;
+              }
+            }
+          }
+
+          console.log("Crunchbase extraction:", JSON.stringify({ crunchbaseUrl, fundingTotal, lastFundingRound, numEmployees, investors }));
         }
       } catch (e) {
         console.error("Crunchbase scrape failed (non-fatal):", e);
