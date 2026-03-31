@@ -317,6 +317,22 @@ Deno.serve(async (req) => {
         console.log(`Processing ${attachments.length} attachment(s) from "${subject}"`);
 
         for (const attachment of attachments) {
+          // Dedup: check if this Gmail message + attachment was already ingested
+          const dedupKey = `gmail:${msgId}:${attachment.filename}`;
+          const { data: existingSource } = await adminClient
+            .from("sources")
+            .select("id")
+            .eq("user_id", userId)
+            .eq("source_type", "email")
+            .eq("file_name", attachment.filename)
+            .filter("created_at", "gte", new Date(Date.now() - 5 * 60 * 1000).toISOString())
+            .limit(1);
+
+          if (existingSource && existingSource.length > 0) {
+            console.log(`Skipping duplicate: ${attachment.filename} (msgId: ${msgId})`);
+            continue;
+          }
+
           const fileBytes = await getAttachment(token, msgId, attachment.attachmentId);
           if (!fileBytes) continue;
 
