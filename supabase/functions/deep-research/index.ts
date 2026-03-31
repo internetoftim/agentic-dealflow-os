@@ -466,6 +466,9 @@ Extract the company's official website URL and LinkedIn company page URL using t
     if (numEmployees) {
       updatePayload.num_employees = numEmployees;
     }
+    if (investors) {
+      updatePayload.investors = investors;
+    }
 
     await adminClient
       .from("deals")
