@@ -67,19 +67,36 @@ Deno.serve(async (req) => {
     const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 
     const adminClient = createClient(supabaseUrl, supabaseServiceKey);
-    const userClient = createClient(supabaseUrl, Deno.env.get("SUPABASE_ANON_KEY")!, {
-      global: { headers: { Authorization: authHeader } },
-    });
 
-    const { data: { user }, error: userError } = await userClient.auth.getUser();
-    if (userError || !user) {
-      return new Response(JSON.stringify({ error: "Unauthorized" }), {
-        status: 401,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
+    // Support both user JWT and service-role key auth
+    const isServiceRole = authHeader === `Bearer ${supabaseServiceKey}`;
+    let resolvedUserId: string;
+
+    const body = await req.json();
+    const { dealId, storagePath, fileName } = body;
+
+    if (isServiceRole) {
+      // Called from process-deck with service role — userId must be in body
+      if (!body.userId) {
+        return new Response(JSON.stringify({ error: "userId required for service-role calls" }), {
+          status: 400,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+      resolvedUserId = body.userId;
+    } else {
+      const userClient = createClient(supabaseUrl, Deno.env.get("SUPABASE_ANON_KEY")!, {
+        global: { headers: { Authorization: authHeader } },
       });
+      const { data: { user }, error: userError } = await userClient.auth.getUser();
+      if (userError || !user) {
+        return new Response(JSON.stringify({ error: "Unauthorized" }), {
+          status: 401,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+      resolvedUserId = user.id;
     }
-
-    const { dealId, storagePath, fileName } = await req.json();
     if (!dealId || !storagePath || !fileName) {
       return new Response(JSON.stringify({ error: "Missing required fields" }), {
         status: 400,
