@@ -401,7 +401,7 @@ Deno.serve(async (req) => {
       .select("ai_model, drive_sync_enabled, google_provider_token, naming_pattern, drive_folder")
       .eq("user_id", userId)
       .single();
-    const model = settings?.ai_model ?? "gpt-4o";
+    const model = settings?.ai_model ?? "gpt-5.4";
 
     // Download file from storage
     const { data: fileData, error: downloadError } = await adminClient.storage
@@ -590,7 +590,7 @@ Deno.serve(async (req) => {
         const userContent: unknown[] = [];
 
         // Determine if the model supports file/image input
-        const supportsFileInput = !isSapinsapin && (model === "gpt-4o" || model === "gpt-5" || model === "gpt-5-mini");
+        const supportsFileInput = !isSapinsapin && (model === "gpt-4o" || model === "gpt-5" || model === "gpt-5-mini" || model === "gpt-5.4");
 
         if (supportsFileInput) {
           const base64 = btoa(new Uint8Array(compressedPdf).reduce((data, byte) => data + String.fromCharCode(byte), ""));

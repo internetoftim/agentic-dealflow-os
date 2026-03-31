@@ -23,7 +23,8 @@ const DEFAULT_MEMO_PROMPT = `You are a VC analyst writing an internal investment
 Be concise, data-driven, and flag any missing information. Use bullet points where appropriate.`;
 
 const AI_MODELS = [
-  { value: "gpt-5-mini", label: "GPT-5 Mini", description: "Fast & cost-effective — default", disabled: false },
+  { value: "gpt-5.4", label: "GPT-5.4", description: "Latest & most capable — default", disabled: false },
+  { value: "gpt-5-mini", label: "GPT-5 Mini", description: "Fast & cost-effective", disabled: false },
   { value: "gpt-oss-202b", label: "GPT-OSS 202B", description: "SapinsapinAI Sovereign AI stack", disabled: true },
   { value: "gpt-4o", label: "GPT-4o", description: "Best multimodal, strong reasoning", disabled: true },
   { value: "gpt-5", label: "GPT-5", description: "Most capable, complex tasks", disabled: true },
@@ -55,7 +56,7 @@ export default function SettingsPage() {
   const [sampleFilename, setSampleFilename] = useState("novastar.ai deck Mar2026 p24.pdf");
   const [detectingPattern, setDetectingPattern] = useState(false);
   const [patternDetected, setPatternDetected] = useState(false);
-  const [aiModel, setAiModel] = useState("gpt-5-mini");
+  const [aiModel, setAiModel] = useState("gpt-5.4");
   const [deepResearchProvider, setDeepResearchProvider] = useState<"custom" | "firecrawl">("custom");
   const [driveFolder, setDriveFolder] = useState("My Drive/WAIT ROOM");
   const [memoPrompt, setMemoPrompt] = useState(DEFAULT_MEMO_PROMPT);
@@ -72,7 +73,7 @@ export default function SettingsPage() {
       .single()
       .then(({ data }) => {
         if (data) {
-          setAiModel(data.ai_model ?? "gpt-5-mini");
+          setAiModel(data.ai_model ?? "gpt-5.4");
           setGmailLabel(data.gmail_label_enabled ?? true);
           setDriveSync(data.drive_sync_enabled ?? true);
           setSpamFilter(data.spam_filter_enabled ?? true);
