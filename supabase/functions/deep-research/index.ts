@@ -449,8 +449,156 @@ Extract the company's official website URL and LinkedIn company page URL using t
       .eq("id", dealId)
       .eq("user_id", user.id);
 
+    // Step 4: Extract key people (GPT web search primary, Firecrawl fallback)
+    let people: { name: string; title: string | null; linkedin_url: string | null }[] = [];
+
+    const openaiKey = Deno.env.get("OPENAI_API_KEY")?.trim().replace(/[\r\n]/g, "");
+
+    if (openaiKey) {
+      // GPT primary: use web_search tool to find key people
+      try {
+        console.log("Extracting key people via GPT web search…");
+        const peoplePrompt = `Find the founders, CEO, CTO, and other C-suite executives of "${deal.name}". ${deal.sector ? `Sector: ${deal.sector}.` : ""} ${research.website ? `Website: ${research.website}.` : ""} ${research.linkedin_url ? `LinkedIn: ${research.linkedin_url}.` : ""}
+
+Use web_search to find their names, titles, and LinkedIn profile URLs. Then call extract_people with verified results. Only include people you are confident about.`;
+
+        const gptResponse = await fetch(`${OPENAI_BASE}/v1/responses`, {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${openaiKey}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            model: "gpt-5-mini",
+            tools: [
+              { type: "web_search", name: "web_search" },
+              {
+                type: "function",
+                name: "extract_people",
+                description: "Extract key people at the company with their titles and LinkedIn URLs.",
+                parameters: {
+                  type: "object",
+                  properties: {
+                    people: {
+                      type: "array",
+                      items: {
+                        type: "object",
+                        properties: {
+                          name: { type: "string", description: "Full name" },
+                          title: { type: ["string", "null"], description: "Job title (CEO, CTO, Co-founder, etc.)" },
+                          linkedin_url: { type: ["string", "null"], description: "LinkedIn profile URL" },
+                        },
+                        required: ["name", "title", "linkedin_url"],
+                        additionalProperties: false,
+                      },
+                    },
+                  },
+                  required: ["people"],
+                  additionalProperties: false,
+                },
+              },
+            ],
+            instructions: "You are a precise research analyst. Use web_search to find key people. When confident, call extract_people.",
+            input: [{ role: "user", content: peoplePrompt }],
+            max_output_tokens: 4096,
+          }),
+        });
+
+        if (gptResponse.ok) {
+          const gptResult = await gptResponse.json();
+          const funcCall = gptResult.output?.find(
+            (item: any) => item.type === "function_call" && item.name === "extract_people"
+          );
+          if (funcCall) {
+            const parsed = JSON.parse(funcCall.arguments);
+            people = parsed.people || [];
+            console.log(`GPT extracted ${people.length} people`);
+          } else {
+            console.warn("No extract_people function call in GPT response, falling back to Firecrawl");
+          }
+        } else {
+          console.error("GPT people search failed:", gptResponse.status, await gptResponse.text());
+        }
+      } catch (e) {
+        console.error("GPT people extraction failed (non-fatal):", e);
+      }
+    }
+
+    // Firecrawl fallback if GPT returned no people
+    if (people.length === 0) {
+      try {
+        console.log("Falling back to Firecrawl for key people search…");
+        const peopleSearchQuery = `"${deal.name}" founders CEO CTO site:linkedin.com/in`;
+        const peopleSearchResponse = await fetch("https://api.firecrawl.dev/v1/search", {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${firecrawlApiKey}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ query: peopleSearchQuery, limit: 10 }),
+        });
+
+        if (peopleSearchResponse.ok) {
+          const peopleSearchData = await peopleSearchResponse.json();
+          const peopleResults = peopleSearchData.data || peopleSearchData.results || [];
+          console.log(`Firecrawl people search returned ${peopleResults.length} results`);
+
+          for (const r of peopleResults) {
+            if (r.url?.includes("linkedin.com/in/")) {
+              // Extract name and title from search result title/description
+              const titleText = r.title || "";
+              // LinkedIn titles are often "Name - Title - Company | LinkedIn"
+              const parts = titleText.split(" - ");
+              const personName = parts[0]?.replace(/\s*\|.*$/, "").trim();
+              const personTitle = parts.length > 1 ? parts[1]?.replace(/\s*\|.*$/, "").trim() : null;
+
+              if (personName && personName.length > 1 && personName.length < 60) {
+                people.push({
+                  name: personName,
+                  title: personTitle || null,
+                  linkedin_url: r.url,
+                });
+              }
+            }
+          }
+          // Deduplicate by linkedin_url
+          const seen = new Set<string>();
+          people = people.filter(p => {
+            const key = p.linkedin_url || p.name;
+            if (seen.has(key)) return false;
+            seen.add(key);
+            return true;
+          });
+          console.log(`Firecrawl extracted ${people.length} people after dedup`);
+        }
+      } catch (e) {
+        console.error("Firecrawl people search failed (non-fatal):", e);
+      }
+    }
+
+    // Store people in deal_people table
+    if (people.length > 0) {
+      // Delete existing people for this deal first
+      await adminClient.from("deal_people").delete().eq("deal_id", dealId);
+
+      const rows = people.slice(0, 10).map(p => ({
+        deal_id: dealId,
+        user_id: user.id,
+        name: p.name,
+        title: p.title,
+        linkedin_url: p.linkedin_url,
+      }));
+
+      const { error: insertError } = await adminClient.from("deal_people").insert(rows);
+      if (insertError) {
+        console.error("Failed to insert deal people:", insertError);
+      } else {
+        console.log(`Stored ${rows.length} people for deal ${dealId}`);
+      }
+    }
+
     return new Response(
-      JSON.stringify({ success: true, provider, research, crunchbase: { crunchbaseUrl, fundingTotal, lastFundingRound, numEmployees } }),
+      JSON.stringify({ success: true, provider, research, crunchbase: { crunchbaseUrl, fundingTotal, lastFundingRound, numEmployees }, people }),
       { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
   } catch (error) {
