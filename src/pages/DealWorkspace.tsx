@@ -1,5 +1,5 @@
 import { useState, useCallback, useRef, useEffect } from "react";
-import { Upload, Link, Cog, Check, Search, Send, FileText, Globe, Layers, Square, Linkedin, Loader2, FileUp, CircleDashed, CircleCheck, Circle, Pause, Clock, Download, Mail, ExternalLink } from "lucide-react";
+import { Upload, Link, Cog, Check, Search, Send, FileText, Globe, Layers, Square, Linkedin, Loader2, FileUp, CircleDashed, CircleCheck, Circle, Pause, Clock, Download, Mail, ExternalLink, Users } from "lucide-react";
 import { useDeals, useSources, useDocsendUrl, useCreateDealWithUpload, useProcessDocsend, useCancelDeal, WORKFLOW_STEPS, PROCESSING_STATUSES, type WorkflowStatus } from "@/hooks/useDeals";
 import { Button } from "@/components/ui/button";
 import { useDealChat } from "@/hooks/useDealChat";
@@ -8,6 +8,7 @@ import { toast } from "sonner";
 import ReactMarkdown from "react-markdown";
 import { supabase } from "@/integrations/supabase/client";
 import { sourceConfig } from "@/data/mockDeals";
+import { useQuery } from "@tanstack/react-query";
 const quickActions = ["Extract Cap Table", "Calculate Burn Rate", "Team Background", "Market Size"];
 
 export default function DealWorkspace() {
@@ -28,6 +29,22 @@ export default function DealWorkspace() {
 
   const activeDeal = deals?.find((d) => d.id === selectedDealId) ?? deals?.[0];
   const { messages, isStreaming, send, stop } = useDealChat(activeDeal?.id);
+
+  // Fetch key people for active deal
+  const { data: dealPeople } = useQuery({
+    queryKey: ["deal-people", activeDeal?.id],
+    queryFn: async () => {
+      if (!activeDeal?.id) return [];
+      const { data, error } = await supabase
+        .from("deal_people")
+        .select("*")
+        .eq("deal_id", activeDeal.id)
+        .order("created_at", { ascending: true });
+      if (error) throw error;
+      return data ?? [];
+    },
+    enabled: !!activeDeal?.id,
+  });
 
   // Auto-scroll chat
   useEffect(() => {
@@ -526,6 +543,38 @@ export default function DealWorkspace() {
                         <span className="text-sm text-muted-foreground">—</span>
                       )}
                     </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Key People */}
+              {activeDeal && dealPeople && dealPeople.length > 0 && (
+                <div className="rounded-lg border border-border bg-card p-5 mt-4">
+                  <h3 className="text-sm font-semibold text-foreground mb-4 flex items-center gap-2">
+                    <Users className="h-3.5 w-3.5" />
+                    Key People
+                  </h3>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    {dealPeople.map((person: any) => (
+                      <div key={person.id} className="flex items-start gap-2.5 rounded-md border border-border bg-background p-3">
+                        <div className="flex-1 min-w-0">
+                          <div className="text-sm font-medium text-foreground truncate">{person.name}</div>
+                          {person.title && (
+                            <div className="text-xs text-muted-foreground truncate">{person.title}</div>
+                          )}
+                        </div>
+                        {person.linkedin_url && (
+                          <a
+                            href={person.linkedin_url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="shrink-0 text-info hover:text-info/80 transition-colors"
+                          >
+                            <Linkedin className="h-4 w-4" />
+                          </a>
+                        )}
+                      </div>
+                    ))}
                   </div>
                 </div>
               )}

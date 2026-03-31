@@ -55,6 +55,36 @@ export type Database = {
           },
         ]
       }
+      deal_people: {
+        Row: {
+          created_at: string
+          deal_id: string
+          id: string
+          linkedin_url: string | null
+          name: string
+          title: string | null
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          deal_id: string
+          id?: string
+          linkedin_url?: string | null
+          name: string
+          title?: string | null
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          deal_id?: string
+          id?: string
+          linkedin_url?: string | null
+          name?: string
+          title?: string | null
+          user_id?: string
+        }
+        Relationships: []
+      }
       deals: {
         Row: {
           ask_amount: string | null
