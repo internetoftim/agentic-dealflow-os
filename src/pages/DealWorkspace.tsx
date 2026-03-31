@@ -397,6 +397,11 @@ export default function DealWorkspace() {
               👥 {activeDeal.num_employees} employees
             </span>
           )}
+          {activeDeal?.investors && (
+            <span className="inline-flex items-center gap-1.5 rounded-full bg-muted px-2.5 py-1 text-xs font-medium text-foreground">
+              🏦 Investors: {activeDeal.investors}
+            </span>
+          )}
           {(activeDeal as any)?.deep_research_status === "researching" && (
             <span className="inline-flex items-center gap-1.5 rounded-full bg-warning-muted px-2.5 py-1 text-xs font-medium text-warning">
               <Search className="h-3 w-3 animate-pulse" /> Deep researching…

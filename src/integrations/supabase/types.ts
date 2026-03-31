@@ -98,6 +98,7 @@ export type Database = {
           gdrive_file_id: string | null
           growth: string | null
           id: string
+          investors: string | null
           last_funding_round: string | null
           linkedin_url: string | null
           memo_draft: string | null
@@ -130,6 +131,7 @@ export type Database = {
           gdrive_file_id?: string | null
           growth?: string | null
           id?: string
+          investors?: string | null
           last_funding_round?: string | null
           linkedin_url?: string | null
           memo_draft?: string | null
@@ -162,6 +164,7 @@ export type Database = {
           gdrive_file_id?: string | null
           growth?: string | null
           id?: string
+          investors?: string | null
           last_funding_round?: string | null
           linkedin_url?: string | null
           memo_draft?: string | null

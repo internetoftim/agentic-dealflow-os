@@ -34,6 +34,7 @@ export interface Deal {
   funding_total: string | null;
   last_funding_round: string | null;
   num_employees: string | null;
+  investors: string | null;
   created_at: string;
   updated_at: string;
 }

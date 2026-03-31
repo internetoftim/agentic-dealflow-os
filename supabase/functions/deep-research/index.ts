@@ -152,6 +152,7 @@ Deno.serve(async (req) => {
     let fundingTotal: string | null = null;
     let lastFundingRound: string | null = null;
     let numEmployees: string | null = null;
+    let investors: string | null = null;
 
     // Check if any initial search result already has a Crunchbase URL
     const cbFromSearch = searchResults.find((r: any) =>
@@ -230,7 +231,30 @@ Deno.serve(async (req) => {
             numEmployees = empMatch[1].trim();
           }
 
-          console.log("Crunchbase extraction:", JSON.stringify({ crunchbaseUrl, fundingTotal, lastFundingRound, numEmployees }));
+          // Extract investors
+          // Common patterns: "Investors: A, B, C" or "Notable Investors" section or "Funded by"
+          const investorPatterns = [
+            /(?:Notable )?Investors?[:\s]*([^\n]+)/i,
+            /(?:Funded|Backed)\s+by[:\s]*([^\n]+)/i,
+            /(?:Lead )?Investor[s]?[:\s]*\[?([^\]\n]+)\]?/i,
+          ];
+          for (const pat of investorPatterns) {
+            const invMatch = cbMarkdown.match(pat);
+            if (invMatch) {
+              const raw = invMatch[1].trim();
+              // Clean up: remove markdown links, extra whitespace
+              const cleaned = raw
+                .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1") // [text](url) → text
+                .replace(/\s{2,}/g, " ")
+                .trim();
+              if (cleaned.length > 2 && cleaned.length < 500) {
+                investors = cleaned;
+                break;
+              }
+            }
+          }
+
+          console.log("Crunchbase extraction:", JSON.stringify({ crunchbaseUrl, fundingTotal, lastFundingRound, numEmployees, investors }));
         }
       } catch (e) {
         console.error("Crunchbase scrape failed (non-fatal):", e);
@@ -441,6 +465,9 @@ Extract the company's official website URL and LinkedIn company page URL using t
     }
     if (numEmployees) {
       updatePayload.num_employees = numEmployees;
+    }
+    if (investors) {
+      updatePayload.investors = investors;
     }
 
     await adminClient
