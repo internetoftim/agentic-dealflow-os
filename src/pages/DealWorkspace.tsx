@@ -311,12 +311,17 @@ export default function DealWorkspace() {
             <button
               onClick={async () => {
                 const path = loadedSources[0].storage_path;
-                const { data, error } = await supabase.storage.from("decks").createSignedUrl(path, 60);
-                if (error || !data?.signedUrl) {
-                  toast.error("Failed to get download link");
+                const { data, error } = await supabase.storage.from("decks").download(path);
+                if (error || !data) {
+                  toast.error("Failed to download deck");
                   return;
                 }
-                window.open(data.signedUrl, "_blank");
+                const url = URL.createObjectURL(data);
+                const a = document.createElement("a");
+                a.href = url;
+                a.download = loadedSources[0].file_name || "deck.pdf";
+                a.click();
+                URL.revokeObjectURL(url);
               }}
               className="inline-flex items-center gap-1.5 rounded-full bg-muted px-2.5 py-1 text-xs font-medium text-foreground hover:bg-accent transition-colors cursor-pointer"
             >
