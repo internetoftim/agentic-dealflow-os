@@ -546,6 +546,39 @@ export default function DealWorkspace() {
                   </div>
                 </div>
               )}
+
+              {/* Key People */}
+              {activeDeal && dealPeople && dealPeople.length > 0 && (
+                <div className="rounded-lg border border-border bg-card p-5 mt-4">
+                  <h3 className="text-sm font-semibold text-foreground mb-4 flex items-center gap-2">
+                    <Users className="h-3.5 w-3.5" />
+                    Key People
+                  </h3>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    {dealPeople.map((person: any) => (
+                      <div key={person.id} className="flex items-start gap-2.5 rounded-md border border-border bg-background p-3">
+                        <div className="flex-1 min-w-0">
+                          <div className="text-sm font-medium text-foreground truncate">{person.name}</div>
+                          {person.title && (
+                            <div className="text-xs text-muted-foreground truncate">{person.title}</div>
+                          )}
+                        </div>
+                        {person.linkedin_url && (
+                          <a
+                            href={person.linkedin_url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="shrink-0 text-info hover:text-info/80 transition-colors"
+                          >
+                            <Linkedin className="h-4 w-4" />
+                          </a>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
             </div>
           )}
           {activeTab === "memo" && (
