@@ -191,6 +191,7 @@ export type Database = {
           deal_id: string
           extracted_text: string | null
           file_name: string
+          gmail_message_id: string | null
           id: string
           original_size: string | null
           processing_status: string
@@ -204,6 +205,7 @@ export type Database = {
           deal_id: string
           extracted_text?: string | null
           file_name: string
+          gmail_message_id?: string | null
           id?: string
           original_size?: string | null
           processing_status?: string
@@ -217,6 +219,7 @@ export type Database = {
           deal_id?: string
           extracted_text?: string | null
           file_name?: string
+          gmail_message_id?: string | null
           id?: string
           original_size?: string | null
           processing_status?: string

@@ -317,21 +317,7 @@ Deno.serve(async (req) => {
         console.log(`Processing ${attachments.length} attachment(s) from "${subject}"`);
 
         for (const attachment of attachments) {
-          // Dedup: check if this Gmail message + attachment was already ingested
-          const dedupKey = `gmail:${msgId}:${attachment.filename}`;
-          const { data: existingSource } = await adminClient
-            .from("sources")
-            .select("id")
-            .eq("user_id", userId)
-            .eq("source_type", "email")
-            .eq("file_name", attachment.filename)
-            .filter("created_at", "gte", new Date(Date.now() - 5 * 60 * 1000).toISOString())
-            .limit(1);
-
-          if (existingSource && existingSource.length > 0) {
-            console.log(`Skipping duplicate: ${attachment.filename} (msgId: ${msgId})`);
-            continue;
-          }
+          const gmailMessageId = `${msgId}:${attachment.filename}`;
 
           const fileBytes = await getAttachment(token, msgId, attachment.attachmentId);
           if (!fileBytes) continue;
@@ -377,8 +363,8 @@ Deno.serve(async (req) => {
             continue;
           }
 
-          // Create source record
-          await adminClient.from("sources").insert({
+          // Create source record with gmail_message_id for dedup
+          const { error: sourceError } = await adminClient.from("sources").insert({
             deal_id: deal.id,
             user_id: userId,
             file_name: attachment.filename,
@@ -386,7 +372,16 @@ Deno.serve(async (req) => {
             storage_path: storagePath,
             source_type: "email",
             processing_status: "uploaded",
+            gmail_message_id: gmailMessageId,
           });
+
+          if (sourceError) {
+            // Unique constraint violation = duplicate, clean up the deal
+            console.log(`Duplicate detected (${gmailMessageId}), rolling back deal`);
+            await adminClient.from("deals").delete().eq("id", deal.id);
+            await adminClient.storage.from("decks").remove([storagePath]);
+            continue;
+          }
 
           // Trigger process-deck
           fetch(`${supabaseUrl}/functions/v1/process-deck`, {
