@@ -367,24 +367,20 @@ export default function DealWorkspace() {
             </span>
           ) : null}
           {activeDeal?.crunchbase_url && (
-            <a
-              href={activeDeal.crunchbase_url}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-flex items-center gap-1.5 rounded-full bg-accent px-2.5 py-1 text-xs font-medium text-accent-foreground hover:underline"
+            <button
+              onClick={() => window.open(activeDeal.crunchbase_url!, '_blank', 'noopener,noreferrer')}
+              className="inline-flex items-center gap-1.5 rounded-full bg-accent px-2.5 py-1 text-xs font-medium text-accent-foreground hover:underline cursor-pointer"
             >
               <Globe className="h-3 w-3" /> Crunchbase
-            </a>
+            </button>
           )}
           {activeDeal?.linkedin_url && (
-            <a
-              href={activeDeal.linkedin_url}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-flex items-center gap-1.5 rounded-full bg-info-muted px-2.5 py-1 text-xs font-medium text-info hover:underline"
+            <button
+              onClick={() => window.open(activeDeal.linkedin_url!, '_blank', 'noopener,noreferrer')}
+              className="inline-flex items-center gap-1.5 rounded-full bg-info-muted px-2.5 py-1 text-xs font-medium text-info hover:underline cursor-pointer"
             >
               <Linkedin className="h-3 w-3" /> LinkedIn
-            </a>
+            </button>
           )}
           {activeDeal?.funding_total && (
             <span className="inline-flex items-center gap-1.5 rounded-full bg-muted px-2.5 py-1 text-xs font-medium text-foreground">
