@@ -152,6 +152,7 @@ Deno.serve(async (req) => {
     let fundingTotal: string | null = null;
     let lastFundingRound: string | null = null;
     let numEmployees: string | null = null;
+    let investors: string | null = null;
 
     // Check if any initial search result already has a Crunchbase URL
     const cbFromSearch = searchResults.find((r: any) =>
