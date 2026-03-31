@@ -469,7 +469,7 @@ Use web_search to find their names, titles, and LinkedIn profile URLs. Then call
             "Content-Type": "application/json",
           },
           body: JSON.stringify({
-            model: "gpt-5-mini",
+            model: "gpt-5.4",
             tools: [
               { type: "web_search", name: "web_search" },
               {
