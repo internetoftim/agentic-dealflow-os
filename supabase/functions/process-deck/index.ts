@@ -873,8 +873,8 @@ Deno.serve(async (req) => {
         const syncFileName = pdfStoragePath.split("/").pop() ?? fileName;
         const response = await fetch(`${supabaseUrl}/functions/v1/sync-to-drive`, {
           method: "POST",
-          headers: { Authorization: authHeader, "Content-Type": "application/json" },
-          body: JSON.stringify({ dealId, storagePath: pdfStoragePath, fileName: syncFileName }),
+          headers: { Authorization: `Bearer ${supabaseServiceKey}`, "Content-Type": "application/json" },
+          body: JSON.stringify({ dealId, storagePath: pdfStoragePath, fileName: syncFileName, userId }),
         });
 
         if (response.ok) {
