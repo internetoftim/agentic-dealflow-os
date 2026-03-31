@@ -178,8 +178,8 @@ export default function DealWorkspace() {
           </div>
         </div>
 
-        {/* Processing Pipeline Status */}
-        {activeDeal && activeDeal.status !== "inbox" && activeDeal.status !== "memo-ready" && activeDeal.status !== "cancelled" && (
+        {/* Processing Pipeline Status — always visible */}
+        {activeDeal && (
           <div>
             <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-2.5">Pipeline Status</h3>
             <div className="rounded-md border border-border bg-card p-3 flex flex-col gap-1.5">
@@ -188,63 +188,79 @@ export default function DealWorkspace() {
                   <Clock className="h-3.5 w-3.5" />
                   <span className="text-xs font-medium">Queued — waiting for active job</span>
                 </div>
+              ) : activeDeal.status === "cancelled" ? (
+                <div className="flex items-center gap-2">
+                  <Pause className="h-3.5 w-3.5 text-destructive shrink-0" />
+                  <span className="text-xs font-medium text-destructive">Cancelled</span>
+                </div>
+              ) : activeDeal.status === "error" ? (
+                <div className="flex items-center gap-2">
+                  <Circle className="h-3.5 w-3.5 text-destructive shrink-0" />
+                  <span className="text-xs font-medium text-destructive">Processing failed</span>
+                </div>
               ) : (
                 <>
                   {WORKFLOW_STEPS.map((step) => {
                     const stepIndex = WORKFLOW_STEPS.findIndex(s => s.key === step.key);
                     const currentIndex = WORKFLOW_STEPS.findIndex(s => s.key === activeDeal.status);
-                    const isCompleted = currentIndex > stepIndex;
-                    const isActive = activeDeal.status === step.key;
+                    const isTerminal = activeDeal.status === "memo-ready" || activeDeal.status === "inbox";
+                    const isCompleted = isTerminal
+                      ? step.key === "memo-ready" ? activeDeal.status === "memo-ready" : activeDeal.status === "memo-ready"
+                      : currentIndex > stepIndex;
+                    const isActive = !isTerminal && activeDeal.status === step.key;
+                    const isPending = !isCompleted && !isActive;
 
-                    return (
+                    // For memo-ready, all steps are completed
+                    const allDone = activeDeal.status === "memo-ready";
+
+                    // For Drive sync step, link to Google Drive if available
+                    const isDriveStep = step.key === "syncing" && activeDeal.gdrive_file_id;
+                    const driveUrl = isDriveStep ? `https://drive.google.com/file/d/${activeDeal.gdrive_file_id}/view` : null;
+
+                    const content = (
                       <div key={step.key} className="flex items-center gap-2">
-                        {isCompleted ? (
+                        {allDone || (isCompleted && !isActive) ? (
                           <CircleCheck className="h-3.5 w-3.5 text-success shrink-0" />
                         ) : isActive ? (
                           <Loader2 className="h-3.5 w-3.5 text-primary animate-spin shrink-0" />
                         ) : (
-                          <CircleDashed className="h-3.5 w-3.5 text-muted-foreground/40 shrink-0" />
+                          <CircleDashed className="h-3.5 w-3.5 text-muted-foreground/30 shrink-0" />
                         )}
                         <span className={`text-xs font-medium ${
-                          isCompleted ? "text-success" : isActive ? "text-primary" : "text-muted-foreground/40"
+                          allDone || isCompleted ? "text-success" : isActive ? "text-primary" : "text-muted-foreground/30"
                         }`}>
                           {step.label}
                         </span>
+                        {driveUrl && allDone && (
+                          <ExternalLink className="h-3 w-3 text-success ml-auto" />
+                        )}
                       </div>
                     );
+
+                    if (driveUrl && allDone) {
+                      return (
+                        <a key={step.key} href={driveUrl} target="_blank" rel="noopener noreferrer" className="hover:bg-accent rounded-sm px-0.5 -mx-0.5 transition-colors">
+                          {content}
+                        </a>
+                      );
+                    }
+
+                    return content;
                   })}
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="mt-2 h-7 text-[11px] gap-1 px-2 w-fit"
-                    onClick={() => activeDeal && cancelDeal.mutate(activeDeal.id)}
-                    disabled={cancelDeal.isPending}
-                  >
-                    {cancelDeal.isPending ? <Loader2 className="h-3 w-3 animate-spin" /> : <Pause className="h-3 w-3" />}
-                    Stop
-                  </Button>
+                  {PROCESSING_STATUSES.includes(activeDeal.status) && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="mt-2 h-7 text-[11px] gap-1 px-2 w-fit"
+                      onClick={() => activeDeal && cancelDeal.mutate(activeDeal.id)}
+                      disabled={cancelDeal.isPending}
+                    >
+                      {cancelDeal.isPending ? <Loader2 className="h-3 w-3 animate-spin" /> : <Pause className="h-3 w-3" />}
+                      Stop
+                    </Button>
+                  )}
                 </>
               )}
-            </div>
-          </div>
-        )}
-
-        {activeDeal && activeDeal.status === "cancelled" && (
-          <div>
-            <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-2.5">Pipeline Status</h3>
-            <div className="rounded-md border border-border bg-card p-3 flex items-center gap-2">
-              <Pause className="h-3.5 w-3.5 text-destructive shrink-0" />
-              <span className="text-xs font-medium text-destructive">Cancelled</span>
-            </div>
-          </div>
-        )}
-
-        {activeDeal && activeDeal.status === "memo-ready" && (
-          <div>
-            <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-2.5">Pipeline Status</h3>
-            <div className="rounded-md border border-border bg-card p-3 flex items-center gap-2">
-              <CircleCheck className="h-3.5 w-3.5 text-success shrink-0" />
-              <span className="text-xs font-medium text-success">All steps complete</span>
             </div>
           </div>
         )}
