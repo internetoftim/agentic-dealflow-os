@@ -38,6 +38,22 @@ export default function DealWorkspace() {
   const activeDeal = deals?.find((d) => d.id === selectedDealId) ?? deals?.[0];
   const { messages, isStreaming, send, stop } = useDealChat(activeDeal?.id);
 
+  // Fetch key people for active deal
+  const { data: dealPeople } = useQuery({
+    queryKey: ["deal-people", activeDeal?.id],
+    queryFn: async () => {
+      if (!activeDeal?.id) return [];
+      const { data, error } = await supabase
+        .from("deal_people")
+        .select("*")
+        .eq("deal_id", activeDeal.id)
+        .order("created_at", { ascending: true });
+      if (error) throw error;
+      return data ?? [];
+    },
+    enabled: !!activeDeal?.id,
+  });
+
   // Auto-scroll chat
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
