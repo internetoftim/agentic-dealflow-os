@@ -579,7 +579,6 @@ export default function DealWorkspace() {
                 </div>
               )}
             </div>
-            </div>
           )}
           {activeTab === "memo" && (
             <div className="p-5">
