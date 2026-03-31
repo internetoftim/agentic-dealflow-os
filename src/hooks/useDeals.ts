@@ -46,6 +46,7 @@ export const WORKFLOW_STEPS = [
   { key: "extracting", label: "Extracting" },
   { key: "searching-website", label: "Finding Website" },
   { key: "syncing", label: "Syncing to Drive" },
+  { key: "deep-research", label: "Deep Research" },
   { key: "memo-ready", label: "Ready" },
 ] as const;
 

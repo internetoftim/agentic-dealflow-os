@@ -204,14 +204,27 @@ export default function DealWorkspace() {
                     const stepIndex = WORKFLOW_STEPS.findIndex(s => s.key === step.key);
                     const currentIndex = WORKFLOW_STEPS.findIndex(s => s.key === activeDeal.status);
                     const isTerminal = activeDeal.status === "memo-ready" || activeDeal.status === "inbox";
-                    const isCompleted = isTerminal
-                      ? step.key === "memo-ready" ? activeDeal.status === "memo-ready" : activeDeal.status === "memo-ready"
-                      : currentIndex > stepIndex;
-                    const isActive = !isTerminal && activeDeal.status === step.key;
-                    const isPending = !isCompleted && !isActive;
 
-                    // For memo-ready, all steps are completed
-                    const allDone = activeDeal.status === "memo-ready";
+                    // Deep Research step uses its own status field
+                    let isCompleted: boolean;
+                    let isActive: boolean;
+
+                    if (step.key === "deep-research") {
+                      isCompleted = activeDeal.deep_research_status === "completed";
+                      isActive = ["queued", "running", "pending"].includes(activeDeal.deep_research_status) && (isTerminal || currentIndex >= stepIndex);
+                    } else if (step.key === "memo-ready") {
+                      isCompleted = activeDeal.status === "memo-ready";
+                      isActive = false;
+                    } else if (isTerminal) {
+                      isCompleted = true;
+                      isActive = false;
+                    } else {
+                      isCompleted = currentIndex > stepIndex;
+                      isActive = activeDeal.status === step.key;
+                    }
+
+                    const isPending = !isCompleted && !isActive;
+                    const allDone = isCompleted;
 
                     // For Drive sync step, link to Google Drive if available
                     const isDriveStep = step.key === "syncing" && activeDeal.gdrive_file_id;
