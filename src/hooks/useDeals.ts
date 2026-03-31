@@ -30,6 +30,10 @@ export interface Deal {
   memo_draft: string | null;
   gdrive_file_id: string | null;
   paused_at_step: string | null;
+  crunchbase_url: string | null;
+  funding_total: string | null;
+  last_funding_round: string | null;
+  num_employees: string | null;
   created_at: string;
   updated_at: string;
 }

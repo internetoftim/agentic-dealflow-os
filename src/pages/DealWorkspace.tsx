@@ -366,9 +366,9 @@ export default function DealWorkspace() {
               <Search className="h-3 w-3 animate-pulse" /> Deep searching web…
             </span>
           ) : null}
-          {(activeDeal as any)?.crunchbase_url && (
+          {activeDeal?.crunchbase_url && (
             <a
-              href={(activeDeal as any).crunchbase_url}
+              href={activeDeal.crunchbase_url}
               target="_blank"
               rel="noopener noreferrer"
               className="inline-flex items-center gap-1.5 rounded-full bg-accent px-2.5 py-1 text-xs font-medium text-accent-foreground hover:underline"
@@ -376,9 +376,9 @@ export default function DealWorkspace() {
               <Globe className="h-3 w-3" /> Crunchbase
             </a>
           )}
-          {(activeDeal as any)?.linkedin_url && (
+          {activeDeal?.linkedin_url && (
             <a
-              href={(activeDeal as any).linkedin_url}
+              href={activeDeal.linkedin_url}
               target="_blank"
               rel="noopener noreferrer"
               className="inline-flex items-center gap-1.5 rounded-full bg-info-muted px-2.5 py-1 text-xs font-medium text-info hover:underline"
@@ -386,19 +386,19 @@ export default function DealWorkspace() {
               <Linkedin className="h-3 w-3" /> LinkedIn
             </a>
           )}
-          {(activeDeal as any)?.funding_total && (
+          {activeDeal?.funding_total && (
             <span className="inline-flex items-center gap-1.5 rounded-full bg-muted px-2.5 py-1 text-xs font-medium text-foreground">
-              💰 Funding: {(activeDeal as any).funding_total}
+              💰 Funding: {activeDeal.funding_total}
             </span>
           )}
-          {(activeDeal as any)?.last_funding_round && (
+          {activeDeal?.last_funding_round && (
             <span className="inline-flex items-center gap-1.5 rounded-full bg-muted px-2.5 py-1 text-xs font-medium text-foreground">
-              🏷️ {(activeDeal as any).last_funding_round}
+              🏷️ {activeDeal.last_funding_round}
             </span>
           )}
-          {(activeDeal as any)?.num_employees && (
+          {activeDeal?.num_employees && (
             <span className="inline-flex items-center gap-1.5 rounded-full bg-muted px-2.5 py-1 text-xs font-medium text-foreground">
-              👥 {(activeDeal as any).num_employees} employees
+              👥 {activeDeal.num_employees} employees
             </span>
           )}
           {(activeDeal as any)?.deep_research_status === "researching" && (
