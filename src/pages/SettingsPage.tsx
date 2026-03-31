@@ -56,7 +56,7 @@ export default function SettingsPage() {
   const [sampleFilename, setSampleFilename] = useState("novastar.ai deck Mar2026 p24.pdf");
   const [detectingPattern, setDetectingPattern] = useState(false);
   const [patternDetected, setPatternDetected] = useState(false);
-  const [aiModel, setAiModel] = useState("gpt-5-mini");
+  const [aiModel, setAiModel] = useState("gpt-5.4");
   const [deepResearchProvider, setDeepResearchProvider] = useState<"custom" | "firecrawl">("custom");
   const [driveFolder, setDriveFolder] = useState("My Drive/WAIT ROOM");
   const [memoPrompt, setMemoPrompt] = useState(DEFAULT_MEMO_PROMPT);
