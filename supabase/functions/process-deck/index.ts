@@ -401,7 +401,7 @@ Deno.serve(async (req) => {
       .select("ai_model, drive_sync_enabled, google_provider_token, naming_pattern, drive_folder")
       .eq("user_id", userId)
       .single();
-    const model = settings?.ai_model ?? "gpt-4o";
+    const model = settings?.ai_model ?? "gpt-5.4";
 
     // Download file from storage
     const { data: fileData, error: downloadError } = await adminClient.storage
