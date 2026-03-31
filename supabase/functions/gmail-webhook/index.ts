@@ -363,8 +363,8 @@ Deno.serve(async (req) => {
             continue;
           }
 
-          // Create source record
-          await adminClient.from("sources").insert({
+          // Create source record with gmail_message_id for dedup
+          const { error: sourceError } = await adminClient.from("sources").insert({
             deal_id: deal.id,
             user_id: userId,
             file_name: attachment.filename,
@@ -372,7 +372,16 @@ Deno.serve(async (req) => {
             storage_path: storagePath,
             source_type: "email",
             processing_status: "uploaded",
+            gmail_message_id: gmailMessageId,
           });
+
+          if (sourceError) {
+            // Unique constraint violation = duplicate, clean up the deal
+            console.log(`Duplicate detected (${gmailMessageId}), rolling back deal`);
+            await adminClient.from("deals").delete().eq("id", deal.id);
+            await adminClient.storage.from("decks").remove([storagePath]);
+            continue;
+          }
 
           // Trigger process-deck
           fetch(`${supabaseUrl}/functions/v1/process-deck`, {
