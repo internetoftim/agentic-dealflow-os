@@ -214,7 +214,11 @@ class DocsendWebAgent:
             page = await context.new_page()
             await Stealth().apply_stealth_async(page)
             await page.goto(url, wait_until="domcontentloaded", timeout=120000)
-            await page.wait_for_timeout(5000)
+            try:
+                await page.wait_for_load_state("networkidle", timeout=30000)
+            except Exception:
+                logger.info("Network idle timeout — continuing anyway")
+            await page.wait_for_timeout(8000)
 
             # Handle email gate if present
             await self._handle_email_gate(page)
@@ -223,7 +227,7 @@ class DocsendWebAgent:
 
             for i in range(1, self.max_pages + 1):
                 logger.info("Capturing page %d", i)
-                await page.wait_for_timeout(3000)
+                await page.wait_for_timeout(5000)
                 text = (await page.locator("body").inner_text())[:6000]
                 notes.append(f"## Page {i}\n\n{text.strip()}\n")
 
