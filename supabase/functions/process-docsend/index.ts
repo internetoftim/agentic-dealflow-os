@@ -57,14 +57,16 @@ Deno.serve(async (req) => {
     const normalizedUrl = url.trim();
     const isDocSend = /docsend\.com/i.test(normalizedUrl);
     const isPandaDoc = /pandadoc\.com/i.test(normalizedUrl);
-    if (!isDocSend && !isPandaDoc) {
+    const isPapermark = /papermark\.(com|io)/i.test(normalizedUrl);
+    const isDocViewer = isDocSend || isPandaDoc || isPapermark;
+    if (!isDocViewer) {
       return new Response(
-        JSON.stringify({ error: "URL must be a DocSend or PandaDoc link" }),
+        JSON.stringify({ error: "URL must be a DocSend, PandaDoc, or Papermark link" }),
         { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
 
-    const sourceType = isDocSend ? "docsend" : "pandadoc";
+    const sourceType = isDocSend ? "docsend" : isPandaDoc ? "pandadoc" : "papermark";
     const dealName = deriveDealName(normalizedUrl);
 
     const { data: deal, error: dealError } = await adminClient

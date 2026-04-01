@@ -136,7 +136,7 @@ export default function DealWorkspace() {
                 value={docSendUrl}
                 onChange={(e) => setDocSendUrl(e.target.value)}
                 onKeyDown={(e) => e.key === "Enter" && handleFetchUrl()}
-                placeholder="Paste DocSend / PandaDoc link…"
+                placeholder="Paste DocSend / PandaDoc / Papermark link…"
                 className="flex-1 text-xs bg-transparent outline-none placeholder:text-muted-foreground"
               />
             </div>
