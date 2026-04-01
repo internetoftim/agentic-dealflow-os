@@ -133,7 +133,7 @@ export function useDocsendUrl(dealId?: string, source?: string) {
       if (error) return null;
       return data?.url ?? null;
     },
-    enabled: !!user && !!dealId && source === "docsend",
+    enabled: !!user && !!dealId && ["docsend", "pandadoc", "papermark"].includes(source ?? ""),
   });
 }
 

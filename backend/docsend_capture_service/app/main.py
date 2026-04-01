@@ -125,9 +125,60 @@ class AG2Planner:
 
 
 class DocsendWebAgent:
+    EMAIL_FOR_GATE = "tim@onepointsix.ai"
+
     def __init__(self, max_pages: int = 20) -> None:
         self.max_pages = max_pages
         self.planner = AG2Planner()
+
+    async def _handle_email_gate(self, page: Page) -> None:
+        """Detect and fill email gate forms on DocSend, Papermark, etc."""
+        email_selectors = [
+            'input[type="email"]',
+            'input[name="email"]',
+            'input[placeholder*="email" i]',
+            'input[placeholder*="Email" i]',
+            'input[aria-label*="email" i]',
+            'input[id*="email" i]',
+        ]
+        for selector in email_selectors:
+            try:
+                loc = page.locator(selector).first
+                if await loc.count() > 0 and await loc.is_visible(timeout=2000):
+                    logger.info("Email gate detected via %s — filling with %s", selector, self.EMAIL_FOR_GATE)
+                    await loc.fill(self.EMAIL_FOR_GATE)
+                    await page.wait_for_timeout(500)
+
+                    # Try to find and click the submit button
+                    submit_selectors = [
+                        'button[type="submit"]',
+                        'input[type="submit"]',
+                        'button:has-text("Continue")',
+                        'button:has-text("View")',
+                        'button:has-text("Submit")',
+                        'button:has-text("Access")',
+                        'button:has-text("Enter")',
+                        'button:has-text("Get access")',
+                    ]
+                    for btn_sel in submit_selectors:
+                        try:
+                            btn = page.locator(btn_sel).first
+                            if await btn.count() > 0 and await btn.is_visible(timeout=1000):
+                                await btn.click(timeout=3000)
+                                logger.info("Clicked submit button: %s", btn_sel)
+                                await page.wait_for_timeout(5000)
+                                return
+                        except Exception:
+                            continue
+
+                    # Fallback: press Enter
+                    await loc.press("Enter")
+                    logger.info("Pressed Enter as submit fallback")
+                    await page.wait_for_timeout(5000)
+                    return
+            except Exception:
+                continue
+        logger.info("No email gate detected")
 
     async def _best_next_selector(self, page: Page) -> List[str]:
         html_hint = await page.content()
@@ -164,6 +215,9 @@ class DocsendWebAgent:
             await Stealth().apply_stealth_async(page)
             await page.goto(url, wait_until="domcontentloaded", timeout=120000)
             await page.wait_for_timeout(5000)
+
+            # Handle email gate if present
+            await self._handle_email_gate(page)
 
             title = await page.title()
 
