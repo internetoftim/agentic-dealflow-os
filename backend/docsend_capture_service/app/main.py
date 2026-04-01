@@ -214,8 +214,6 @@ class DocsendWebAgent:
             page = await context.new_page()
             await Stealth().apply_stealth_async(page)
             await page.goto(url, wait_until="domcontentloaded", timeout=120000)
-            # Wait for network to settle and dynamic content to render
-            await page.wait_for_load_state("networkidle", timeout=30000).catch(lambda _: None) if hasattr(page, 'wait_for_load_state') else None
             try:
                 await page.wait_for_load_state("networkidle", timeout=30000)
             except Exception:
