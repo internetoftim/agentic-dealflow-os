@@ -341,15 +341,15 @@ export default function DealWorkspace() {
               <Download className="h-3 w-3 text-muted-foreground" /> Download Deck
             </button>
           )}
-          {/* DocSend source link */}
-          {activeDeal?.source === "docsend" && docsendUrl && (
+          {/* Doc viewer source link */}
+          {["docsend", "pandadoc", "papermark"].includes(activeDeal?.source ?? "") && docsendUrl && (
             <a
               href={docsendUrl}
               target="_blank"
               rel="noopener noreferrer"
               className="inline-flex items-center gap-1.5 rounded-full bg-badge-green-muted px-2.5 py-1 text-xs font-medium text-badge-green hover:underline"
             >
-              <ExternalLink className="h-3 w-3" /> DocSend Link
+              <ExternalLink className="h-3 w-3" /> {activeDeal?.source === "docsend" ? "DocSend" : activeDeal?.source === "pandadoc" ? "PandaDoc" : "Papermark"} Link
             </a>
           )}
           {activeDeal?.website ? (
