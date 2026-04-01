@@ -165,6 +165,9 @@ class DocsendWebAgent:
             await page.goto(url, wait_until="domcontentloaded", timeout=120000)
             await page.wait_for_timeout(5000)
 
+            # Handle email gate if present
+            await self._handle_email_gate(page)
+
             title = await page.title()
 
             for i in range(1, self.max_pages + 1):
