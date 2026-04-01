@@ -227,7 +227,7 @@ class DocsendWebAgent:
 
             for i in range(1, self.max_pages + 1):
                 logger.info("Capturing page %d", i)
-                await page.wait_for_timeout(3000)
+                await page.wait_for_timeout(5000)
                 text = (await page.locator("body").inner_text())[:6000]
                 notes.append(f"## Page {i}\n\n{text.strip()}\n")
 
