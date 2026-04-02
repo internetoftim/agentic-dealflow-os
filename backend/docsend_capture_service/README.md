@@ -1,6 +1,6 @@
 # DocSend Capture Service (FastAPI + AG2 + Web Agent)
 
-This service captures DocSend/PandaDoc pages with a browser agent, screenshots each page, assembles them into a PDF, and returns both markdown + PDF payload.
+This service captures DocSend, Papermark, PandaDoc and similar document viewer pages with a browser agent, screenshots each page, assembles them into a PDF, and returns both markdown + PDF payload.
 
 ## Endpoints
 
