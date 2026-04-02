@@ -23,15 +23,9 @@ jobs:
         with:
           project_id: api-project-845824049229
 
-      - name: Pull secrets from Secret Manager
-        run: |
-          OPENAI_API_KEY=$(gcloud secrets versions access latest --secret=OPENAI_API_KEY --project=api-project-845824049229)
-          SERVICE_API_KEY=$(gcloud secrets versions access latest --secret=SERVICE_API_KEY --project=api-project-845824049229 2>/dev/null || echo "")
-          cat > backend/docsend_capture_service/.env <<EOF
-          OPENAI_API_KEY=${OPENAI_API_KEY}
-          AG2_MODEL=gpt-4o-mini
-          SERVICE_API_KEY=${SERVICE_API_KEY}
-          EOF
-
       - name: Deploy
-        run: chmod +x deploy.sh && ./deploy.sh
+        env: # Or as an environment variable
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY}}      
+          SERVICE_API_KEY: ${{ secrets.SERVICE_API_KEY}}      
+        run: |
+          chmod +x deploy.sh && ./deploy.sh
