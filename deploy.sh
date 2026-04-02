@@ -1,5 +1,5 @@
 #!/bin/bash
-set -e
+set -euo pipefail
 
 ENV_FILE="backend/docsend_capture_service/.env"
 if [ -f "$ENV_FILE" ]; then
@@ -12,11 +12,14 @@ if [ -z "$OPENAI_API_KEY" ]; then
   echo "ERROR: OPENAI_API_KEY not set"; exit 1
 fi
 
-PROJECT_ID="api-project-845824049229"
+PROJECT_ID="${PROJECT_ID:-api-project-845824049229}"
 REGION="us-central1"
 BACKEND_SERVICE="docsend-backend"
 FRONTEND_SERVICE="docsend-frontend"
 REPO="gcr.io/$PROJECT_ID"
+
+echo "==> Using GCP project: $PROJECT_ID"
+gcloud config set project "$PROJECT_ID" >/dev/null
 
 echo "==> Enabling required APIs (skipping if no permission)..."
 gcloud services enable \
