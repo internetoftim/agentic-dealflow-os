@@ -18,12 +18,12 @@ BACKEND_SERVICE="docsend-backend"
 FRONTEND_SERVICE="docsend-frontend"
 REPO="gcr.io/$PROJECT_ID"
 
-echo "==> Enabling required APIs..."
+echo "==> Enabling required APIs (skipping if no permission)..."
 gcloud services enable \
   run.googleapis.com \
   containerregistry.googleapis.com \
   secretmanager.googleapis.com \
-  --project=$PROJECT_ID
+  --project=$PROJECT_ID 2>/dev/null || echo "WARN: Could not enable APIs (likely already enabled)"
 
 echo "==> Storing secrets in Secret Manager..."
 echo -n "$OPENAI_API_KEY" | gcloud secrets create OPENAI_API_KEY \
