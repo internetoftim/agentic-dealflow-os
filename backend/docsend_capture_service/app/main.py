@@ -1,5 +1,5 @@
 """
-Multi-agent backend for Agentic Deal Flow OS.
+Multi-agent backend for Agentic Deal Flow OS. 
 
 Agents:
   OrchestratorAgent  — routes tasks, coordinates swarm
