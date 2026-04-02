@@ -74,6 +74,16 @@ Deletes both Cloud Run services, container images, IAM bindings, and secrets.
 
 On every push to `main` that touches `backend/`, the workflow at `.github/workflows/deploy.yml` automatically builds and redeploys both services.
 
+The workflow now supports **either** of the following GCP auth modes:
+
+1. **Workload Identity Federation (recommended)** via:
+   - `GCP_WORKLOAD_IDENTITY_PROVIDER` (GitHub secret)
+   - `GCP_SERVICE_ACCOUNT` (GitHub secret)
+2. **Service account JSON key (fallback)** via:
+   - `GCP_SA_KEY` (GitHub secret)
+
+Set repository variable `GCP_PROJECT_ID` to override the default project.
+
 ### First-time setup
 
 Requires [gh CLI](https://cli.github.com/) and `gcloud` authenticated.
