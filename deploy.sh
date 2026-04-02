@@ -29,29 +29,36 @@ gcloud services enable \
   --project=$PROJECT_ID 2>/dev/null || echo "WARN: Could not enable APIs (likely already enabled)"
 
 echo "==> Storing secrets in Secret Manager..."
-echo -n "$OPENAI_API_KEY" | gcloud secrets create OPENAI_API_KEY \
+(echo -n "$OPENAI_API_KEY" | gcloud secrets create OPENAI_API_KEY \
   --data-file=- --project=$PROJECT_ID 2>/dev/null || \
 echo -n "$OPENAI_API_KEY" | gcloud secrets versions add OPENAI_API_KEY \
-  --data-file=- --project=$PROJECT_ID
+  --data-file=- --project=$PROJECT_ID 2>/dev/null) || \
+echo "WARN: Could not update OPENAI_API_KEY secret (may need secretmanager.admin role)"
 
-if [ -z "$SERVICE_API_KEY" ]; then
+if [ -z "${SERVICE_API_KEY:-}" ]; then
   SERVICE_API_KEY=$(openssl rand -hex 32)
-  echo "==> Generated SERVICE_API_KEY: $SERVICE_API_KEY"
+  echo "==> Generated SERVICE_API_KEY"
 fi
-echo -n "$SERVICE_API_KEY" | gcloud secrets create SERVICE_API_KEY \
+(echo -n "$SERVICE_API_KEY" | gcloud secrets create SERVICE_API_KEY \
   --data-file=- --project=$PROJECT_ID 2>/dev/null || \
 echo -n "$SERVICE_API_KEY" | gcloud secrets versions add SERVICE_API_KEY \
-  --data-file=- --project=$PROJECT_ID
+  --data-file=- --project=$PROJECT_ID 2>/dev/null) || \
+echo "WARN: Could not update SERVICE_API_KEY secret (may need secretmanager.admin role)"
 
 echo "==> Granting Cloud Run access to secrets..."
-PROJECT_NUMBER=$(gcloud projects describe $PROJECT_ID --format="value(projectNumber)")
-SA="$PROJECT_NUMBER-compute@developer.gserviceaccount.com"
-for SECRET in OPENAI_API_KEY SERVICE_API_KEY; do
-  gcloud secrets add-iam-policy-binding $SECRET \
-    --member="serviceAccount:$SA" \
-    --role="roles/secretmanager.secretAccessor" \
-    --project=$PROJECT_ID
-done
+PROJECT_NUMBER=$(gcloud projects describe $PROJECT_ID --format="value(projectNumber)" 2>/dev/null) || true
+if [ -n "${PROJECT_NUMBER:-}" ]; then
+  SA="$PROJECT_NUMBER-compute@developer.gserviceaccount.com"
+  for SECRET in OPENAI_API_KEY SERVICE_API_KEY; do
+    gcloud secrets add-iam-policy-binding $SECRET \
+      --member="serviceAccount:$SA" \
+      --role="roles/secretmanager.secretAccessor" \
+      --project=$PROJECT_ID 2>/dev/null || \
+    echo "WARN: Could not bind $SECRET to $SA (may already be bound or need permissions)"
+  done
+else
+  echo "WARN: Could not get project number, skipping IAM bindings (secrets may already be configured)"
+fi
 
 echo "==> Building and pushing backend image..."
 cd backend/docsend_capture_service
