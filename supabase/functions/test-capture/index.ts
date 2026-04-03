@@ -79,9 +79,9 @@ Deno.serve(async (req) => {
     // Build callback URL
     const callbackUrl = `${supabaseUrl}/functions/v1/docsend-callback`;
 
-    // Fire async capture
-    console.log(`Firing capture to ${captureServiceUrl}/capture-async`);
-    const captureRes = await fetch(`${captureServiceUrl}/capture-async`, {
+    // Fire synchronous capture
+    console.log(`Firing capture to ${captureServiceUrl}/capture`);
+    const captureRes = await fetch(`${captureServiceUrl}/capture`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -90,11 +90,6 @@ Deno.serve(async (req) => {
       body: JSON.stringify({
         url,
         max_pages: 50,
-        callback_url: callbackUrl,
-        job_id: job.id,
-        deal_id: deal.id,
-        user_id: testUserId,
-        service_role_key: supabaseServiceKey,
       }),
     });
 
