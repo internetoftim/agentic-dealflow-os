@@ -1,6 +1,6 @@
-# DocSend Capture Service (FastAPI + AG2 + Web Agent)
+# Deck Viewer Capture Service (FastAPI + AG2 + Web Agent)
 
-This service captures DocSend/PandaDoc pages with a browser agent, screenshots each page, assembles them into a PDF, and returns both markdown + PDF payload.
+This service captures shared deck viewers (DocSend, PandaDoc, Papermark, and similar web viewers) with a browser agent, screenshots each page, and assembles a clean PDF. The service intentionally focuses on visual capture only (no downstream information extraction).
 
 ## Endpoints
 
@@ -10,7 +10,8 @@ This service captures DocSend/PandaDoc pages with a browser agent, screenshots e
     ```json
     {
       "url": "https://docsend.com/view/...",
-      "max_pages": 20
+      "max_pages": 20,
+      "gate_email": "optional@email.com"
     }
     ```
   - example:
@@ -18,7 +19,7 @@ This service captures DocSend/PandaDoc pages with a browser agent, screenshots e
     curl -X POST https://<cloud-run-url>/capture \
       -H "X-API-Key: <SERVICE_API_KEY>" \
       -H "Content-Type: application/json" \
-      -d '{"url": "https://docsend.com/view/..."}'
+      -d '{"url": "https://www.papermark.com/view/cmmuepdvo0001lb04nhx5g7xf"}'
     ```
 
 ## Authentication
@@ -34,6 +35,7 @@ OPENAI_API_KEY=<your-openai-key>
 AG2_MODEL=gpt-4o-mini
 NGROK_AUTHTOKEN=<your-ngrok-token>       # optional, for local tunneling
 SERVICE_API_KEY=<your-service-api-key>   # generated automatically on first deploy if not set
+CAPTURE_GATE_EMAIL=<email-used-for-viewer-gates>  # optional fallback for email-gated viewers
 ```
 
 ## Run locally
@@ -102,5 +104,6 @@ Removes IAM bindings, deletes the service account and all its keys, and deletes 
 Set in Supabase function environment:
 
 - `DOCSEND_CAPTURE_SERVICE_URL=http://<host>:8080`
+- `DOCSEND_CAPTURE_SERVICE_API_KEY=<SERVICE_API_KEY>`
 
-When configured, `process-docsend` tries this service first before OpenAI computer-use / Firecrawl fallbacks.
+When configured, `process-docsend` uses this service to generate a PDF for the EasyVC extraction flow.

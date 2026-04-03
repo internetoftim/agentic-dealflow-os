@@ -6,12 +6,18 @@ const corsHeaders = {
     "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
 
+type CaptureServiceResponse = {
+  title?: string | null;
+  page_count: number;
+  screenshots: Array<{ page: number; data_url: string }>;
+  pdf_base64: string;
+};
+
 /**
- * Process DocSend Link Edge Function
+ * Process shared deck links (DocSend, PandaDoc, Papermark, and similar viewers).
  *
- * Accepts a DocSend (or PandaDoc) URL, uses Firecrawl to scrape the page
- * content and capture a screenshot, creates a deal record and source,
- * then stores extracted text for downstream analysis.
+ * This flow only captures a clean screenshot-based PDF via the AG2 capture backend,
+ * stores the PDF in Supabase Storage, then hands off extraction to process-deck/EasyVC.
  */
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
@@ -19,7 +25,6 @@ Deno.serve(async (req) => {
   }
 
   try {
-    // --- Auth ---
     const authHeader = req.headers.get("Authorization");
     if (!authHeader) {
       return new Response(JSON.stringify({ error: "No authorization header" }), {
@@ -31,13 +36,19 @@ Deno.serve(async (req) => {
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const supabaseAnonKey = Deno.env.get("SUPABASE_ANON_KEY")!;
-    const firecrawlApiKey = Deno.env.get("FIRECRAWL_API_KEY");
+    const captureServiceUrl = Deno.env.get("DOCSEND_CAPTURE_SERVICE_URL")?.trim();
+    const captureServiceApiKey = Deno.env.get("DOCSEND_CAPTURE_SERVICE_API_KEY")?.trim();
 
-    if (!firecrawlApiKey) {
-      return new Response(JSON.stringify({ error: "FIRECRAWL_API_KEY is not configured" }), {
-        status: 500,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
+    if (!captureServiceUrl || !captureServiceApiKey) {
+      return new Response(
+        JSON.stringify({
+          error: "DOCSEND_CAPTURE_SERVICE_URL and DOCSEND_CAPTURE_SERVICE_API_KEY must be configured",
+        }),
+        {
+          status: 500,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        },
+      );
     }
 
     const adminClient = createClient(supabaseUrl, supabaseServiceKey);
@@ -56,7 +67,7 @@ Deno.serve(async (req) => {
       });
     }
 
-    const { url } = await req.json();
+    const { url, maxPages } = await req.json();
     if (!url || typeof url !== "string") {
       return new Response(JSON.stringify({ error: "Missing url parameter" }), {
         status: 400,
@@ -64,20 +75,19 @@ Deno.serve(async (req) => {
       });
     }
 
-    // Validate URL format
     const normalizedUrl = url.trim();
-    const isDocSend = /docsend\.com/i.test(normalizedUrl);
-    const isPandaDoc = /pandadoc\.com/i.test(normalizedUrl);
-    if (!isDocSend && !isPandaDoc) {
+    if (!isSupportedDeckViewer(normalizedUrl)) {
       return new Response(
-        JSON.stringify({ error: "URL must be a DocSend or PandaDoc link" }),
-        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        JSON.stringify({
+          error:
+            "URL must be a supported shared document viewer link (e.g., DocSend, PandaDoc, Papermark)",
+        }),
+        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } },
       );
     }
 
-    const sourceType = isDocSend ? "docsend" : "pandadoc";
+    const sourceType = detectSourceType(normalizedUrl);
 
-    // --- Step 1: Create deal record immediately (status = scraping) ---
     const dealName = deriveDealName(normalizedUrl);
     const { data: deal, error: dealError } = await adminClient
       .from("deals")
@@ -87,6 +97,7 @@ Deno.serve(async (req) => {
         source: sourceType,
         status: "scraping",
         auto_ingested: false,
+        website: normalizedUrl,
       })
       .select()
       .single();
@@ -97,86 +108,88 @@ Deno.serve(async (req) => {
 
     console.log(`Created deal ${deal.id} for ${sourceType} URL: ${normalizedUrl}`);
 
-    // --- Step 2: Scrape with Firecrawl ---
     try {
       await adminClient
         .from("deals")
         .update({ status: "scraping", updated_at: new Date().toISOString() })
         .eq("id", deal.id);
 
-      const scrapeResult = await scrapeWithFirecrawl(firecrawlApiKey, normalizedUrl);
+      const capture = await captureDeckPdf({
+        captureServiceUrl,
+        captureServiceApiKey,
+        url: normalizedUrl,
+        maxPages: clampMaxPages(maxPages),
+        gateEmail: user.email ?? undefined,
+      });
 
-      console.log(
-        `Firecrawl returned ${scrapeResult.markdown.length} chars markdown, ` +
-          `screenshot: ${scrapeResult.screenshotUrl ? "yes" : "no"}`
-      );
-
-      // --- Step 3: Store screenshot in Supabase Storage (if available) ---
-      let storagePath: string | null = null;
-      if (scrapeResult.screenshotUrl) {
-        try {
-          const imgRes = await fetch(scrapeResult.screenshotUrl);
-          if (imgRes.ok) {
-            const imgBytes = new Uint8Array(await imgRes.arrayBuffer());
-            storagePath = `${user.id}/${deal.id}/screenshot.png`;
-            const { error: uploadError } = await adminClient.storage
-              .from("decks")
-              .upload(storagePath, new Blob([imgBytes], { type: "image/png" }), {
-                upsert: true,
-              });
-            if (uploadError) {
-              console.warn("Screenshot upload failed:", uploadError.message);
-              storagePath = null;
-            }
-          }
-        } catch (e) {
-          console.warn("Failed to download screenshot:", e);
-        }
+      if (!capture.pdf_base64) {
+        throw new Error("Capture service returned empty PDF payload");
       }
 
-      // --- Step 4: Create source record ---
+      const pdfBytes = decodeBase64(capture.pdf_base64);
+      const slug = extractSlug(normalizedUrl);
+      const pdfStoragePath = `${user.id}/${deal.id}/${sourceType}-${slug}.pdf`;
+
+      const { error: uploadError } = await adminClient.storage
+        .from("decks")
+        .upload(pdfStoragePath, pdfBytes, {
+          contentType: "application/pdf",
+          upsert: true,
+        });
+
+      if (uploadError) {
+        throw new Error(`Failed to upload generated PDF: ${uploadError.message}`);
+      }
+
       await adminClient.from("sources").insert({
         deal_id: deal.id,
         user_id: user.id,
-        file_name: `${sourceType}-${extractSlug(normalizedUrl)}.md`,
-        original_size: `${(scrapeResult.markdown.length / 1024).toFixed(0)}KB`,
-        storage_path: storagePath,
+        file_name: `${sourceType}-${slug}.pdf`,
+        original_size: `${(pdfBytes.byteLength / 1024).toFixed(0)}KB`,
+        storage_path: pdfStoragePath,
         source_type: sourceType,
-        processing_status: "extracted",
-        extracted_text: scrapeResult.markdown.slice(0, 100_000),
+        processing_status: "uploaded",
       });
 
-      // --- Step 5: Update deal with page count estimate and extracted metadata ---
-      const pageEstimate = estimatePages(scrapeResult.markdown);
       await adminClient
         .from("deals")
         .update({
-          pages: pageEstimate,
-          status: "extracting",
+          pages: capture.page_count,
+          deck_size: `${capture.page_count} slides`,
+          status: "uploading",
           updated_at: new Date().toISOString(),
         })
         .eq("id", deal.id);
 
-      // --- Step 6: Extract metadata via LLM ---
-      await extractMetadata(adminClient, deal.id, user.id, scrapeResult.markdown);
+      await triggerProcessDeck({
+        supabaseUrl,
+        supabaseServiceKey,
+        dealId: deal.id,
+        storagePath: pdfStoragePath,
+      });
 
-      console.log(`DocSend processing complete for deal ${deal.id}`);
+      console.log(`Deck capture complete for deal ${deal.id}; handed off PDF to process-deck`);
 
       return new Response(
-        JSON.stringify({ success: true, dealId: deal.id }),
-        { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        JSON.stringify({
+          success: true,
+          dealId: deal.id,
+          pageCount: capture.page_count,
+          sourceType,
+        }),
+        { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } },
       );
-    } catch (scrapeError) {
-      console.error(`Scrape failed for deal ${deal.id}:`, scrapeError);
+    } catch (captureError) {
+      console.error(`Capture failed for deal ${deal.id}:`, captureError);
       await adminClient
         .from("deals")
         .update({ status: "error", updated_at: new Date().toISOString() })
         .eq("id", deal.id);
 
-      const message = scrapeError instanceof Error ? scrapeError.message : "Scrape failed";
+      const message = captureError instanceof Error ? captureError.message : "Capture failed";
       return new Response(
         JSON.stringify({ error: message, dealId: deal.id }),
-        { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } },
       );
     }
   } catch (error) {
@@ -189,213 +202,120 @@ Deno.serve(async (req) => {
   }
 });
 
-// ─── Helpers ───────────────────────────────────────────────
+async function captureDeckPdf(params: {
+  captureServiceUrl: string;
+  captureServiceApiKey: string;
+  url: string;
+  maxPages: number;
+  gateEmail?: string;
+}): Promise<CaptureServiceResponse> {
+  const { captureServiceUrl, captureServiceApiKey, url, maxPages, gateEmail } = params;
 
-/** Scrape a URL using Firecrawl and return markdown + screenshot URL */
-async function scrapeWithFirecrawl(
-  apiKey: string,
-  url: string
-): Promise<{ markdown: string; screenshotUrl: string | null; title: string | null }> {
-  const res = await fetch("https://api.firecrawl.dev/v1/scrape", {
+  const res = await fetch(`${captureServiceUrl.replace(/\/$/, "")}/capture`, {
     method: "POST",
     headers: {
-      Authorization: `Bearer ${apiKey}`,
       "Content-Type": "application/json",
+      "X-API-Key": captureServiceApiKey,
     },
     body: JSON.stringify({
       url,
-      formats: ["markdown", "screenshot"],
-      waitFor: 5000, // DocSend pages load slowly
-      timeout: 30000,
+      max_pages: maxPages,
+      gate_email: gateEmail,
     }),
   });
 
   if (!res.ok) {
     const errText = await res.text();
-    throw new Error(`Firecrawl scrape failed [${res.status}]: ${errText}`);
+    throw new Error(`Capture service failed [${res.status}]: ${errText}`);
   }
 
-  const data = await res.json();
-  const result = data.data || data;
-
-  return {
-    markdown: result.markdown || "",
-    screenshotUrl: result.screenshot || null,
-    title: result.metadata?.title || null,
-  };
+  return (await res.json()) as CaptureServiceResponse;
 }
 
-/** Derive a deal name from a DocSend/PandaDoc URL */
+async function triggerProcessDeck(params: {
+  supabaseUrl: string;
+  supabaseServiceKey: string;
+  dealId: string;
+  storagePath: string;
+}): Promise<void> {
+  const { supabaseUrl, supabaseServiceKey, dealId, storagePath } = params;
+
+  const res = await fetch(`${supabaseUrl}/functions/v1/process-deck`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${supabaseServiceKey}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      dealId,
+      storagePath,
+    }),
+  });
+
+  if (!res.ok) {
+    const body = await res.text();
+    throw new Error(`Failed to trigger process-deck [${res.status}]: ${body}`);
+  }
+}
+
+function isSupportedDeckViewer(url: string): boolean {
+  try {
+    const host = new URL(url).hostname.toLowerCase();
+    return [
+      "docsend.com",
+      "www.docsend.com",
+      "pandadoc.com",
+      "app.pandadoc.com",
+      "papermark.com",
+      "www.papermark.com",
+    ].includes(host);
+  } catch {
+    return false;
+  }
+}
+
+function detectSourceType(url: string): string {
+  try {
+    const host = new URL(url).hostname.toLowerCase();
+    if (host.includes("docsend")) return "docsend";
+    if (host.includes("pandadoc")) return "pandadoc";
+    if (host.includes("papermark")) return "papermark";
+  } catch {
+    // no-op
+  }
+  return "deck-viewer";
+}
+
 function deriveDealName(url: string): string {
-  // Try to extract slug: docsend.com/view/abc123 → "abc123"
   const slug = extractSlug(url);
-  // Clean up the slug to make it more readable
-  return slug
-    .replace(/[-_]/g, " ")
-    .replace(/\b\w/g, (c) => c.toUpperCase())
-    .trim() || "DocSend Import";
+  return (
+    slug
+      .replace(/[-_]/g, " ")
+      .replace(/\b\w/g, (c) => c.toUpperCase())
+      .trim() || "Deck Import"
+  );
 }
 
-/** Extract the slug/ID from a DocSend or PandaDoc URL */
 function extractSlug(url: string): string {
   try {
     const u = new URL(url);
     const parts = u.pathname.split("/").filter(Boolean);
-    // docsend.com/view/SLUG or app.pandadoc.com/s/SLUG
     return parts[parts.length - 1] || "unknown";
   } catch {
     return "unknown";
   }
 }
 
-/** Rough page count estimate from markdown length */
-function estimatePages(markdown: string): number {
-  // ~500 words per slide, ~5 chars per word
-  const wordCount = markdown.split(/\s+/).length;
-  return Math.max(1, Math.round(wordCount / 500));
+function decodeBase64(value: string): Uint8Array {
+  const binary = atob(value);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) {
+    bytes[i] = binary.charCodeAt(i);
+  }
+  return bytes;
 }
 
-/** Use the configured AI model to extract metadata from scraped text */
-async function extractMetadata(
-  adminClient: any,
-  dealId: string,
-  userId: string,
-  text: string
-): Promise<void> {
-  // Fetch user's AI model preference
-  const { data: settings } = await adminClient
-    .from("user_settings")
-    .select("ai_model")
-    .eq("user_id", userId)
-    .single();
-  const model = settings?.ai_model ?? "gpt-oss-202b";
-
-  const isSapinsapin = model === "gpt-oss-202b";
-  const sapinsapinModel = "/models/gpt-oss-20b-balitanlp-cpt";
-  const SAPINSAPIN_BASE = "https://apollo-inference-bridge.am1-aks.apolloglobal.net";
-  const OPENAI_BASE = "https://api.openai.com";
-
-  const baseUrl = isSapinsapin ? SAPINSAPIN_BASE : OPENAI_BASE;
-  const apiKey = isSapinsapin
-    ? Deno.env.get("APOLLO_API_KEY")?.trim().replace(/[\r\n]/g, "")
-    : Deno.env.get("OPENAI_API_KEY")?.trim().replace(/[\r\n]/g, "");
-
-  if (!apiKey) {
-    console.warn("No AI API key configured — skipping metadata extraction");
-    await adminClient
-      .from("deals")
-      .update({ status: "memo-ready", updated_at: new Date().toISOString() })
-      .eq("id", dealId);
-    return;
-  }
-
-  const aiHeaders: Record<string, string> = { "Content-Type": "application/json" };
-  if (isSapinsapin) {
-    aiHeaders["X-API-Key"] = apiKey;
-  } else {
-    aiHeaders["Authorization"] = `Bearer ${apiKey}`;
-  }
-
-  const textSnippet = text.slice(0, 50_000);
-  const aiPayload = {
-    model: isSapinsapin ? sapinsapinModel : model,
-    messages: [
-      {
-        role: "system",
-        content:
-          "You are the Deep Research & Identity Agent for a VC Deal OS. Extract startup metadata from the scraped content of a pitch deck shared via DocSend/PandaDoc. Be precise — return null for fields you cannot verify.",
-      },
-      {
-        role: "user",
-        content: `Here is the scraped content of a pitch deck:\n\n${textSnippet}\n\nAnalyze this and extract metadata using the extract_deck_metadata tool. Return null for fields you cannot determine.`,
-      },
-    ],
-    tools: [
-      {
-        type: "function",
-        function: {
-          name: "extract_deck_metadata",
-          description: "Extract structured metadata from a startup pitch deck.",
-          parameters: {
-            type: "object",
-            properties: {
-              startup_name: { type: "string", description: "Name of the startup/company" },
-              website: { type: ["string", "null"], description: "Company website URL if found" },
-              stage: {
-                type: "string",
-                enum: ["Pre-Seed", "Seed", "Series A", "Series B", "Series C", "Growth", "Unknown"],
-              },
-              sector: { type: "string", description: "Primary sector/industry" },
-              ask_amount: { type: ["string", "null"], description: "Amount being raised" },
-              valuation: { type: ["string", "null"], description: "Valuation if mentioned" },
-              revenue: { type: ["string", "null"], description: "Current revenue/ARR" },
-              growth: { type: ["string", "null"], description: "Growth rate" },
-              team_size: { type: ["string", "null"], description: "Team size" },
-            },
-            required: ["startup_name", "stage", "sector"],
-            additionalProperties: false,
-          },
-        },
-      },
-    ],
-    tool_choice: { type: "function", function: { name: "extract_deck_metadata" } },
-  };
-
-  try {
-    const aiRes = await fetch(`${baseUrl}/v1/chat/completions`, {
-      method: "POST",
-      headers: aiHeaders,
-      body: JSON.stringify(aiPayload),
-    });
-
-    if (!aiRes.ok) {
-      console.warn(`AI metadata extraction failed [${aiRes.status}]:`, await aiRes.text());
-      await adminClient
-        .from("deals")
-        .update({ status: "memo-ready", updated_at: new Date().toISOString() })
-        .eq("id", dealId);
-      return;
-    }
-
-    const aiData = await aiRes.json();
-    const toolCall = aiData.choices?.[0]?.message?.tool_calls?.[0];
-    if (!toolCall) {
-      console.warn("No tool call in AI response");
-      await adminClient
-        .from("deals")
-        .update({ status: "memo-ready", updated_at: new Date().toISOString() })
-        .eq("id", dealId);
-      return;
-    }
-
-    const meta = JSON.parse(toolCall.function.arguments);
-    console.log(`Extracted metadata: ${meta.startup_name} (${meta.sector}, ${meta.stage})`);
-
-    // Update deal with extracted metadata
-    const updatePayload: Record<string, unknown> = {
-      name: meta.startup_name || deriveDealNameFallback(dealId),
-      stage: meta.stage || "Unknown",
-      sector: meta.sector || "Unknown",
-      status: "memo-ready",
-      updated_at: new Date().toISOString(),
-    };
-    if (meta.website) updatePayload.website = meta.website;
-    if (meta.ask_amount) updatePayload.ask_amount = meta.ask_amount;
-    if (meta.valuation) updatePayload.valuation = meta.valuation;
-    if (meta.revenue) updatePayload.revenue = meta.revenue;
-    if (meta.growth) updatePayload.growth = meta.growth;
-    if (meta.team_size) updatePayload.team_size = meta.team_size;
-
-    await adminClient.from("deals").update(updatePayload).eq("id", dealId);
-  } catch (e) {
-    console.error("Metadata extraction error:", e);
-    await adminClient
-      .from("deals")
-      .update({ status: "memo-ready", updated_at: new Date().toISOString() })
-      .eq("id", dealId);
-  }
-}
-
-function deriveDealNameFallback(dealId: string): string {
-  return `DocSend Import ${dealId.slice(0, 6)}`;
+function clampMaxPages(maxPages: unknown): number {
+  if (typeof maxPages !== "number" || !Number.isFinite(maxPages)) return 40;
+  return Math.max(1, Math.min(100, Math.floor(maxPages)));
 }
