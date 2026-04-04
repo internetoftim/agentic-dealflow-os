@@ -1,3 +1,7 @@
+.venv/
+*.env
+capture.pdf
+
 # Logs
 logs
 *.log
