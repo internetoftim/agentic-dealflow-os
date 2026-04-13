@@ -282,7 +282,7 @@ export default function SettingsPage() {
             </>
           )}
           <p className="text-xs text-muted-foreground">
-            Decks submitted via this link appear in your pipeline with source <code className="bg-muted rounded px-1">public-intake</code>.
+            Decks submitted via this link appear in your pipeline with source <code className="bg-muted rounded px-1">inbound</code>.
           </p>
         </div>
       </section>
