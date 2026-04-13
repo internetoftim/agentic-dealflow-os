@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Sparkles, Check, Mail, HardDrive, Shield, Bot, Search, RotateCcw, Loader2, FolderOpen, FileText } from "lucide-react";
+import { Sparkles, Check, Mail, HardDrive, Shield, Bot, Search, RotateCcw, Loader2, FolderOpen, FileText, Link2, Copy } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { toast } from "sonner";
@@ -196,6 +196,43 @@ export default function SettingsPage() {
               </button>
             ))}
           </div>
+        </div>
+      </section>
+
+      {/* Public Intake Link */}
+      <section className="mb-8">
+        <h2 className="text-sm font-semibold text-foreground mb-4 flex items-center gap-2">
+          <Link2 className="h-4 w-4 text-muted-foreground" />
+          Public Intake Link
+        </h2>
+        <div className="rounded-lg border border-border bg-card p-5 space-y-3">
+          <p className="text-xs text-muted-foreground">
+            Share this link with founders so they can submit their pitch decks directly into your pipeline.
+          </p>
+          {user && (
+            <div className="flex gap-2 items-center">
+              <input
+                type="text"
+                readOnly
+                value={`https://easyvc.lovable.app/intake/${user.id}`}
+                className="flex-1 rounded-md border border-input bg-muted/50 px-3 py-2 text-sm font-mono outline-none text-muted-foreground select-all"
+                onClick={(e) => (e.target as HTMLInputElement).select()}
+              />
+              <button
+                onClick={() => {
+                  navigator.clipboard.writeText(`https://easyvc.lovable.app/intake/${user.id}`);
+                  toast.success("Intake link copied!");
+                }}
+                className="flex items-center gap-1.5 rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-foreground hover:opacity-90 transition-opacity"
+              >
+                <Copy className="h-3.5 w-3.5" />
+                Copy
+              </button>
+            </div>
+          )}
+          <p className="text-xs text-muted-foreground">
+            Decks submitted via this link appear in your pipeline with source <code className="bg-muted rounded px-1">public-intake</code>.
+          </p>
         </div>
       </section>
 
