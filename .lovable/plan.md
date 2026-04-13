@@ -1,47 +1,73 @@
 
 
-## Plan: Fix CI/CD and Backend Deployment
+## Public Deck Intake Portal
 
-### Issues Found
+### Overview
 
-**1. `deploy.sh` line 18 — Hardcoded macOS path**
+Create a publicly accessible page (no login required) where a VC user can share a link with founders to upload their pitch decks. Uploaded decks feed into the existing deal pipeline using the same processing flow as manual uploads.
+
+### Architecture
+
+```text
+Founder visits:  /intake/:userId
+        │
+        ▼
+  PublicIntake.tsx  (no auth required)
+  - Upload form: file + company name + optional email
+  - Drag & drop support
+  - Progress feedback
+        │
+        ▼
+  Edge Function: public-intake (no JWT, uses service role)
+  - Validates input (file size, type, required fields)
+  - Creates deal record (source: "public-intake")
+  - Compresses & uploads file to storage
+  - Creates source record
+  - Triggers process-deck pipeline
+  - Returns success
 ```
-export PATH="$PATH:/Users/tims/google-cloud-sdk/bin"
-```
-This breaks in GitHub Actions (Ubuntu). The `setup-gcloud` action already adds gcloud to PATH.
-
-**2. `deploy.sh` lines 4-10 — Requires `.env` file that doesn't exist in CI**
-The script reads from `backend/docsend_capture_service/.env` and exits if missing. In GitHub Actions, secrets come via environment variables (set on lines 28-29 of the workflow), but the script never sees them because it fails at the `.env` check first.
 
 ### Changes
 
-#### File: `deploy.sh`
+#### 1. New Edge Function: `supabase/functions/public-intake/index.ts`
 
-1. **Remove hardcoded path** (line 18) — delete entirely.
+- **No JWT required** — this is a public endpoint
+- Accepts multipart form data: `file` (PDF/PPTX), `userId` (from URL), `companyName`, `submitterEmail` (optional), `submitterName` (optional)
+- Validates: userId exists in deals table (any user row), file type is PDF/PPTX, file size < 20MB
+- Creates deal with `source: "public-intake"`, `auto_ingested: true`
+- Uploads file to `decks` bucket under `{userId}/{dealId}/`
+- Creates source record with `source_type: "public-intake"`
+- Invokes `process-deck` (fire-and-forget)
+- Returns `{ status: "success", dealId }`
 
-2. **Make `.env` file optional** (lines 4-10) — Change logic so it tries `.env` but falls back to environment variables if the file doesn't exist. Replace the `exit 1` with a warning:
+#### 2. New Page: `src/pages/PublicIntake.tsx`
 
-```bash
-ENV_FILE="backend/docsend_capture_service/.env"
-if [ -f "$ENV_FILE" ]; then
-  export $(grep -v '^#' "$ENV_FILE" | grep -v '^$' | xargs)
-else
-  echo "WARN: $ENV_FILE not found, using environment variables"
-fi
+- Route: `/intake/:userId` — **outside** the ProtectedRoute wrapper
+- Clean, minimal branded page (uses existing design tokens)
+- Shows: company name input, file upload (drag & drop + click), optional submitter name/email fields
+- File validation: PDF/PPTX only, max 20MB
+- Upload progress states: idle → uploading → success → error
+- On success: "Thank you" confirmation with checkmark
+- Calls the `public-intake` edge function directly via fetch (not supabase client, since no auth)
 
-# Validate required vars
-if [ -z "$OPENAI_API_KEY" ]; then
-  echo "ERROR: OPENAI_API_KEY not set"; exit 1
-fi
-```
+#### 3. Route Addition: `src/App.tsx`
 
-This way, local runs use `.env`, and CI uses the `env:` block from the workflow.
+- Add `/intake/:userId` route **outside** the ProtectedRoute wrapper, alongside `/login`
 
-#### File: `.github/workflows/deploy.yml`
+#### 4. Settings Page Addition: `src/pages/SettingsPage.tsx`
 
-No changes needed — the current workflow correctly passes secrets as env vars and runs `deploy.sh`. Once `deploy.sh` is fixed, this will work.
+- Add a "Public Intake Link" section showing the user's shareable URL
+- Copy-to-clipboard button
+- Format: `https://easyvc.lovable.app/intake/{userId}`
 
-### Summary
+### Security Considerations
 
-Two small edits to `deploy.sh`: remove the Mac-only PATH line and make the `.env` file optional with a fallback to environment variables.
+- The edge function uses service role key internally but validates the target `userId` exists
+- Rate limiting: basic check — reject if the user already has >50 deals with source "public-intake" in the last 24h
+- File type validation on both client and server
+- No sensitive data exposed — the userId in the URL is a UUID (not guessable, but not secret either)
+
+### No Database Changes Required
+
+The existing `deals` and `sources` tables already support all needed fields. The new `source: "public-intake"` value is just a text string.
 
