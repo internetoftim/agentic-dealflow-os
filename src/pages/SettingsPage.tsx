@@ -62,13 +62,15 @@ export default function SettingsPage() {
   const [memoPrompt, setMemoPrompt] = useState(DEFAULT_MEMO_PROMPT);
   const [recapPattern, setRecapPattern] = useState(DEFAULT_RECAP_PATTERN);
   const [savingModel, setSavingModel] = useState(false);
+  const [intakeSlug, setIntakeSlug] = useState("");
+  const [savingSlug, setSavingSlug] = useState(false);
 
   // Load settings from DB
   useEffect(() => {
     if (!user) return;
     supabase
       .from("user_settings")
-      .select("ai_model, gmail_label_enabled, drive_sync_enabled, spam_filter_enabled, deep_research_provider, naming_pattern, naming_mode, drive_folder, memo_prompt, recap_naming_pattern")
+      .select("ai_model, gmail_label_enabled, drive_sync_enabled, spam_filter_enabled, deep_research_provider, naming_pattern, naming_mode, drive_folder, memo_prompt, recap_naming_pattern, intake_slug")
       .eq("user_id", user.id)
       .single()
       .then(({ data }) => {
@@ -88,6 +90,9 @@ export default function SettingsPage() {
           }
           if ((data as any).recap_naming_pattern) {
             setRecapPattern((data as any).recap_naming_pattern);
+          }
+          if ((data as any).intake_slug) {
+            setIntakeSlug((data as any).intake_slug);
           }
         }
       });
