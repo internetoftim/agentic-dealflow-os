@@ -33,4 +33,5 @@ export const sourceConfig: Record<string, { label: string; colorClass: string; b
   "docusend": { label: "DocSend", colorClass: "text-badge-green", bgClass: "bg-badge-green-muted" },
   "docsend": { label: "DocSend", colorClass: "text-badge-green", bgClass: "bg-badge-green-muted" },
   "email": { label: "Email", colorClass: "text-badge-blue", bgClass: "bg-badge-blue-muted" },
+  "inbound": { label: "Inbound", colorClass: "text-badge-green", bgClass: "bg-badge-green-muted" },
 };
