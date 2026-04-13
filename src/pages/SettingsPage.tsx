@@ -215,25 +215,71 @@ export default function SettingsPage() {
             Share this link with founders so they can submit their pitch decks directly into your pipeline.
           </p>
           {user && (
-            <div className="flex gap-2 items-center">
-              <input
-                type="text"
-                readOnly
-                value={`https://easyvc.lovable.app/intake/${user.id}`}
-                className="flex-1 rounded-md border border-input bg-muted/50 px-3 py-2 text-sm font-mono outline-none text-muted-foreground select-all"
-                onClick={(e) => (e.target as HTMLInputElement).select()}
-              />
-              <button
-                onClick={() => {
-                  navigator.clipboard.writeText(`https://easyvc.lovable.app/intake/${user.id}`);
-                  toast.success("Intake link copied!");
-                }}
-                className="flex items-center gap-1.5 rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-foreground hover:opacity-90 transition-opacity"
-              >
-                <Copy className="h-3.5 w-3.5" />
-                Copy
-              </button>
-            </div>
+            <>
+              {/* Current link display + copy */}
+              <div className="flex gap-2 items-center">
+                <input
+                  type="text"
+                  readOnly
+                  value={`https://easyvc.lovable.app/intake/${intakeSlug || user.id}`}
+                  className="flex-1 rounded-md border border-input bg-muted/50 px-3 py-2 text-sm font-mono outline-none text-muted-foreground select-all"
+                  onClick={(e) => (e.target as HTMLInputElement).select()}
+                />
+                <button
+                  onClick={() => {
+                    navigator.clipboard.writeText(`https://easyvc.lovable.app/intake/${intakeSlug || user.id}`);
+                    toast.success("Intake link copied!");
+                  }}
+                  className="flex items-center gap-1.5 rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-foreground hover:opacity-90 transition-opacity"
+                >
+                  <Copy className="h-3.5 w-3.5" />
+                  Copy
+                </button>
+              </div>
+
+              {/* Custom slug editor */}
+              <div>
+                <label className="text-xs font-medium text-foreground mb-1 block">Custom Slug</label>
+                <div className="flex gap-2 items-center">
+                  <span className="text-xs text-muted-foreground whitespace-nowrap">/intake/</span>
+                  <input
+                    type="text"
+                    value={intakeSlug}
+                    onChange={(e) => setIntakeSlug(e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, ""))}
+                    placeholder={user.id}
+                    className="flex-1 rounded-md border border-input bg-card px-3 py-2 text-sm font-mono outline-none placeholder:text-muted-foreground focus:ring-1 focus:ring-ring"
+                  />
+                  <button
+                    onClick={async () => {
+                      if (!user) return;
+                      setSavingSlug(true);
+                      const slugValue = intakeSlug.trim() || null;
+                      const { error } = await supabase
+                        .from("user_settings")
+                        .upsert({ user_id: user.id, intake_slug: slugValue } as any, { onConflict: "user_id" });
+                      setSavingSlug(false);
+                      if (error) {
+                        if (error.message?.includes("duplicate") || error.code === "23505") {
+                          toast.error("This slug is already taken. Try another one.");
+                        } else {
+                          toast.error("Failed to save slug");
+                        }
+                      } else {
+                        toast.success(slugValue ? `Slug set to "${slugValue}"` : "Slug removed, using default UUID");
+                      }
+                    }}
+                    disabled={savingSlug}
+                    className="flex items-center gap-1.5 rounded-md border border-border px-3 py-2 text-sm font-medium text-foreground hover:bg-accent transition-colors disabled:opacity-50"
+                  >
+                    {savingSlug ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />}
+                    Save
+                  </button>
+                </div>
+                <p className="text-xs text-muted-foreground mt-1">
+                  Letters, numbers, and dashes only. Leave blank to use your default ID.
+                </p>
+              </div>
+            </>
           )}
           <p className="text-xs text-muted-foreground">
             Decks submitted via this link appear in your pipeline with source <code className="bg-muted rounded px-1">public-intake</code>.
