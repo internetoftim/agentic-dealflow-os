@@ -36,8 +36,8 @@ async def verify_api_key(header_key: str = Security(_api_key_header)) -> None:
         raise HTTPException(status_code=403, detail="Invalid API key")
 
 from PIL import Image
-from reportlab.lib.pagesizes import letter
 from reportlab.pdfgen import canvas
+from reportlab.lib.utils import ImageReader
 from playwright.async_api import async_playwright, Page
 from playwright_stealth import Stealth
 
@@ -316,7 +316,7 @@ def _crop_whitespace(image_bytes: bytes, threshold: int = 240) -> bytes:
 
 def build_pdf_base64(screenshots: List[Dict[str, Any]]) -> str:
     buffer = io.BytesIO()
-    pdf = canvas.Canvas(buffer, pagesize=letter)
+    pdf = None
     for shot in screenshots:
         data_url = shot.get("data_url", "")
         if not isinstance(data_url, str) or "," not in data_url:
@@ -324,12 +324,17 @@ def build_pdf_base64(screenshots: List[Dict[str, Any]]) -> str:
         img_bytes = base64.b64decode(data_url.split(",", 1)[1])
         image = Image.open(io.BytesIO(img_bytes)).convert("RGB")
         w, h = image.size
-        pdf.setPageSize((w, h))
+        if pdf is None:
+            pdf = canvas.Canvas(buffer, pagesize=(w, h))
+        else:
+            pdf.setPageSize((w, h))
         image_stream = io.BytesIO()
         image.save(image_stream, format="JPEG", quality=90)
         image_stream.seek(0)
-        pdf.drawInlineImage(Image.open(image_stream), 0, 0, w, h)
+        pdf.drawImage(ImageReader(image_stream), 0, 0, w, h)
         pdf.showPage()
+    if pdf is None:
+        pdf = canvas.Canvas(buffer)
     pdf.save()
     return base64.b64encode(buffer.getvalue()).decode("utf-8")
 
