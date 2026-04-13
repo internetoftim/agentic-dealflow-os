@@ -23,7 +23,7 @@ Deno.serve(async (req) => {
     // Parse multipart form data
     const formData = await req.formData();
     const file = formData.get("file") as File | null;
-    const userId = formData.get("userId") as string | null;
+    let userId = formData.get("userId") as string | null;
     const companyName = (formData.get("companyName") as string | "").trim();
     const submitterName = (formData.get("submitterName") as string | "")?.trim() || null;
     const submitterEmail = (formData.get("submitterEmail") as string | "")?.trim() || null;
@@ -54,24 +54,44 @@ Deno.serve(async (req) => {
       );
     }
 
-    // Validate userId exists (check user_settings or deals for any row with this user_id)
-    const { data: existingDeal } = await adminClient
-      .from("deals")
-      .select("id")
-      .eq("user_id", userId)
-      .limit(1);
+    // Resolve userId: could be a UUID or a custom intake_slug
+    const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(userId);
 
-    const { data: existingSettings } = await adminClient
-      .from("user_settings")
-      .select("id")
-      .eq("user_id", userId)
-      .limit(1);
+    if (!isUuid) {
+      // Treat as intake_slug — look up the real user_id
+      const { data: slugMatch } = await adminClient
+        .from("user_settings")
+        .select("user_id")
+        .eq("intake_slug", userId)
+        .single();
 
-    if ((!existingDeal || existingDeal.length === 0) && (!existingSettings || existingSettings.length === 0)) {
-      return new Response(
-        JSON.stringify({ error: "Invalid intake link" }),
-        { status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
+      if (!slugMatch) {
+        return new Response(
+          JSON.stringify({ error: "Invalid intake link" }),
+          { status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+      userId = slugMatch.user_id;
+    } else {
+      // Validate UUID userId exists
+      const { data: existingSettings } = await adminClient
+        .from("user_settings")
+        .select("id")
+        .eq("user_id", userId)
+        .limit(1);
+
+      const { data: existingDeal } = await adminClient
+        .from("deals")
+        .select("id")
+        .eq("user_id", userId)
+        .limit(1);
+
+      if ((!existingDeal || existingDeal.length === 0) && (!existingSettings || existingSettings.length === 0)) {
+        return new Response(
+          JSON.stringify({ error: "Invalid intake link" }),
+          { status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
     }
 
     // Rate limiting: max 50 public-intake deals per user per 24h

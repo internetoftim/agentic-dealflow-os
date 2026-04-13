@@ -252,6 +252,7 @@ export type Database = {
           google_provider_refresh_token: string | null
           google_provider_token: string | null
           id: string
+          intake_slug: string | null
           memo_prompt: string | null
           naming_mode: string | null
           naming_pattern: string | null
@@ -271,6 +272,7 @@ export type Database = {
           google_provider_refresh_token?: string | null
           google_provider_token?: string | null
           id?: string
+          intake_slug?: string | null
           memo_prompt?: string | null
           naming_mode?: string | null
           naming_pattern?: string | null
@@ -290,6 +292,7 @@ export type Database = {
           google_provider_refresh_token?: string | null
           google_provider_token?: string | null
           id?: string
+          intake_slug?: string | null
           memo_prompt?: string | null
           naming_mode?: string | null
           naming_pattern?: string | null
