@@ -64,7 +64,10 @@ echo "==> Backend deployed at: $BACKEND_URL"
 # Skipped when deploy.sh is running both, since deploy-frontend.sh will do a full redeploy anyway.
 if [ "$SKIP_FRONTEND_SYNC" != "true" ]; then
   echo "==> Re-pinning frontend to latest SERVICE_API_KEY..."
+  FRONTEND_IMAGE=$(gcloud run services describe $FRONTEND_SERVICE \
+    --region $REGION --format="value(spec.template.spec.template.spec.containers[0].image)" --project=$PROJECT_ID 2>/dev/null || echo "$REPO/$FRONTEND_SERVICE")
   gcloud run deploy $FRONTEND_SERVICE \
+    --image $FRONTEND_IMAGE \
     --region $REGION \
     --platform managed \
     --update-secrets="SERVICE_API_KEY=SERVICE_API_KEY:latest" \
