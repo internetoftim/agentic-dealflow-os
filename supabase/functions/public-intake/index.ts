@@ -100,7 +100,7 @@ Deno.serve(async (req) => {
       .from("deals")
       .select("id", { count: "exact", head: true })
       .eq("user_id", userId)
-      .eq("source", "public-intake")
+      .eq("source", "inbound")
       .gte("created_at", twentyFourHoursAgo);
 
     if ((count ?? 0) >= RATE_LIMIT) {
@@ -116,7 +116,7 @@ Deno.serve(async (req) => {
       .insert({
         user_id: userId,
         name: companyName,
-        source: "public-intake",
+        source: "inbound",
         auto_ingested: true,
         status: "uploading",
         deck_size: `${(file.size / (1024 * 1024)).toFixed(1)} MB`,
@@ -154,7 +154,7 @@ Deno.serve(async (req) => {
       deal_id: deal.id,
       user_id: userId,
       file_name: file.name,
-      source_type: "public-intake",
+      source_type: "inbound",
       processing_status: "pending",
       storage_path: storagePath,
       original_size: `${(file.size / (1024 * 1024)).toFixed(1)} MB`,
