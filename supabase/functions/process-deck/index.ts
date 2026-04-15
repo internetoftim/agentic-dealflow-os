@@ -420,11 +420,7 @@ Deno.serve(async (req) => {
     }
 
     // --- STEP 1: Convert PPTX to PDF (if applicable) ---
-    let pdfStoragePath = storagePath;
-    let slidesApiText = ""; // text extracted via Google Slides API during conversion
-    if (isPptx && !shouldSkip("converting")) {
-      if (await checkAborted(adminClient, dealId, "converting")) {
-        await processNextQueued(adminClient, userId, supabaseUrl, supabaseServiceKey);
+    if (isPptx && !shouldSkip("converting") && arrayBuffer) {
         return new Response(JSON.stringify({ success: true, cancelled: true, at: "converting" }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
       }
       await setDealStatus(adminClient, dealId, "converting");
