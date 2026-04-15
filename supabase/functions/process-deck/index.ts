@@ -367,7 +367,7 @@ Deno.serve(async (req) => {
     }
 
     const body = await req.json();
-    const { dealId, storagePath, resumeFrom, localExtracted } = body;
+    const { dealId, storagePath, resumeFrom, localExtracted, skipCompression } = body;
     if (!dealId || !storagePath) {
       return new Response(JSON.stringify({ error: "Missing dealId or storagePath" }), {
         status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
@@ -403,22 +403,26 @@ Deno.serve(async (req) => {
       .single();
     const model = settings?.ai_model ?? "gpt-5.4";
 
-    // Download file from storage
-    const { data: fileData, error: downloadError } = await adminClient.storage
-      .from("decks").download(storagePath);
-    if (downloadError || !fileData) {
-      throw new Error(`Failed to download file: ${downloadError?.message}`);
-    }
-
-    let arrayBuffer = await fileData.arrayBuffer();
+    // Download file from storage — skip for captured decks during compression
+    // (we still need it for text extraction, but we'll download later in a lighter path)
+    let arrayBuffer: ArrayBuffer | null = null;
     const fileName = storagePath.split("/").pop()?.toLowerCase() ?? "";
     const isPptx = fileName.endsWith(".pptx") || fileName.endsWith(".ppt");
     const isPdf = fileName.endsWith(".pdf");
 
+    if (!skipCompression) {
+      const { data: fileData, error: downloadError } = await adminClient.storage
+        .from("decks").download(storagePath);
+      if (downloadError || !fileData) {
+        throw new Error(`Failed to download file: ${downloadError?.message}`);
+      }
+      arrayBuffer = await fileData.arrayBuffer();
+    }
+
     // --- STEP 1: Convert PPTX to PDF (if applicable) ---
     let pdfStoragePath = storagePath;
-    let slidesApiText = ""; // text extracted via Google Slides API during conversion
-    if (isPptx && !shouldSkip("converting")) {
+    let slidesApiText = "";
+    if (isPptx && !shouldSkip("converting") && arrayBuffer) {
       if (await checkAborted(adminClient, dealId, "converting")) {
         await processNextQueued(adminClient, userId, supabaseUrl, supabaseServiceKey);
         return new Response(JSON.stringify({ success: true, cancelled: true, at: "converting" }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
@@ -438,7 +442,6 @@ Deno.serve(async (req) => {
       arrayBuffer = conversionResult.pdfBytes.buffer as ArrayBuffer;
       slidesApiText = conversionResult.slidesText;
 
-      const pdfFileName = fileName.replace(/\.(pptx|ppt)$/i, ".pdf");
       pdfStoragePath = storagePath.replace(/\.(pptx|ppt)$/i, ".pdf");
 
       const { error: pdfUploadError } = await adminClient.storage
@@ -456,16 +459,24 @@ Deno.serve(async (req) => {
     }
 
     // --- STEP 2: Compress PDF ---
-    let compressedPdf: Uint8Array;
+    let compressedPdf: Uint8Array | null = null;
     let pageCount: number;
-    if (!shouldSkip("compressing")) {
+
+    if (skipCompression) {
+      // Captured decks (DocSend/Papermark): PDF already in storage, skip download+recompress
+      console.log("Skipping compression — captured deck already stored");
+      const { data: dealData } = await adminClient.from("deals").select("pages, deck_size").eq("id", dealId).single();
+      pageCount = dealData?.pages ?? 0;
+      // Briefly show step for UI consistency
+      await setDealStatus(adminClient, dealId, "compressing");
+    } else if (!shouldSkip("compressing")) {
       if (await checkAborted(adminClient, dealId, "compressing")) {
         await processNextQueued(adminClient, userId, supabaseUrl, supabaseServiceKey);
         return new Response(JSON.stringify({ success: true, cancelled: true, at: "compressing" }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
       }
       await setDealStatus(adminClient, dealId, "compressing");
 
-      const pdfBytes = new Uint8Array(arrayBuffer);
+      const pdfBytes = new Uint8Array(arrayBuffer!);
       const result = await compressPdfToTarget(pdfBytes);
       compressedPdf = result.compressed;
       pageCount = result.pages;
@@ -520,9 +531,18 @@ Deno.serve(async (req) => {
           extractedText = slidesApiText;
           console.log(`Using Slides API text: ${extractedText.length} chars`);
         } else {
-          // Try PDF text extraction
+          // Try PDF text extraction — download on-demand if not already in memory
           try {
-            const result = extractPdfText(compressedPdf.buffer as ArrayBuffer);
+            let pdfBuffer: ArrayBuffer;
+            if (compressedPdf) {
+              pdfBuffer = compressedPdf.buffer as ArrayBuffer;
+            } else {
+              // Lightweight download just for text extraction
+              const { data: pdfFile } = await adminClient.storage.from("decks").download(pdfStoragePath);
+              if (!pdfFile) throw new Error("Cannot download PDF for text extraction");
+              pdfBuffer = await pdfFile.arrayBuffer();
+            }
+            const result = extractPdfText(pdfBuffer);
             extractedText = result.text;
             if (result.pageCount > 0) actualPageCount = result.pageCount;
             console.log(`Extracted ${extractedText.length} chars from PDF, ${actualPageCount} pages`);
@@ -590,9 +610,10 @@ Deno.serve(async (req) => {
         const userContent: unknown[] = [];
 
         // Determine if the model supports file/image input
-        const supportsFileInput = !isSapinsapin && (model === "gpt-4o" || model === "gpt-5" || model === "gpt-5-mini" || model === "gpt-5.4");
+        // Skip file input for captured decks (skipCompression) to avoid base64 memory explosion
+        const supportsFileInput = !skipCompression && !isSapinsapin && (model === "gpt-4o" || model === "gpt-5" || model === "gpt-5-mini" || model === "gpt-5.4");
 
-        if (supportsFileInput) {
+        if (supportsFileInput && compressedPdf) {
           const base64 = btoa(new Uint8Array(compressedPdf).reduce((data, byte) => data + String.fromCharCode(byte), ""));
           userContent.push({ type: "file", file: { filename: "deck.pdf", file_data: `data:application/pdf;base64,${base64}` } });
           userContent.push({ type: "text", text: "Analyze this pitch deck and extract metadata using the extract_deck_metadata tool." });
