@@ -908,7 +908,25 @@ Deno.serve(async (req) => {
       }
     }
 
-    // --- STEP 6: Final status ---
+    // --- STEP 6: Trigger deep research (fire-and-forget) ---
+    try {
+      await adminClient.from("deals").update({ deep_research_status: "pending" }).eq("id", dealId);
+      const drResp = await fetch(`${supabaseUrl}/functions/v1/deep-research`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${supabaseServiceKey}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ dealId }),
+      });
+      if (drResp.ok) {
+        console.log("Deep research triggered successfully");
+      } else {
+        const errText = await drResp.text();
+        console.warn("Deep research returned error:", errText);
+      }
+    } catch (e) {
+      console.warn("Deep research trigger failed (non-fatal):", e);
+    }
+
+    // --- STEP 7: Final status ---
     await setDealStatus(adminClient, dealId, "memo-ready");
 
     // Process next queued deal for this user
