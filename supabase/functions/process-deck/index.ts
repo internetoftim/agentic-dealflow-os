@@ -403,17 +403,21 @@ Deno.serve(async (req) => {
       .single();
     const model = settings?.ai_model ?? "gpt-5.4";
 
-    // Download file from storage
-    const { data: fileData, error: downloadError } = await adminClient.storage
-      .from("decks").download(storagePath);
-    if (downloadError || !fileData) {
-      throw new Error(`Failed to download file: ${downloadError?.message}`);
-    }
-
-    let arrayBuffer = await fileData.arrayBuffer();
+    // Download file from storage — skip for captured decks during compression
+    // (we still need it for text extraction, but we'll download later in a lighter path)
+    let arrayBuffer: ArrayBuffer | null = null;
     const fileName = storagePath.split("/").pop()?.toLowerCase() ?? "";
     const isPptx = fileName.endsWith(".pptx") || fileName.endsWith(".ppt");
     const isPdf = fileName.endsWith(".pdf");
+
+    if (!skipCompression) {
+      const { data: fileData, error: downloadError } = await adminClient.storage
+        .from("decks").download(storagePath);
+      if (downloadError || !fileData) {
+        throw new Error(`Failed to download file: ${downloadError?.message}`);
+      }
+      arrayBuffer = await fileData.arrayBuffer();
+    }
 
     // --- STEP 1: Convert PPTX to PDF (if applicable) ---
     let pdfStoragePath = storagePath;
