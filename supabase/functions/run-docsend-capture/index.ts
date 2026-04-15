@@ -40,8 +40,20 @@ function deriveSourceType(url: string, fallbackSource?: string | null): string {
   return fallbackSource || "docsend";
 }
 
+/** Decode base64 in chunks to avoid holding the full decoded string in memory at once. */
 function pdfBytesFromBase64(pdfBase64: string): Uint8Array {
-  return Uint8Array.from(atob(pdfBase64), (char) => char.charCodeAt(0));
+  const binaryLen = Math.ceil(pdfBase64.length * 3 / 4);
+  const bytes = new Uint8Array(binaryLen);
+  const CHUNK = 65536; // decode 64KB of base64 at a time
+  let offset = 0;
+  for (let i = 0; i < pdfBase64.length; i += CHUNK) {
+    const slice = pdfBase64.slice(i, i + CHUNK);
+    const decoded = atob(slice);
+    for (let j = 0; j < decoded.length; j++) {
+      bytes[offset++] = decoded.charCodeAt(j);
+    }
+  }
+  return bytes.subarray(0, offset);
 }
 
 async function markCaptureFailure(
