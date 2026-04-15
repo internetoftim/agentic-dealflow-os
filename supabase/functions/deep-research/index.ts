@@ -95,7 +95,7 @@ Deno.serve(async (req) => {
     const { data: settings } = await adminClient
       .from("user_settings")
       .select("ai_model, deep_research_provider")
-      .eq("user_id", user.id)
+      .eq("user_id", userId)
       .single();
 
     const provider = "firecrawl";
@@ -487,7 +487,7 @@ Extract the company's official website URL and LinkedIn company page URL using t
       .from("deals")
       .update(updatePayload)
       .eq("id", dealId)
-      .eq("user_id", user.id);
+      .eq("user_id", userId);
 
     // Step 4: Extract key people (GPT web search primary, Firecrawl fallback)
     let people: { name: string; title: string | null; linkedin_url: string | null }[] = [];
@@ -623,7 +623,7 @@ Use web_search to find their names, titles, and LinkedIn profile URLs. Then call
 
       const rows = people.slice(0, 10).map(p => ({
         deal_id: dealId,
-        user_id: user.id,
+        user_id: userId,
         name: p.name,
         title: p.title,
         linkedin_url: p.linkedin_url,
