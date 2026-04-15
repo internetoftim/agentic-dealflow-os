@@ -398,10 +398,11 @@ Deno.serve(async (req) => {
     // Fetch user settings (needed for Google token for conversion + AI model)
     const { data: settings } = await adminClient
       .from("user_settings")
-      .select("ai_model, drive_sync_enabled, google_provider_token, naming_pattern, drive_folder")
+      .select("ai_model, drive_sync_enabled, google_provider_token, naming_pattern, drive_folder, text_only_llm")
       .eq("user_id", userId)
       .single();
     const model = settings?.ai_model ?? "gpt-5.4";
+    const textOnlyLlm = settings?.text_only_llm ?? false;
 
     const fileName = storagePath.split("/").pop()?.toLowerCase() ?? "";
     const isPptx = fileName.endsWith(".pptx") || fileName.endsWith(".ppt");
@@ -569,11 +570,71 @@ Deno.serve(async (req) => {
           aiHeaders["Authorization"] = `Bearer ${rawApiKey}`;
         }
 
-        // Always text-only — no base64 file encoding to avoid memory explosion
-        const textToSend = extractedText.length > 0 ? extractedText.slice(0, 50_000) : "No text could be extracted from the deck file.";
-        const userContent: unknown[] = [
-          { type: "text", text: `Here is the full text content of the pitch deck:\n\n${textToSend}\n\nAnalyze this pitch deck and extract metadata using the extract_deck_metadata tool. Return null for fields you cannot determine.` }
-        ];
+        // Multimodal mode: encode PDF pages as images one-by-one to avoid memory spikes
+        // Text-only mode: send extracted text only (safer for large decks)
+        const useMultimodal = !textOnlyLlm && !isSapinsapin && isPdf && !skipCompression;
+        const userContent: unknown[] = [];
+
+        if (useMultimodal && arrayBuffer === null) {
+          // Re-download PDF for multimodal encoding (we released it earlier)
+          try {
+            const { data: pdfFile } = await adminClient.storage.from("decks").download(pdfStoragePath);
+            if (pdfFile) arrayBuffer = await pdfFile.arrayBuffer();
+          } catch (e) {
+            console.warn("Failed to re-download PDF for multimodal, falling back to text-only:", e);
+          }
+        }
+
+        if (useMultimodal && arrayBuffer) {
+          // Page-by-page encoding: load PDF, render each page to a small base64 image
+          // This avoids holding the entire deck as base64 in memory at once
+          console.log("Multimodal mode: encoding pages as images...");
+          try {
+            const pdfDoc = await PDFDocument.load(arrayBuffer, { ignoreEncryption: true });
+            const totalPages = pdfDoc.getPageCount();
+            const maxPages = Math.min(totalPages, 20); // Cap at 20 pages to stay within limits
+
+            for (let i = 0; i < maxPages; i++) {
+              // Create a single-page PDF and serialize it
+              const singlePageDoc = await PDFDocument.create();
+              const [copiedPage] = await singlePageDoc.copyPages(pdfDoc, [i]);
+              singlePageDoc.addPage(copiedPage);
+              const singlePageBytes = await singlePageDoc.save();
+
+              // Encode single page as base64 (much smaller than full deck)
+              const base64 = btoa(String.fromCharCode(...new Uint8Array(singlePageBytes)));
+              userContent.push({
+                type: "image_url",
+                image_url: { url: `data:application/pdf;base64,${base64}`, detail: "low" },
+              });
+            }
+            if (totalPages > maxPages) {
+              console.log(`Multimodal: encoded ${maxPages}/${totalPages} pages (capped)`);
+            }
+            // Release PDF buffer after encoding
+            arrayBuffer = null;
+          } catch (e) {
+            console.warn("Multimodal page encoding failed, falling back to text-only:", e);
+          }
+        }
+
+        // If no multimodal content was added (text-only mode or fallback), use text
+        if (userContent.length === 0) {
+          const textToSend = extractedText.length > 0 ? extractedText.slice(0, 50_000) : "No text could be extracted from the deck file.";
+          userContent.push({
+            type: "text",
+            text: `Here is the full text content of the pitch deck:\n\n${textToSend}\n\nAnalyze this pitch deck and extract metadata using the extract_deck_metadata tool. Return null for fields you cannot determine.`,
+          });
+          console.log("Using text-only mode for LLM extraction");
+        } else {
+          // Add instruction text alongside images
+          const textToSend = extractedText.length > 0 ? extractedText.slice(0, 20_000) : "";
+          userContent.push({
+            type: "text",
+            text: `Above are the pages of a startup pitch deck rendered as images.${textToSend ? `\n\nSupplementary extracted text:\n${textToSend}` : ""}\n\nAnalyze this pitch deck and extract metadata using the extract_deck_metadata tool. Return null for fields you cannot determine.`,
+          });
+          console.log(`Multimodal mode: ${userContent.length - 1} page images + text prompt`);
+        }
 
         const aiPayload = {
           model: isSapinsapin ? sapinsapinModel : model,
