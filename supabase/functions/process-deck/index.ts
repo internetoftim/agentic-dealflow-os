@@ -610,9 +610,10 @@ Deno.serve(async (req) => {
         const userContent: unknown[] = [];
 
         // Determine if the model supports file/image input
-        const supportsFileInput = !isSapinsapin && (model === "gpt-4o" || model === "gpt-5" || model === "gpt-5-mini" || model === "gpt-5.4");
+        // Skip file input for captured decks (skipCompression) to avoid base64 memory explosion
+        const supportsFileInput = !skipCompression && !isSapinsapin && (model === "gpt-4o" || model === "gpt-5" || model === "gpt-5-mini" || model === "gpt-5.4");
 
-        if (supportsFileInput) {
+        if (supportsFileInput && compressedPdf) {
           const base64 = btoa(new Uint8Array(compressedPdf).reduce((data, byte) => data + String.fromCharCode(byte), ""));
           userContent.push({ type: "file", file: { filename: "deck.pdf", file_data: `data:application/pdf;base64,${base64}` } });
           userContent.push({ type: "text", text: "Analyze this pitch deck and extract metadata using the extract_deck_metadata tool." });
