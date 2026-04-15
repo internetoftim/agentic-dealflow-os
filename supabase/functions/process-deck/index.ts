@@ -592,9 +592,8 @@ Deno.serve(async (req) => {
           try {
             const pdfDoc = await PDFDocument.load(arrayBuffer, { ignoreEncryption: true });
             const totalPages = pdfDoc.getPageCount();
-            const maxPages = Math.min(totalPages, 20); // Cap at 20 pages to stay within limits
 
-            for (let i = 0; i < maxPages; i++) {
+            for (let i = 0; i < totalPages; i++) {
               // Create a single-page PDF and serialize it
               const singlePageDoc = await PDFDocument.create();
               const [copiedPage] = await singlePageDoc.copyPages(pdfDoc, [i]);
