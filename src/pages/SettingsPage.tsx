@@ -62,6 +62,7 @@ export default function SettingsPage() {
   const [memoPrompt, setMemoPrompt] = useState(DEFAULT_MEMO_PROMPT);
   const [recapPattern, setRecapPattern] = useState(DEFAULT_RECAP_PATTERN);
   const [savingModel, setSavingModel] = useState(false);
+  const [textOnlyLlm, setTextOnlyLlm] = useState(false);
   const [intakeSlug, setIntakeSlug] = useState("");
   const [savingSlug, setSavingSlug] = useState(false);
 
