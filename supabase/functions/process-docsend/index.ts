@@ -9,7 +9,7 @@ const corsHeaders = {
 /**
  * Process DocSend / PandaDoc Link — Step 1
  *
- * Creates a deal (status = scraping) and returns immediately.
+ * Creates a deal (status = scraping) plus the initial pending capture job.
  * The frontend then invokes run-docsend-capture to do the heavy work.
  */
 Deno.serve(async (req) => {
@@ -85,10 +85,26 @@ Deno.serve(async (req) => {
       throw new Error(`Failed to create deal: ${dealError.message}`);
     }
 
-    console.log(`Created deal ${deal.id} for ${sourceType} URL: ${normalizedUrl}`);
+    const { data: job, error: jobError } = await adminClient
+      .from("capture_jobs")
+      .insert({
+        deal_id: deal.id,
+        user_id: user.id,
+        url: normalizedUrl,
+        status: "pending",
+      })
+      .select()
+      .single();
+
+    if (jobError) {
+      await adminClient.from("deals").delete().eq("id", deal.id);
+      throw new Error(`Failed to create capture job: ${jobError.message}`);
+    }
+
+    console.log(`Created deal ${deal.id} and capture job ${job.id} for ${sourceType} URL: ${normalizedUrl}`);
 
     return new Response(
-      JSON.stringify({ success: true, dealId: deal.id, url: normalizedUrl, status: "scraping" }),
+      JSON.stringify({ success: true, dealId: deal.id, jobId: job.id, url: normalizedUrl, status: "scraping" }),
       { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
   } catch (error) {

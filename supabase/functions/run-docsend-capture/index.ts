@@ -1,4 +1,5 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { captureSync } from "../_shared/docsend-capture-client.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -6,17 +7,301 @@ const corsHeaders = {
     "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
 
+const DEFAULT_MAX_PAGES = 50;
+
+type RunDocsendCaptureRequest = {
+  dealId?: string;
+  gateEmail?: string | null;
+  jobId?: string;
+  maxPages?: number;
+  url?: string;
+};
+
+type CaptureJobRecord = {
+  id: string;
+};
+
+class ProcessDeckHandoffError extends Error {}
+
+function extractSlug(url: string): string {
+  try {
+    const parsed = new URL(url);
+    const parts = parsed.pathname.split("/").filter(Boolean);
+    return parts[parts.length - 1] || "unknown";
+  } catch {
+    return "unknown";
+  }
+}
+
+function deriveSourceType(url: string, fallbackSource?: string | null): string {
+  if (/docsend\.com/i.test(url)) return "docsend";
+  if (/pandadoc\.com/i.test(url)) return "pandadoc";
+  if (/papermark\.(com|io)/i.test(url)) return "papermark";
+  return fallbackSource || "docsend";
+}
+
+function pdfBytesFromBase64(pdfBase64: string): Uint8Array {
+  return Uint8Array.from(atob(pdfBase64), (char) => char.charCodeAt(0));
+}
+
+async function markCaptureFailure(
+  supabaseUrl: string,
+  supabaseServiceKey: string,
+  dealId: string,
+  jobId: string | null,
+  message: string,
+) {
+  const adminClient = createClient(supabaseUrl, supabaseServiceKey);
+  const updatedAt = new Date().toISOString();
+
+  if (jobId) {
+    await adminClient
+      .from("capture_jobs")
+      .update({ status: "failed", error_message: message, updated_at: updatedAt })
+      .eq("id", jobId);
+  }
+
+  await adminClient
+    .from("deals")
+    .update({ status: "error", updated_at: updatedAt })
+    .eq("id", dealId);
+}
+
+async function prepareCaptureJob(
+  adminClient: any,
+  dealId: string,
+  userId: string,
+  url: string,
+  jobId?: string,
+): Promise<CaptureJobRecord> {
+  const updatedAt = new Date().toISOString();
+
+  if (jobId) {
+    const { data, error } = await adminClient
+      .from("capture_jobs")
+      .update({
+        status: "processing",
+        error_message: null,
+        updated_at: updatedAt,
+        url,
+      })
+      .eq("id", jobId)
+      .eq("deal_id", dealId)
+      .eq("user_id", userId)
+      .select("id")
+      .single();
+
+    if (error || !data) {
+      throw new Error(`Failed to prepare capture job: ${error?.message ?? "Missing capture job"}`);
+    }
+
+    return data as CaptureJobRecord;
+  }
+
+  const { data, error } = await adminClient
+    .from("capture_jobs")
+    .insert({
+      deal_id: dealId,
+      user_id: userId,
+      url,
+      status: "processing",
+    })
+    .select("id")
+    .single();
+
+  if (error || !data) {
+    throw new Error(`Failed to create capture job: ${error?.message ?? "Unknown error"}`);
+  }
+
+  return data as CaptureJobRecord;
+}
+
+async function upsertCapturedSource(
+  adminClient: any,
+  dealId: string,
+  userId: string,
+  sourceType: string,
+  storagePath: string,
+  fileName: string,
+  originalSize: string,
+) {
+  const { data: existingSource, error: existingSourceError } = await adminClient
+    .from("sources")
+    .select("id")
+    .eq("deal_id", dealId)
+    .eq("user_id", userId)
+    .eq("source_type", sourceType)
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (existingSourceError) {
+    throw new Error(`Failed to look up source record: ${existingSourceError.message}`);
+  }
+
+  const payload = {
+    file_name: fileName,
+    original_size: originalSize,
+    storage_path: storagePath,
+    processing_status: "uploaded",
+  };
+
+  if (existingSource?.id) {
+    const { error } = await adminClient
+      .from("sources")
+      .update(payload)
+      .eq("id", existingSource.id);
+    if (error) {
+      throw new Error(`Failed to update captured source: ${error.message}`);
+    }
+    return;
+  }
+
+  const { error } = await adminClient.from("sources").insert({
+    deal_id: dealId,
+    user_id: userId,
+    source_type: sourceType,
+    ...payload,
+  });
+  if (error) {
+    throw new Error(`Failed to create captured source: ${error.message}`);
+  }
+}
+
+async function handOffToProcessDeck(
+  supabaseUrl: string,
+  supabaseServiceKey: string,
+  dealId: string,
+  storagePath: string,
+) {
+  const response = await fetch(`${supabaseUrl}/functions/v1/process-deck`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${supabaseServiceKey}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ dealId, storagePath }),
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new ProcessDeckHandoffError(`process-deck failed [${response.status}]: ${errorText}`);
+  }
+}
+
+async function processCaptureInBackground(args: {
+  captureServiceApiKey: string;
+  captureServiceUrl: string;
+  dealId: string;
+  dealSource?: string | null;
+  gateEmail?: string | null;
+  jobId: string;
+  maxPages: number;
+  supabaseServiceKey: string;
+  supabaseUrl: string;
+  url: string;
+  userId: string;
+}) {
+  const adminClient = createClient(args.supabaseUrl, args.supabaseServiceKey);
+  const captureResult = await captureSync({
+    apiKey: args.captureServiceApiKey,
+    baseUrl: args.captureServiceUrl,
+    gateEmail: args.gateEmail,
+    maxPages: args.maxPages,
+    url: args.url,
+  });
+
+  const pdfBytes = pdfBytesFromBase64(captureResult.pdfBase64);
+  const sizeMB = `${(pdfBytes.length / (1024 * 1024)).toFixed(1)}MB`;
+  const storagePath = `${args.userId}/${args.dealId}/deck.pdf`;
+  const updatedAt = new Date().toISOString();
+  const sourceType = deriveSourceType(args.url, args.dealSource);
+  const fileName = `${sourceType}-${extractSlug(args.url)}.pdf`;
+
+  const { error: uploadError } = await adminClient.storage
+    .from("decks")
+    .upload(storagePath, new Blob([pdfBytes], { type: "application/pdf" }), {
+      upsert: true,
+    });
+
+  if (uploadError) {
+    throw new Error(`Failed to upload captured PDF: ${uploadError.message}`);
+  }
+
+  await upsertCapturedSource(
+    adminClient,
+    args.dealId,
+    args.userId,
+    sourceType,
+    storagePath,
+    fileName,
+    sizeMB,
+  );
+
+  const { error: dealUpdateError } = await adminClient
+    .from("deals")
+    .update({
+      deck_size: sizeMB,
+      pages: captureResult.pageCount || 0,
+      updated_at: updatedAt,
+    })
+    .eq("id", args.dealId);
+
+  if (dealUpdateError) {
+    throw new Error(`Failed to update deal after capture: ${dealUpdateError.message}`);
+  }
+
+  const { error: jobCompleteError } = await adminClient
+    .from("capture_jobs")
+    .update({
+      status: "completed",
+      error_message: null,
+      updated_at: updatedAt,
+    })
+    .eq("id", args.jobId);
+
+  if (jobCompleteError) {
+    throw new Error(`Failed to complete capture job: ${jobCompleteError.message}`);
+  }
+
+  try {
+    await handOffToProcessDeck(args.supabaseUrl, args.supabaseServiceKey, args.dealId, storagePath);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "process-deck handoff failed";
+    await adminClient
+      .from("deals")
+      .update({ status: "error", updated_at: new Date().toISOString() })
+      .eq("id", args.dealId);
+    throw new ProcessDeckHandoffError(message);
+  }
+}
+
+function scheduleBackgroundTask(task: Promise<unknown>) {
+  const edgeRuntime = (globalThis as typeof globalThis & {
+    EdgeRuntime?: { waitUntil?: (promise: Promise<unknown>) => void };
+  }).EdgeRuntime;
+
+  if (edgeRuntime?.waitUntil) {
+    edgeRuntime.waitUntil(task);
+    return;
+  }
+
+  void task;
+}
+
 /**
- * Run DocSend Capture — Queue-based
+ * Run DocSend Capture — background orchestration
  *
- * Inserts a capture job into the queue and fires off an async capture request
- * to the capture service (with a callback URL). Returns immediately.
- * The capture service will POST results to docsend-callback when done.
+ * Uses the existing Cloud Run /capture endpoint as a pure print service.
+ * All job tracking, storage writes, and pipeline handoff stay in Supabase.
  */
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
   }
+
+  let scheduledJobId: string | null = null;
+  let scheduledDealId: string | null = null;
 
   try {
     const authHeader = req.headers.get("Authorization");
@@ -49,7 +334,13 @@ Deno.serve(async (req) => {
       });
     }
 
-    const { dealId, url } = await req.json();
+    const requestBody = (await req.json()) as RunDocsendCaptureRequest;
+    const dealId = requestBody?.dealId?.trim();
+    const url = requestBody?.url?.trim();
+    const requestedMaxPages = typeof requestBody?.maxPages === "number" ? requestBody.maxPages : DEFAULT_MAX_PAGES;
+    const maxPages = Math.max(1, Math.min(100, requestedMaxPages));
+    const gateEmail = requestBody?.gateEmail ?? null;
+
     if (!dealId || !url) {
       return new Response(JSON.stringify({ error: "Missing dealId or url" }), {
         status: 400,
@@ -57,78 +348,84 @@ Deno.serve(async (req) => {
       });
     }
 
+    const { data: deal, error: dealError } = await adminClient
+      .from("deals")
+      .select("id, source")
+      .eq("id", dealId)
+      .eq("user_id", user.id)
+      .single();
+
+    if (dealError || !deal) {
+      return new Response(JSON.stringify({ error: "Deal not found" }), {
+        status: 404,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    const captureJob = await prepareCaptureJob(
+      adminClient,
+      dealId,
+      user.id,
+      url,
+      requestBody?.jobId?.trim(),
+    );
+    scheduledJobId = captureJob.id;
+    scheduledDealId = dealId;
+
+    await adminClient
+      .from("deals")
+      .update({ status: "scraping", updated_at: new Date().toISOString() })
+      .eq("id", dealId);
+
     if (!captureServiceUrl || !captureServiceApiKey) {
-      await adminClient.from("deals").update({ status: "error", updated_at: new Date().toISOString() }).eq("id", dealId);
+      const errorMessage = "DocSend capture service is not configured";
+      await markCaptureFailure(supabaseUrl, supabaseServiceKey, dealId, captureJob.id, errorMessage);
       return new Response(
-        JSON.stringify({ error: "DocSend capture service is not configured" }),
+        JSON.stringify({ error: errorMessage }),
         { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
 
-    // Insert capture job into queue
-    const { data: job, error: jobError } = await adminClient
-      .from("capture_jobs")
-      .insert({
-        deal_id: dealId,
-        user_id: user.id,
-        url,
-        status: "pending",
-      })
-      .select()
-      .single();
-
-    if (jobError) {
-      throw new Error(`Failed to create capture job: ${jobError.message}`);
-    }
-
-    console.log(`Created capture job ${job.id} for deal ${dealId}`);
-
-    // Build callback URL pointing to docsend-callback edge function
-    const callbackUrl = `${supabaseUrl}/functions/v1/docsend-callback`;
-
-    // Fire async capture request (don't await the full capture — just send it)
-    // The capture service will POST to callbackUrl when done.
-    fetch(`${captureServiceUrl}/capture-async`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "X-API-Key": captureServiceApiKey,
-      },
-      body: JSON.stringify({
-        url,
-        max_pages: 50,
-        callback_url: callbackUrl,
-        job_id: job.id,
-        deal_id: dealId,
-        user_id: user.id,
-        service_role_key: supabaseServiceKey,
-      }),
-    }).catch((err) => {
-      console.error(`Failed to fire async capture for job ${job.id}:`, err);
+    const backgroundTask = processCaptureInBackground({
+      captureServiceApiKey,
+      captureServiceUrl,
+      dealId,
+      dealSource: deal.source,
+      gateEmail,
+      jobId: captureJob.id,
+      maxPages,
+      supabaseServiceKey,
+      supabaseUrl,
+      url,
+      userId: user.id,
+    }).catch(async (error) => {
+      const message = error instanceof Error ? error.message : "Unknown capture error";
+      console.error(`run-docsend-capture background error for job ${captureJob.id}:`, error);
+      if (error instanceof ProcessDeckHandoffError) {
+        return;
+      }
+      await markCaptureFailure(supabaseUrl, supabaseServiceKey, dealId, captureJob.id, message);
     });
 
-    // Update job status to processing
-    await adminClient
-      .from("capture_jobs")
-      .update({ status: "processing", updated_at: new Date().toISOString() })
-      .eq("id", job.id);
-
-    console.log(`Fired async capture for job ${job.id}, returning immediately`);
+    scheduleBackgroundTask(backgroundTask);
 
     return new Response(
-      JSON.stringify({ success: true, dealId, jobId: job.id }),
+      JSON.stringify({ success: true, dealId, jobId: captureJob.id, scheduled: true }),
       { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
   } catch (error) {
     console.error("run-docsend-capture error:", error);
 
-    try {
-      const { dealId } = await req.clone().json().catch(() => ({ dealId: null }));
-      if (dealId) {
-        const adminClient = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
-        await adminClient.from("deals").update({ status: "error", updated_at: new Date().toISOString() }).eq("id", dealId);
-      }
-    } catch { /* best effort */ }
+    if (scheduledDealId) {
+      const message = error instanceof Error ? error.message : "Unknown error";
+      await markCaptureFailure(
+        Deno.env.get("SUPABASE_URL")!,
+        Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
+        scheduledDealId,
+        scheduledJobId,
+        message,
+      );
+    }
 
     const message = error instanceof Error ? error.message : "Unknown error";
     return new Response(JSON.stringify({ error: message }), {
