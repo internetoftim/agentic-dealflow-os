@@ -607,9 +607,7 @@ Deno.serve(async (req) => {
                 image_url: { url: `data:application/pdf;base64,${base64}`, detail: "low" },
               });
             }
-            if (totalPages > maxPages) {
-              console.log(`Multimodal: encoded ${maxPages}/${totalPages} pages (capped)`);
-            }
+            console.log(`Multimodal: encoded all ${totalPages} pages`);
             // Release PDF buffer after encoding
             arrayBuffer = null;
           } catch (e) {
