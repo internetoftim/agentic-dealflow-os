@@ -367,7 +367,7 @@ Deno.serve(async (req) => {
     }
 
     const body = await req.json();
-    const { dealId, storagePath, resumeFrom, localExtracted, skipCompression } = body;
+    const { dealId, storagePath, resumeFrom, localExtracted } = body;
     if (!dealId || !storagePath) {
       return new Response(JSON.stringify({ error: "Missing dealId or storagePath" }), {
         status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
@@ -403,110 +403,90 @@ Deno.serve(async (req) => {
       .single();
     const model = settings?.ai_model ?? "gpt-5.4";
 
+    // Download file from storage
+    const { data: fileData, error: downloadError } = await adminClient.storage
+      .from("decks").download(storagePath);
+    if (downloadError || !fileData) {
+      throw new Error(`Failed to download file: ${downloadError?.message}`);
+    }
+
+    let arrayBuffer = await fileData.arrayBuffer();
     const fileName = storagePath.split("/").pop()?.toLowerCase() ?? "";
     const isPptx = fileName.endsWith(".pptx") || fileName.endsWith(".ppt");
     const isPdf = fileName.endsWith(".pdf");
 
-    let arrayBuffer: ArrayBuffer | null = null;
+    // --- STEP 1: Convert PPTX to PDF (if applicable) ---
     let pdfStoragePath = storagePath;
-    let slidesApiText = "";
+    let slidesApiText = ""; // text extracted via Google Slides API during conversion
+    if (isPptx && !shouldSkip("converting")) {
+      if (await checkAborted(adminClient, dealId, "converting")) {
+        await processNextQueued(adminClient, userId, supabaseUrl, supabaseServiceKey);
+        return new Response(JSON.stringify({ success: true, cancelled: true, at: "converting" }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      }
+      await setDealStatus(adminClient, dealId, "converting");
+
+      if (!settings?.google_provider_token) {
+        throw new Error("Google Drive not connected — required for PPTX to PDF conversion");
+      }
+
+      console.log("Converting PPTX to PDF via Google Drive API...");
+      const conversionResult = await convertPptxToPdfViaDrive(
+        arrayBuffer,
+        settings.google_provider_token,
+        fileName
+      );
+      arrayBuffer = conversionResult.pdfBytes.buffer as ArrayBuffer;
+      slidesApiText = conversionResult.slidesText;
+
+      const pdfFileName = fileName.replace(/\.(pptx|ppt)$/i, ".pdf");
+      pdfStoragePath = storagePath.replace(/\.(pptx|ppt)$/i, ".pdf");
+
+      const { error: pdfUploadError } = await adminClient.storage
+        .from("decks")
+        .upload(pdfStoragePath, new Blob([conversionResult.pdfBytes.buffer as ArrayBuffer], { type: "application/pdf" }), {
+          upsert: true,
+        });
+      if (pdfUploadError) {
+        console.warn("Failed to upload converted PDF:", pdfUploadError.message);
+      }
+
+      console.log(`PPTX converted to PDF: ${(conversionResult.pdfBytes.length / (1024 * 1024)).toFixed(1)}MB`);
+    } else if (isPptx) {
+      pdfStoragePath = storagePath.replace(/\.(pptx|ppt)$/i, ".pdf");
+    }
+
+    // --- STEP 2: Compress PDF ---
     let compressedPdf: Uint8Array;
     let pageCount: number;
-
-    if (skipCompression) {
-      // Captured decks: PDF already uploaded by run-docsend-capture. Skip download/compress.
-      // Only download a lightweight copy for text extraction.
-      console.log("skipCompression=true — skipping download/convert/compress for captured deck");
-      pdfStoragePath = storagePath;
-      const { data: dealData } = await adminClient.from("deals").select("pages, deck_size").eq("id", dealId).single();
-      pageCount = dealData?.pages ?? 0;
-
-      // Download for text extraction only (needed for metadata step)
-      const { data: fileData, error: downloadError } = await adminClient.storage
-        .from("decks").download(storagePath);
-      if (downloadError || !fileData) {
-        throw new Error(`Failed to download file for extraction: ${downloadError?.message}`);
+    if (!shouldSkip("compressing")) {
+      if (await checkAborted(adminClient, dealId, "compressing")) {
+        await processNextQueued(adminClient, userId, supabaseUrl, supabaseServiceKey);
+        return new Response(JSON.stringify({ success: true, cancelled: true, at: "compressing" }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
       }
-      compressedPdf = new Uint8Array(await fileData.arrayBuffer());
+      await setDealStatus(adminClient, dealId, "compressing");
+
+      const pdfBytes = new Uint8Array(arrayBuffer);
+      const result = await compressPdfToTarget(pdfBytes);
+      compressedPdf = result.compressed;
+      pageCount = result.pages;
+
+      const { error: compressUploadError } = await adminClient.storage
+        .from("decks")
+        .upload(pdfStoragePath, new Blob([compressedPdf.buffer as ArrayBuffer], { type: "application/pdf" }), { upsert: true });
+      if (compressUploadError) console.warn("Failed to upload compressed PDF:", compressUploadError.message);
+
+      await adminClient.from("deals").update({
+        compressed_size: `${(compressedPdf.length / (1024 * 1024)).toFixed(1)}MB`,
+        pages: pageCount,
+        updated_at: new Date().toISOString(),
+      }).eq("id", dealId);
     } else {
-      // Normal flow: download, convert, compress
-      const { data: fileData, error: downloadError } = await adminClient.storage
-        .from("decks").download(storagePath);
-      if (downloadError || !fileData) {
-        throw new Error(`Failed to download file: ${downloadError?.message}`);
-      }
-
-      arrayBuffer = await fileData.arrayBuffer();
-
-      // --- STEP 1: Convert PPTX to PDF (if applicable) ---
-      if (isPptx && !shouldSkip("converting")) {
-        if (await checkAborted(adminClient, dealId, "converting")) {
-          await processNextQueued(adminClient, userId, supabaseUrl, supabaseServiceKey);
-          return new Response(JSON.stringify({ success: true, cancelled: true, at: "converting" }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
-        }
-        await setDealStatus(adminClient, dealId, "converting");
-
-        if (!settings?.google_provider_token) {
-          throw new Error("Google Drive not connected — required for PPTX to PDF conversion");
-        }
-
-        console.log("Converting PPTX to PDF via Google Drive API...");
-        const conversionResult = await convertPptxToPdfViaDrive(
-          arrayBuffer,
-          settings.google_provider_token,
-          fileName
-        );
-        arrayBuffer = conversionResult.pdfBytes.buffer as ArrayBuffer;
-        slidesApiText = conversionResult.slidesText;
-
-        const pdfFileName = fileName.replace(/\.(pptx|ppt)$/i, ".pdf");
-        pdfStoragePath = storagePath.replace(/\.(pptx|ppt)$/i, ".pdf");
-
-        const { error: pdfUploadError } = await adminClient.storage
-          .from("decks")
-          .upload(pdfStoragePath, new Blob([conversionResult.pdfBytes.buffer as ArrayBuffer], { type: "application/pdf" }), {
-            upsert: true,
-          });
-        if (pdfUploadError) {
-          console.warn("Failed to upload converted PDF:", pdfUploadError.message);
-        }
-
-        console.log(`PPTX converted to PDF: ${(conversionResult.pdfBytes.length / (1024 * 1024)).toFixed(1)}MB`);
-      } else if (isPptx) {
-        pdfStoragePath = storagePath.replace(/\.(pptx|ppt)$/i, ".pdf");
-      }
-
-      // --- STEP 2: Compress PDF ---
-      if (!shouldSkip("compressing")) {
-        if (await checkAborted(adminClient, dealId, "compressing")) {
-          await processNextQueued(adminClient, userId, supabaseUrl, supabaseServiceKey);
-          return new Response(JSON.stringify({ success: true, cancelled: true, at: "compressing" }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
-        }
-        await setDealStatus(adminClient, dealId, "compressing");
-
-        const pdfBytes = new Uint8Array(arrayBuffer!);
-        const result = await compressPdfToTarget(pdfBytes);
-        compressedPdf = result.compressed;
-        pageCount = result.pages;
-
-        const { error: compressUploadError } = await adminClient.storage
-          .from("decks")
-          .upload(pdfStoragePath, new Blob([compressedPdf.buffer as ArrayBuffer], { type: "application/pdf" }), { upsert: true });
-        if (compressUploadError) console.warn("Failed to upload compressed PDF:", compressUploadError.message);
-
-        await adminClient.from("deals").update({
-          compressed_size: `${(compressedPdf.length / (1024 * 1024)).toFixed(1)}MB`,
-          pages: pageCount,
-          updated_at: new Date().toISOString(),
-        }).eq("id", dealId);
-      } else {
-        // Resuming past compression — re-download the already-compressed PDF
-        const { data: existingPdf } = await adminClient.storage.from("decks").download(pdfStoragePath);
-        if (!existingPdf) throw new Error("Cannot find compressed PDF for resume");
-        compressedPdf = new Uint8Array(await existingPdf.arrayBuffer());
-        const { data: dealData } = await adminClient.from("deals").select("pages").eq("id", dealId).single();
-        pageCount = dealData?.pages ?? 0;
-      }
+      // Resuming past compression — re-download the already-compressed PDF
+      const { data: existingPdf } = await adminClient.storage.from("decks").download(pdfStoragePath);
+      if (!existingPdf) throw new Error("Cannot find compressed PDF for resume");
+      compressedPdf = new Uint8Array(await existingPdf.arrayBuffer());
+      const { data: dealData } = await adminClient.from("deals").select("pages").eq("id", dealId).single();
+      pageCount = dealData?.pages ?? 0;
     }
 
     // --- STEP 3: Extracting metadata ---
