@@ -13,6 +13,7 @@ import LoginPage from "@/pages/LoginPage";
 import NotFound from "@/pages/NotFound";
 import IngestRelay from "@/pages/IngestRelay";
 import PublicIntake from "@/pages/PublicIntake";
+import InboundPage from "@/pages/InboundPage";
 
 const queryClient = new QueryClient();
 
@@ -49,6 +50,7 @@ const App = () => (
                       <Route path="/" element={<DealWorkspace />} />
                       <Route path="/pipeline" element={<KanbanPipeline />} />
                       <Route path="/data-room" element={<DataRoom />} />
+                      <Route path="/inbound" element={<InboundPage />} />
                       <Route path="/settings" element={<SettingsPage />} />
                       <Route path="*" element={<NotFound />} />
                     </Routes>
