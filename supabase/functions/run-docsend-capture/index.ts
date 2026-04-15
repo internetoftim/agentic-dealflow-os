@@ -220,7 +220,7 @@ async function processCaptureInBackground(args: {
 
   const { error: uploadError } = await adminClient.storage
     .from("decks")
-    .upload(storagePath, new Blob([pdfBytes], { type: "application/pdf" }), {
+    .upload(storagePath, new Blob([pdfBytes.buffer as ArrayBuffer], { type: "application/pdf" }), {
       upsert: true,
     });
 
