@@ -225,7 +225,7 @@ async function processCaptureInBackground(args: {
   userId: string;
 }) {
   const adminClient = createClient(args.supabaseUrl, args.supabaseServiceKey);
-  const captureResult = await captureSync({
+  let captureResult = await captureSync({
     apiKey: args.captureServiceApiKey,
     baseUrl: args.captureServiceUrl,
     gateEmail: args.gateEmail,
@@ -234,6 +234,10 @@ async function processCaptureInBackground(args: {
   });
 
   const pdfBytes = pdfBytesFromBase64(captureResult.pdfBase64);
+  // Release the base64 string to free memory before uploading
+  (captureResult as any).pdfBase64 = null;
+  captureResult = null as any;
+
   const sizeMB = `${(pdfBytes.length / (1024 * 1024)).toFixed(1)}MB`;
   const storagePath = `${args.userId}/${args.dealId}/deck.pdf`;
   const updatedAt = new Date().toISOString();
