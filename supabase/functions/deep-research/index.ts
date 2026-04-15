@@ -46,25 +46,16 @@ Deno.serve(async (req) => {
     }
 
     const adminClient = createClient(supabaseUrl, supabaseServiceKey);
+    const userClient = createClient(supabaseUrl, supabaseAnonKey, {
+      global: { headers: { Authorization: authHeader } },
+    });
 
-    // Support both user JWT and service-role key calls
-    const isServiceRole = authHeader === `Bearer ${supabaseServiceKey}`;
-    let userId: string;
-    if (isServiceRole) {
-      // Called internally from process-deck; userId will come from the deal record
-      userId = "";
-    } else {
-      const userClient = createClient(supabaseUrl, supabaseAnonKey, {
-        global: { headers: { Authorization: authHeader } },
+    const { data: { user }, error: userError } = await userClient.auth.getUser();
+    if (userError || !user) {
+      return new Response(JSON.stringify({ error: "Unauthorized" }), {
+        status: 401,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
-      const { data: { user }, error: userError } = await userClient.auth.getUser();
-      if (userError || !user) {
-        return new Response(JSON.stringify({ error: "Unauthorized" }), {
-          status: 401,
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        });
-      }
-      userId = user.id;
     }
 
     const { dealId } = await req.json();
@@ -76,16 +67,12 @@ Deno.serve(async (req) => {
     }
 
     // Fetch deal
-    let dealQuery = adminClient.from("deals").select("*").eq("id", dealId);
-    if (!isServiceRole) {
-      dealQuery = dealQuery.eq("user_id", userId);
-    }
-    const { data: deal, error: dealError } = await dealQuery.single();
-    if (!isServiceRole && deal) {
-      userId = deal.user_id; // already set
-    } else if (isServiceRole && deal) {
-      userId = deal.user_id; // get userId from deal record
-    }
+    const { data: deal, error: dealError } = await adminClient
+      .from("deals")
+      .select("*")
+      .eq("id", dealId)
+      .eq("user_id", user.id)
+      .single();
 
     if (dealError || !deal) {
       throw new Error("Deal not found");
@@ -95,7 +82,7 @@ Deno.serve(async (req) => {
     const { data: settings } = await adminClient
       .from("user_settings")
       .select("ai_model, deep_research_provider")
-      .eq("user_id", userId)
+      .eq("user_id", user.id)
       .single();
 
     const provider = "firecrawl";
@@ -487,7 +474,7 @@ Extract the company's official website URL and LinkedIn company page URL using t
       .from("deals")
       .update(updatePayload)
       .eq("id", dealId)
-      .eq("user_id", userId);
+      .eq("user_id", user.id);
 
     // Step 4: Extract key people (GPT web search primary, Firecrawl fallback)
     let people: { name: string; title: string | null; linkedin_url: string | null }[] = [];
@@ -623,7 +610,7 @@ Use web_search to find their names, titles, and LinkedIn profile URLs. Then call
 
       const rows = people.slice(0, 10).map(p => ({
         deal_id: dealId,
-        user_id: userId,
+        user_id: user.id,
         name: p.name,
         title: p.title,
         linkedin_url: p.linkedin_url,
