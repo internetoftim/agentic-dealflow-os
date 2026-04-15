@@ -1,4 +1,5 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { captureSync } from "../_shared/docsend-capture-client.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -7,9 +8,10 @@ const corsHeaders = {
 };
 
 /**
- * Test Capture — bypasses user auth to test the capture service directly.
+ * Test Capture — bypasses user auth to smoke-test the capture service directly.
  * Accepts: { url: string }
- * Creates a deal, inserts a capture job, and fires the async capture request.
+ * Creates a deal and capture job, then runs the same sync capture client used by
+ * run-docsend-capture without handing off to process-deck.
  */
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
@@ -76,43 +78,69 @@ Deno.serve(async (req) => {
     if (jobError) throw new Error(`Failed to create job: ${jobError.message}`);
     console.log(`Created capture job: ${job.id}`);
 
-    // Build callback URL
-    const callbackUrl = `${supabaseUrl}/functions/v1/docsend-callback`;
-
-    // Fire synchronous capture
-    console.log(`Firing capture to ${captureServiceUrl}/capture`);
-    const captureRes = await fetch(`${captureServiceUrl}/capture`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "X-API-Key": captureServiceApiKey,
-      },
-      body: JSON.stringify({
-        url,
-        max_pages: 50,
-      }),
-    });
-
-    const captureStatus = captureRes.status;
-    const captureBody = await captureRes.text();
-    console.log(`Capture service responded: ${captureStatus} — ${captureBody}`);
-
-    // Update job to processing
+    // Update job to processing before invoking the capture service.
     await adminClient
       .from("capture_jobs")
       .update({ status: "processing", updated_at: new Date().toISOString() })
       .eq("id", job.id);
 
-    return new Response(
-      JSON.stringify({
-        success: true,
-        dealId: deal.id,
-        jobId: job.id,
-        captureServiceStatus: captureStatus,
-        captureServiceResponse: captureBody,
-      }),
-      { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-    );
+    console.log(`Firing capture to ${captureServiceUrl}/capture`);
+
+    try {
+      const captureResult = await captureSync({
+        apiKey: captureServiceApiKey,
+        baseUrl: captureServiceUrl,
+        maxPages: 50,
+        url,
+      });
+
+      const pdfSizeBytes = Uint8Array.from(
+        atob(captureResult.pdfBase64),
+        (char) => char.charCodeAt(0),
+      ).length;
+      const deckSize = `${(pdfSizeBytes / (1024 * 1024)).toFixed(1)}MB`;
+
+      await adminClient
+        .from("capture_jobs")
+        .update({ status: "completed", error_message: null, updated_at: new Date().toISOString() })
+        .eq("id", job.id);
+
+      await adminClient
+        .from("deals")
+        .update({
+          deck_size: deckSize,
+          pages: captureResult.pageCount || 0,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", deal.id);
+
+      return new Response(
+        JSON.stringify({
+          success: true,
+          dealId: deal.id,
+          jobId: job.id,
+          title: captureResult.title,
+          pageCount: captureResult.pageCount,
+          deckSize,
+        }),
+        { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    } catch (captureError) {
+      const message = captureError instanceof Error ? captureError.message : "Capture failed";
+
+      await adminClient
+        .from("capture_jobs")
+        .update({ status: "failed", error_message: message, updated_at: new Date().toISOString() })
+        .eq("id", job.id);
+
+      await adminClient
+        .from("deals")
+        .update({ status: "error", updated_at: new Date().toISOString() })
+        .eq("id", deal.id);
+
+      throw captureError;
+    }
+
   } catch (error) {
     console.error("test-capture error:", error);
     const message = error instanceof Error ? error.message : "Unknown error";

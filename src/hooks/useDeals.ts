@@ -39,6 +39,23 @@ export interface Deal {
   updated_at: string;
 }
 
+export interface CaptureJob {
+  created_at: string;
+  deal_id: string;
+  error_message: string | null;
+  id: string;
+  status: string;
+  updated_at: string;
+  url: string;
+  user_id: string;
+}
+
+export const DOC_VIEWER_SOURCES = ["docsend", "pandadoc", "papermark"] as const;
+
+function isDocViewerSource(source?: string) {
+  return DOC_VIEWER_SOURCES.includes((source ?? "") as (typeof DOC_VIEWER_SOURCES)[number]);
+}
+
 /** Active processing statuses (not terminal) */
 export const PROCESSING_STATUSES = ["uploading", "converting", "compressing", "scraping", "extracting", "searching-website", "syncing"];
 
@@ -119,6 +136,30 @@ export function useSources(dealId?: string) {
   });
 }
 
+export function useLatestCaptureJob(dealId?: string, source?: string) {
+  const { user } = useAuth();
+
+  return useQuery({
+    queryKey: ["latest-capture-job", dealId],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("capture_jobs")
+        .select("*")
+        .eq("deal_id", dealId!)
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (error) throw error;
+      return (data ?? null) as CaptureJob | null;
+    },
+    enabled: !!user && !!dealId && isDocViewerSource(source),
+    refetchInterval: (query) => {
+      const job = query.state.data as CaptureJob | null | undefined;
+      return job && ["pending", "processing"].includes(job.status) ? 3000 : false;
+    },
+  });
+}
+
 export function useDocsendUrl(dealId?: string, source?: string) {
   const { user } = useAuth();
   return useQuery({
@@ -128,12 +169,13 @@ export function useDocsendUrl(dealId?: string, source?: string) {
         .from("capture_jobs")
         .select("url")
         .eq("deal_id", dealId!)
+        .order("created_at", { ascending: false })
         .limit(1)
-        .single();
-      if (error) return null;
+        .maybeSingle();
+      if (error) throw error;
       return data?.url ?? null;
     },
-    enabled: !!user && !!dealId && ["docsend", "pandadoc", "papermark"].includes(source ?? ""),
+    enabled: !!user && !!dealId && isDocViewerSource(source),
   });
 }
 
@@ -288,6 +330,24 @@ export function useCreateDealWithUpload() {
   });
 }
 
+type RunDocsendCaptureArgs = {
+  dealId: string;
+  gateEmail?: string | null;
+  jobId?: string;
+  maxPages?: number;
+  url: string;
+};
+
+async function runDocsendCapture(args: RunDocsendCaptureArgs) {
+  const { data, error } = await supabase.functions.invoke("run-docsend-capture", {
+    body: args,
+  });
+
+  if (error) throw error;
+  if (data?.error) throw new Error(data.error);
+  return data;
+}
+
 export function useProcessDocsend() {
   const queryClient = useQueryClient();
   const { user } = useAuth();
@@ -306,23 +366,38 @@ export function useProcessDocsend() {
 
       const dealId = data.dealId;
       queryClient.invalidateQueries({ queryKey: ["deals"] });
+      queryClient.invalidateQueries({ queryKey: ["latest-capture-job", dealId] });
 
-      // Step 2: Fire capture in background (don't await — frontend polls status)
-      supabase.functions.invoke("run-docsend-capture", {
-        body: { dealId, url: data.url },
-      }).then((res) => {
-        if (res.error) console.error("run-docsend-capture error:", res.error);
-        if (res.data?.error) console.error("run-docsend-capture error:", res.data.error);
-        queryClient.invalidateQueries({ queryKey: ["deals"] });
-      }).catch((err) => {
-        console.error("run-docsend-capture failed:", err);
-        queryClient.invalidateQueries({ queryKey: ["deals"] });
+      // Step 2: Schedule capture and return once the background orchestration is accepted.
+      await runDocsendCapture({
+        dealId,
+        jobId: data.jobId,
+        url: data.url,
       });
 
       return data;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["deals"] });
+      queryClient.invalidateQueries({ queryKey: ["latest-capture-job"] });
+    },
+  });
+}
+
+export function useRetryDocsendCapture() {
+  const queryClient = useQueryClient();
+  const { user } = useAuth();
+
+  return useMutation({
+    mutationFn: async ({ dealId, url }: { dealId: string; url: string }) => {
+      if (!user) throw new Error("Not authenticated");
+      return await runDocsendCapture({ dealId, url });
+    },
+    onSuccess: (_data, variables) => {
+      queryClient.invalidateQueries({ queryKey: ["deals"] });
+      queryClient.invalidateQueries({ queryKey: ["latest-capture-job", variables.dealId] });
+      queryClient.invalidateQueries({ queryKey: ["capture-job-url", variables.dealId] });
+      queryClient.invalidateQueries({ queryKey: ["sources", variables.dealId] });
     },
   });
 }

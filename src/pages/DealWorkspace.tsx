@@ -1,6 +1,6 @@
 import { useState, useCallback, useRef, useEffect } from "react";
 import { Upload, Link, Cog, Check, Search, Send, FileText, Globe, Layers, Square, Linkedin, Loader2, FileUp, CircleDashed, CircleCheck, Circle, Pause, Clock, Download, Mail, ExternalLink, Users } from "lucide-react";
-import { useDeals, useSources, useDocsendUrl, useCreateDealWithUpload, useProcessDocsend, useCancelDeal, WORKFLOW_STEPS, PROCESSING_STATUSES, type WorkflowStatus } from "@/hooks/useDeals";
+import { useDeals, useSources, useLatestCaptureJob, useCreateDealWithUpload, useProcessDocsend, useRetryDocsendCapture, useCancelDeal, WORKFLOW_STEPS, PROCESSING_STATUSES, DOC_VIEWER_SOURCES } from "@/hooks/useDeals";
 import { Button } from "@/components/ui/button";
 import { useDealChat } from "@/hooks/useDealChat";
 import { useGenerateMemo } from "@/hooks/useGenerateMemo";
@@ -19,16 +19,21 @@ export default function DealWorkspace() {
   const chatEndRef = useRef<HTMLDivElement>(null);
 
   const { data: deals } = useDeals();
-  const { data: sources } = useSources(selectedDealId);
-  const activeDealForUrl = deals?.find((d) => d.id === selectedDealId) ?? deals?.[0];
-  const { data: docsendUrl } = useDocsendUrl(activeDealForUrl?.id, activeDealForUrl?.source);
+  const activeDeal = deals?.find((d) => d.id === selectedDealId) ?? deals?.[0];
+  const { data: sources } = useSources(activeDeal?.id);
   const createDeal = useCreateDealWithUpload();
   const processDocsend = useProcessDocsend();
+  const retryDocsendCapture = useRetryDocsendCapture();
   const cancelDeal = useCancelDeal();
   const generateMemo = useGenerateMemo();
 
-  const activeDeal = deals?.find((d) => d.id === selectedDealId) ?? deals?.[0];
+  const { data: latestCaptureJob } = useLatestCaptureJob(activeDeal?.id, activeDeal?.source);
   const { messages, isStreaming, send, stop } = useDealChat(activeDeal?.id);
+  const isDocViewerDeal = DOC_VIEWER_SOURCES.includes((activeDeal?.source ?? "") as (typeof DOC_VIEWER_SOURCES)[number]);
+  const docsendUrl = latestCaptureJob?.url ?? null;
+  const isCloudCaptureActive = activeDeal?.status === "scraping" && ["pending", "processing"].includes(latestCaptureJob?.status ?? "");
+  const isCloudCaptureFailed = latestCaptureJob?.status === "failed";
+  const captureFailureMessage = latestCaptureJob?.error_message?.trim() || null;
 
   // Fetch key people for active deal
   const { data: dealPeople } = useQuery({
@@ -94,7 +99,12 @@ export default function DealWorkspace() {
     const trimmed = docSendUrl.trim();
     if (!trimmed) return;
     toast.promise(
-      processDocsend.mutateAsync(trimmed).then(() => setDocSendUrl("")),
+      processDocsend.mutateAsync(trimmed).then((result) => {
+        setDocSendUrl("");
+        if (result?.dealId) {
+          setSelectedDealId(result.dealId);
+        }
+      }),
       {
         loading: "Starting deck capture…",
         success: "Capture started — this may take a minute. Progress will update automatically.",
@@ -102,6 +112,22 @@ export default function DealWorkspace() {
       }
     );
   }, [docSendUrl, processDocsend]);
+
+  const handleRetryCapture = useCallback(() => {
+    if (!activeDeal?.id || !latestCaptureJob?.url) return;
+
+    toast.promise(
+      retryDocsendCapture.mutateAsync({
+        dealId: activeDeal.id,
+        url: latestCaptureJob.url,
+      }),
+      {
+        loading: "Retrying cloud capture…",
+        success: "Cloud capture restarted — progress will update automatically.",
+        error: (err) => `Retry failed: ${err.message}`,
+      }
+    );
+  }, [activeDeal?.id, latestCaptureJob?.url, retryDocsendCapture]);
 
   const tabs = [
     { key: "chat" as const, label: "Chat", icon: Send },
@@ -194,12 +220,46 @@ export default function DealWorkspace() {
                   <span className="text-xs font-medium text-destructive">Cancelled</span>
                 </div>
               ) : activeDeal.status === "error" ? (
-                <div className="flex items-center gap-2">
-                  <Circle className="h-3.5 w-3.5 text-destructive shrink-0" />
-                  <span className="text-xs font-medium text-destructive">Processing failed</span>
+                <div className="flex flex-col gap-2">
+                  <div className="flex items-start gap-2">
+                    <Circle className="h-3.5 w-3.5 text-destructive shrink-0 mt-0.5" />
+                    <div className="min-w-0">
+                      <p className="text-xs font-medium text-destructive">
+                        {isCloudCaptureFailed ? "Cloud capture failed" : "Processing failed"}
+                      </p>
+                      {captureFailureMessage && (
+                        <p className="text-[11px] text-muted-foreground break-words">{captureFailureMessage}</p>
+                      )}
+                    </div>
+                  </div>
+                  {isCloudCaptureFailed && latestCaptureJob?.url && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="h-7 text-[11px] gap-1 px-2 w-fit"
+                      onClick={handleRetryCapture}
+                      disabled={retryDocsendCapture.isPending}
+                    >
+                      {retryDocsendCapture.isPending ? <Loader2 className="h-3 w-3 animate-spin" /> : <ExternalLink className="h-3 w-3" />}
+                      Retry Cloud Capture
+                    </Button>
+                  )}
                 </div>
               ) : (
                 <>
+                  {isCloudCaptureActive && (
+                    <div className="flex items-center gap-2 rounded-md bg-accent/40 px-2 py-1.5 mb-1">
+                      <Loader2 className="h-3.5 w-3.5 text-primary animate-spin shrink-0" />
+                      <div className="min-w-0">
+                        <p className="text-xs font-medium text-foreground">Cloud capture in progress</p>
+                        <p className="text-[11px] text-muted-foreground">
+                          {latestCaptureJob?.status === "pending"
+                            ? "Preparing the Cloud Run PDF capture job…"
+                            : "Rendering the deck to PDF via the backend service…"}
+                        </p>
+                      </div>
+                    </div>
+                  )}
                   {WORKFLOW_STEPS.map((step) => {
                     const stepIndex = WORKFLOW_STEPS.findIndex(s => s.key === step.key);
                     const currentIndex = WORKFLOW_STEPS.findIndex(s => s.key === activeDeal.status);
@@ -223,8 +283,8 @@ export default function DealWorkspace() {
                       isActive = activeDeal.status === step.key;
                     }
 
-                    const isPending = !isCompleted && !isActive;
                     const allDone = isCompleted;
+                    const stepLabel = step.key === "scraping" && isDocViewerDeal ? "Cloud Capture" : step.label;
 
                     // For Drive sync step, link to Google Drive if available
                     const isDriveStep = step.key === "syncing" && activeDeal.gdrive_file_id;
@@ -242,7 +302,7 @@ export default function DealWorkspace() {
                         <span className={`text-xs font-medium ${
                           allDone || isCompleted ? "text-success" : isActive ? "text-primary" : "text-muted-foreground/30"
                         }`}>
-                          {step.label}
+                          {stepLabel}
                         </span>
                         {driveUrl && allDone && (
                           <ExternalLink className="h-3 w-3 text-success ml-auto" />
@@ -342,7 +402,7 @@ export default function DealWorkspace() {
             </button>
           )}
           {/* Doc viewer source link */}
-          {["docsend", "pandadoc", "papermark"].includes(activeDeal?.source ?? "") && docsendUrl && (
+          {isDocViewerDeal && docsendUrl && (
             <a
               href={docsendUrl}
               target="_blank"
@@ -351,6 +411,16 @@ export default function DealWorkspace() {
             >
               <ExternalLink className="h-3 w-3" /> {activeDeal?.source === "docsend" ? "DocSend" : activeDeal?.source === "pandadoc" ? "PandaDoc" : "Papermark"} Link
             </a>
+          )}
+          {isCloudCaptureActive && (
+            <span className="inline-flex items-center gap-1.5 rounded-full bg-warning-muted px-2.5 py-1 text-xs font-medium text-warning">
+              <Loader2 className="h-3 w-3 animate-spin" /> Cloud capturing…
+            </span>
+          )}
+          {isCloudCaptureFailed && captureFailureMessage && (
+            <span className="inline-flex items-center gap-1.5 rounded-full bg-destructive/10 px-2.5 py-1 text-xs font-medium text-destructive">
+              <Circle className="h-3 w-3" /> Capture failed
+            </span>
           )}
           {activeDeal?.website ? (
             <a
