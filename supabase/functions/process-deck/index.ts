@@ -420,7 +420,11 @@ Deno.serve(async (req) => {
     }
 
     // --- STEP 1: Convert PPTX to PDF (if applicable) ---
+    let pdfStoragePath = storagePath;
+    let slidesApiText = "";
     if (isPptx && !shouldSkip("converting") && arrayBuffer) {
+      if (await checkAborted(adminClient, dealId, "converting")) {
+        await processNextQueued(adminClient, userId, supabaseUrl, supabaseServiceKey);
         return new Response(JSON.stringify({ success: true, cancelled: true, at: "converting" }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
       }
       await setDealStatus(adminClient, dealId, "converting");
@@ -438,7 +442,6 @@ Deno.serve(async (req) => {
       arrayBuffer = conversionResult.pdfBytes.buffer as ArrayBuffer;
       slidesApiText = conversionResult.slidesText;
 
-      const pdfFileName = fileName.replace(/\.(pptx|ppt)$/i, ".pdf");
       pdfStoragePath = storagePath.replace(/\.(pptx|ppt)$/i, ".pdf");
 
       const { error: pdfUploadError } = await adminClient.storage
@@ -456,16 +459,24 @@ Deno.serve(async (req) => {
     }
 
     // --- STEP 2: Compress PDF ---
-    let compressedPdf: Uint8Array;
+    let compressedPdf: Uint8Array | null = null;
     let pageCount: number;
-    if (!shouldSkip("compressing")) {
+
+    if (skipCompression) {
+      // Captured decks (DocSend/Papermark): PDF already in storage, skip download+recompress
+      console.log("Skipping compression — captured deck already stored");
+      const { data: dealData } = await adminClient.from("deals").select("pages, deck_size").eq("id", dealId).single();
+      pageCount = dealData?.pages ?? 0;
+      // Briefly show step for UI consistency
+      await setDealStatus(adminClient, dealId, "compressing");
+    } else if (!shouldSkip("compressing")) {
       if (await checkAborted(adminClient, dealId, "compressing")) {
         await processNextQueued(adminClient, userId, supabaseUrl, supabaseServiceKey);
         return new Response(JSON.stringify({ success: true, cancelled: true, at: "compressing" }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
       }
       await setDealStatus(adminClient, dealId, "compressing");
 
-      const pdfBytes = new Uint8Array(arrayBuffer);
+      const pdfBytes = new Uint8Array(arrayBuffer!);
       const result = await compressPdfToTarget(pdfBytes);
       compressedPdf = result.compressed;
       pageCount = result.pages;
