@@ -203,6 +203,32 @@ export default function SettingsPage() {
               </button>
             ))}
           </div>
+
+          {/* Text-only vs Multimodal toggle */}
+          <div className="mt-4 flex items-center justify-between rounded-md border border-border p-3">
+            <div>
+              <p className="text-sm font-medium text-foreground">Text-only LLM mode</p>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                When off, deck pages are sent as images to the LLM (multimodal). When on, only extracted text is sent (faster, less memory).
+              </p>
+            </div>
+            <Toggle
+              checked={textOnlyLlm}
+              onChange={async (v) => {
+                if (!user) return;
+                setTextOnlyLlm(v);
+                const { error } = await supabase
+                  .from("user_settings")
+                  .upsert({ user_id: user.id, text_only_llm: v } as any, { onConflict: "user_id" });
+                if (error) {
+                  toast.error("Failed to save preference");
+                  setTextOnlyLlm(!v);
+                } else {
+                  toast.success(v ? "Text-only mode enabled" : "Multimodal mode enabled");
+                }
+              }}
+            />
+          </div>
         </div>
       </section>
 
