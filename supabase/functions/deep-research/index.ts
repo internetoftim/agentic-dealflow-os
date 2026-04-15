@@ -76,12 +76,16 @@ Deno.serve(async (req) => {
     }
 
     // Fetch deal
-    const { data: deal, error: dealError } = await adminClient
-      .from("deals")
-      .select("*")
-      .eq("id", dealId)
-      .eq("user_id", user.id)
-      .single();
+    let dealQuery = adminClient.from("deals").select("*").eq("id", dealId);
+    if (!isServiceRole) {
+      dealQuery = dealQuery.eq("user_id", userId);
+    }
+    const { data: deal, error: dealError } = await dealQuery.single();
+    if (!isServiceRole && deal) {
+      userId = deal.user_id; // already set
+    } else if (isServiceRole && deal) {
+      userId = deal.user_id; // get userId from deal record
+    }
 
     if (dealError || !deal) {
       throw new Error("Deal not found");
