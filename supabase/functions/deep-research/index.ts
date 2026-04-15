@@ -215,7 +215,7 @@ Deno.serve(async (req) => {
             || cbMarkdown.match(/\$(\d[\d,.]*[BMK])\s*(total|funding)/i);
           if (fundingMatch) {
             fundingTotal = fundingMatch[1].trim();
-            if (!fundingTotal.startsWith("$")) fundingTotal = "$" + fundingTotal;
+            if (fundingTotal && !fundingTotal.startsWith("$")) fundingTotal = "$" + fundingTotal;
           }
 
           const roundMatch = cbMarkdown.match(/Last Funding[:\s]*(Series [A-Z\d]+|Seed|Pre-Seed|Grant|Debt|Convertible|Angel|IPO|Venture)/i)

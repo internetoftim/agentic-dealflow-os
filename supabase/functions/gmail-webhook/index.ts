@@ -355,7 +355,7 @@ Deno.serve(async (req) => {
 
           const { error: uploadError } = await adminClient.storage
             .from("decks")
-            .upload(storagePath, new Blob([fileBytes], { type: mimeType }), { upsert: true });
+            .upload(storagePath, new Blob([fileBytes.buffer as ArrayBuffer], { type: mimeType }), { upsert: true });
 
           if (uploadError) {
             console.error(`Upload failed:`, uploadError);

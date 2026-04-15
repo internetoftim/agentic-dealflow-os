@@ -252,7 +252,7 @@ Deno.serve(async (req) => {
         const token = await getValidToken(
           adminClient,
           user_id,
-          userSettings.token,
+          userSettings.google_provider_token,
           userSettings.google_provider_refresh_token
         );
         if (!token) {
@@ -347,7 +347,7 @@ Deno.serve(async (req) => {
                 .from("decks")
                 .upload(
                   storagePath,
-                  new Blob([fileBytes], { type: mimeType }),
+                  new Blob([fileBytes.buffer as ArrayBuffer], { type: mimeType }),
                   { upsert: true }
                 );
 
