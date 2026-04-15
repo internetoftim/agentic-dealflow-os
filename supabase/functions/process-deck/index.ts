@@ -821,6 +821,41 @@ Deno.serve(async (req) => {
       }
     }
 
+    // --- STEP 4b: Compress PDF before Drive sync (lightweight, at the end) ---
+    if (!shouldSkip("compressing")) {
+      if (await checkAborted(adminClient, dealId, "compressing")) {
+        await processNextQueued(adminClient, userId, supabaseUrl, supabaseServiceKey);
+        return new Response(JSON.stringify({ success: true, cancelled: true, at: "compressing" }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      }
+      await setDealStatus(adminClient, dealId, "compressing");
+
+      try {
+        const { data: pdfFile } = await adminClient.storage.from("decks").download(pdfStoragePath);
+        if (pdfFile) {
+          const pdfBuffer = await pdfFile.arrayBuffer();
+          const originalSize = pdfBuffer.byteLength;
+          const result = await compressPdfToTarget(new Uint8Array(pdfBuffer));
+          const savings = ((1 - result.compressed.length / originalSize) * 100).toFixed(0);
+          console.log(`Compressed PDF: ${(originalSize / (1024 * 1024)).toFixed(1)}MB → ${(result.compressed.length / (1024 * 1024)).toFixed(1)}MB (${savings}% reduction)`);
+
+          // Only re-upload if compression actually saved space
+          if (result.compressed.length < originalSize) {
+            await adminClient.storage
+              .from("decks")
+              .upload(pdfStoragePath, new Blob([result.compressed.buffer as ArrayBuffer], { type: "application/pdf" }), { upsert: true });
+          }
+
+          await adminClient.from("deals").update({
+            compressed_size: `${(result.compressed.length / (1024 * 1024)).toFixed(1)}MB`,
+            pages: result.pages || pageCount,
+            updated_at: new Date().toISOString(),
+          }).eq("id", dealId);
+        }
+      } catch (e) {
+        console.warn("PDF compression failed (non-fatal):", e);
+      }
+    }
+
     // --- STEP 5: Sync to Google Drive ---
     if (!shouldSkip("syncing")) {
       if (await checkAborted(adminClient, dealId, "syncing")) {
