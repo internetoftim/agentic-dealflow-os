@@ -180,7 +180,7 @@ async function handOffToProcessDeck(
       Authorization: `Bearer ${supabaseServiceKey}`,
       "Content-Type": "application/json",
     },
-    body: JSON.stringify({ dealId, storagePath }),
+    body: JSON.stringify({ dealId, storagePath, skipCompression: true }),
   });
 
   if (!response.ok) {
