@@ -391,7 +391,7 @@ Deno.serve(async (req) => {
     }
 
     // Determine which steps to skip when resuming
-    const stepOrder = ["converting", "compressing", "extracting", "searching-website", "syncing", "memo-ready"];
+    const stepOrder = ["converting", "extracting", "searching-website", "compressing", "syncing", "memo-ready"];
     const resumeIdx = resumeFrom ? stepOrder.indexOf(resumeFrom) : -1;
     const shouldSkip = (step: string) => resumeFrom ? stepOrder.indexOf(step) < resumeIdx : false;
 
@@ -403,26 +403,19 @@ Deno.serve(async (req) => {
       .single();
     const model = settings?.ai_model ?? "gpt-5.4";
 
-    // Download file from storage — skip for captured decks during compression
-    // (we still need it for text extraction, but we'll download later in a lighter path)
-    let arrayBuffer: ArrayBuffer | null = null;
     const fileName = storagePath.split("/").pop()?.toLowerCase() ?? "";
     const isPptx = fileName.endsWith(".pptx") || fileName.endsWith(".ppt");
     const isPdf = fileName.endsWith(".pdf");
 
-    if (!skipCompression) {
-      const { data: fileData, error: downloadError } = await adminClient.storage
-        .from("decks").download(storagePath);
-      if (downloadError || !fileData) {
-        throw new Error(`Failed to download file: ${downloadError?.message}`);
-      }
-      arrayBuffer = await fileData.arrayBuffer();
-    }
-
-    // --- STEP 1: Convert PPTX to PDF (if applicable) ---
+    // We only download the file when we actually need it — and only once.
+    // For captured decks with pre-extracted text, we skip the download entirely.
+    let arrayBuffer: ArrayBuffer | null = null;
     let pdfStoragePath = storagePath;
     let slidesApiText = "";
-    if (isPptx && !shouldSkip("converting") && arrayBuffer) {
+    let pageCount = 0;
+
+    // --- STEP 1: Convert PPTX to PDF (if applicable) ---
+    if (isPptx && !shouldSkip("converting")) {
       if (await checkAborted(adminClient, dealId, "converting")) {
         await processNextQueued(adminClient, userId, supabaseUrl, supabaseServiceKey);
         return new Response(JSON.stringify({ success: true, cancelled: true, at: "converting" }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
@@ -433,12 +426,19 @@ Deno.serve(async (req) => {
         throw new Error("Google Drive not connected — required for PPTX to PDF conversion");
       }
 
+      // Download PPTX for conversion
+      const { data: fileData, error: downloadError } = await adminClient.storage
+        .from("decks").download(storagePath);
+      if (downloadError || !fileData) throw new Error(`Failed to download file: ${downloadError?.message}`);
+      arrayBuffer = await fileData.arrayBuffer();
+
       console.log("Converting PPTX to PDF via Google Drive API...");
       const conversionResult = await convertPptxToPdfViaDrive(
         arrayBuffer,
         settings.google_provider_token,
         fileName
       );
+      // Release the PPTX buffer, keep only the PDF
       arrayBuffer = conversionResult.pdfBytes.buffer as ArrayBuffer;
       slidesApiText = conversionResult.slidesText;
 
@@ -449,56 +449,16 @@ Deno.serve(async (req) => {
         .upload(pdfStoragePath, new Blob([conversionResult.pdfBytes.buffer as ArrayBuffer], { type: "application/pdf" }), {
           upsert: true,
         });
-      if (pdfUploadError) {
-        console.warn("Failed to upload converted PDF:", pdfUploadError.message);
-      }
+      if (pdfUploadError) console.warn("Failed to upload converted PDF:", pdfUploadError.message);
 
       console.log(`PPTX converted to PDF: ${(conversionResult.pdfBytes.length / (1024 * 1024)).toFixed(1)}MB`);
     } else if (isPptx) {
       pdfStoragePath = storagePath.replace(/\.(pptx|ppt)$/i, ".pdf");
     }
 
-    // --- STEP 2: Compress PDF ---
-    let compressedPdf: Uint8Array | null = null;
-    let pageCount: number;
-
-    if (skipCompression) {
-      // Captured decks (DocSend/Papermark): PDF already in storage, skip download+recompress
-      console.log("Skipping compression — captured deck already stored");
-      const { data: dealData } = await adminClient.from("deals").select("pages, deck_size").eq("id", dealId).single();
-      pageCount = dealData?.pages ?? 0;
-      // Briefly show step for UI consistency
-      await setDealStatus(adminClient, dealId, "compressing");
-    } else if (!shouldSkip("compressing")) {
-      if (await checkAborted(adminClient, dealId, "compressing")) {
-        await processNextQueued(adminClient, userId, supabaseUrl, supabaseServiceKey);
-        return new Response(JSON.stringify({ success: true, cancelled: true, at: "compressing" }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
-      }
-      await setDealStatus(adminClient, dealId, "compressing");
-
-      const pdfBytes = new Uint8Array(arrayBuffer!);
-      const result = await compressPdfToTarget(pdfBytes);
-      compressedPdf = result.compressed;
-      pageCount = result.pages;
-
-      const { error: compressUploadError } = await adminClient.storage
-        .from("decks")
-        .upload(pdfStoragePath, new Blob([compressedPdf.buffer as ArrayBuffer], { type: "application/pdf" }), { upsert: true });
-      if (compressUploadError) console.warn("Failed to upload compressed PDF:", compressUploadError.message);
-
-      await adminClient.from("deals").update({
-        compressed_size: `${(compressedPdf.length / (1024 * 1024)).toFixed(1)}MB`,
-        pages: pageCount,
-        updated_at: new Date().toISOString(),
-      }).eq("id", dealId);
-    } else {
-      // Resuming past compression — re-download the already-compressed PDF
-      const { data: existingPdf } = await adminClient.storage.from("decks").download(pdfStoragePath);
-      if (!existingPdf) throw new Error("Cannot find compressed PDF for resume");
-      compressedPdf = new Uint8Array(await existingPdf.arrayBuffer());
-      const { data: dealData } = await adminClient.from("deals").select("pages").eq("id", dealId).single();
-      pageCount = dealData?.pages ?? 0;
-    }
+    // Get page count from deal record (set during upload or capture callback)
+    const { data: dealData } = await adminClient.from("deals").select("pages, deck_size").eq("id", dealId).single();
+    pageCount = dealData?.pages ?? 0;
 
     // --- STEP 3: Extracting metadata ---
     // If text was extracted locally (e.g. Florence-2 in-browser), skip server-side extraction
