@@ -531,9 +531,18 @@ Deno.serve(async (req) => {
           extractedText = slidesApiText;
           console.log(`Using Slides API text: ${extractedText.length} chars`);
         } else {
-          // Try PDF text extraction
+          // Try PDF text extraction — download on-demand if not already in memory
           try {
-            const result = extractPdfText(compressedPdf.buffer as ArrayBuffer);
+            let pdfBuffer: ArrayBuffer;
+            if (compressedPdf) {
+              pdfBuffer = compressedPdf.buffer as ArrayBuffer;
+            } else {
+              // Lightweight download just for text extraction
+              const { data: pdfFile } = await adminClient.storage.from("decks").download(pdfStoragePath);
+              if (!pdfFile) throw new Error("Cannot download PDF for text extraction");
+              pdfBuffer = await pdfFile.arrayBuffer();
+            }
+            const result = extractPdfText(pdfBuffer);
             extractedText = result.text;
             if (result.pageCount > 0) actualPageCount = result.pageCount;
             console.log(`Extracted ${extractedText.length} chars from PDF, ${actualPageCount} pages`);
