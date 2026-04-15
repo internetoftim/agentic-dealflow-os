@@ -460,9 +460,8 @@ Deno.serve(async (req) => {
     const { data: dealData } = await adminClient.from("deals").select("pages, deck_size").eq("id", dealId).single();
     pageCount = dealData?.pages ?? 0;
 
-    // --- STEP 3: Extracting metadata ---
-    // If text was extracted locally (e.g. Florence-2 in-browser), skip server-side extraction
-    // but still run LLM metadata extraction if a cloud model is configured
+    // --- STEP 2: Extracting metadata ---
+    // Memory-efficient: check for pre-extracted text first, download PDF only if needed
     const isLocalModel = model === "local-florence2";
 
     if (!shouldSkip("extracting")) {
@@ -475,34 +474,35 @@ Deno.serve(async (req) => {
       let extractedText = "";
       let actualPageCount = pageCount;
 
-      // If client already extracted text locally (e.g. Florence-2), load it
-      if (localExtracted) {
-        const { data: existingSource } = await adminClient.from("sources")
-          .select("extracted_text")
-          .eq("deal_id", dealId)
-          .eq("user_id", userId)
-          .single();
-        extractedText = existingSource?.extracted_text ?? "";
+      // Priority 1: Check if text was already extracted (capture callback or local inference)
+      const { data: existingSource } = await adminClient.from("sources")
+        .select("extracted_text")
+        .eq("deal_id", dealId)
+        .eq("user_id", userId)
+        .single();
+
+      if (localExtracted && existingSource?.extracted_text) {
+        extractedText = existingSource.extracted_text;
         console.log(`Using locally-extracted text: ${extractedText.length} chars`);
+      } else if (existingSource?.extracted_text && existingSource.extracted_text.length >= 200) {
+        // Pre-extracted text from capture callback (DocSend/Papermark) — no download needed
+        extractedText = existingSource.extracted_text;
+        console.log(`Using pre-extracted text from source: ${extractedText.length} chars`);
       } else {
-        // Server-side text extraction
-        // For PPTX: prefer Slides API text (most accurate), then PPTX XML, then PDF text
+        // No pre-extracted text — need to download and extract
+        // For PPTX: prefer Slides API text (most accurate)
         if (isPptx && slidesApiText.length >= 200) {
           extractedText = slidesApiText;
           console.log(`Using Slides API text: ${extractedText.length} chars`);
         } else {
-          // Try PDF text extraction — download on-demand if not already in memory
+          // Download PDF on-demand for text extraction (only time we download)
           try {
-            let pdfBuffer: ArrayBuffer;
-            if (compressedPdf) {
-              pdfBuffer = compressedPdf.buffer as ArrayBuffer;
-            } else {
-              // Lightweight download just for text extraction
+            if (!arrayBuffer) {
               const { data: pdfFile } = await adminClient.storage.from("decks").download(pdfStoragePath);
               if (!pdfFile) throw new Error("Cannot download PDF for text extraction");
-              pdfBuffer = await pdfFile.arrayBuffer();
+              arrayBuffer = await pdfFile.arrayBuffer();
             }
-            const result = extractPdfText(pdfBuffer);
+            const result = extractPdfText(arrayBuffer);
             extractedText = result.text;
             if (result.pageCount > 0) actualPageCount = result.pageCount;
             console.log(`Extracted ${extractedText.length} chars from PDF, ${actualPageCount} pages`);
@@ -515,7 +515,7 @@ Deno.serve(async (req) => {
             if (slidesApiText.length > extractedText.length) {
               extractedText = slidesApiText;
               console.log(`Using Slides API text (short but best available): ${extractedText.length} chars`);
-            } else {
+            } else if (arrayBuffer) {
               try {
                 const { data: origFile } = await adminClient.storage.from("decks").download(storagePath);
                 if (origFile) {
@@ -540,17 +540,19 @@ Deno.serve(async (req) => {
         }
       }
 
-      // For local-florence2 model: skip LLM metadata extraction, use basic heuristic
+      // Release the PDF buffer — no longer needed after text extraction
+      arrayBuffer = null;
+
+      // For local-florence2 model: skip LLM metadata extraction
       if (isLocalModel) {
         console.log("Local model selected — skipping LLM metadata extraction, using heuristic");
         const updatePayload: Record<string, unknown> = {
           updated_at: new Date().toISOString(),
           pages: actualPageCount > 0 ? actualPageCount : null,
         };
-        // Don't blindly set website from text — Step 4 will verify it via search
         await adminClient.from("deals").update(updatePayload).eq("id", dealId);
       } else {
-        // LLM metadata extraction (cloud models)
+        // LLM metadata extraction — ALWAYS text-only to avoid memory issues
         const isSapinsapin = model === "gpt-oss-202b";
         const sapinsapinModel = "/models/gpt-oss-20b-balitanlp-cpt";
         const baseUrl = isSapinsapin ? SAPINSAPIN_BASE : OPENAI_BASE;
@@ -567,20 +569,11 @@ Deno.serve(async (req) => {
           aiHeaders["Authorization"] = `Bearer ${rawApiKey}`;
         }
 
-        const userContent: unknown[] = [];
-
-        // Determine if the model supports file/image input
-        // Skip file input for captured decks (skipCompression) to avoid base64 memory explosion
-        const supportsFileInput = !skipCompression && !isSapinsapin && (model === "gpt-4o" || model === "gpt-5" || model === "gpt-5-mini" || model === "gpt-5.4");
-
-        if (supportsFileInput && compressedPdf) {
-          const base64 = btoa(new Uint8Array(compressedPdf).reduce((data, byte) => data + String.fromCharCode(byte), ""));
-          userContent.push({ type: "file", file: { filename: "deck.pdf", file_data: `data:application/pdf;base64,${base64}` } });
-          userContent.push({ type: "text", text: "Analyze this pitch deck and extract metadata using the extract_deck_metadata tool." });
-        } else {
-          const textToSend = extractedText.length > 0 ? extractedText.slice(0, 50_000) : "No text could be extracted from the deck file.";
-          userContent.push({ type: "text", text: `Here is the full text content of the pitch deck:\n\n${textToSend}\n\nAnalyze this pitch deck and extract metadata using the extract_deck_metadata tool. Return null for fields you cannot determine.` });
-        }
+        // Always text-only — no base64 file encoding to avoid memory explosion
+        const textToSend = extractedText.length > 0 ? extractedText.slice(0, 50_000) : "No text could be extracted from the deck file.";
+        const userContent: unknown[] = [
+          { type: "text", text: `Here is the full text content of the pitch deck:\n\n${textToSend}\n\nAnalyze this pitch deck and extract metadata using the extract_deck_metadata tool. Return null for fields you cannot determine.` }
+        ];
 
         const aiPayload = {
           model: isSapinsapin ? sapinsapinModel : model,
@@ -616,25 +609,11 @@ Deno.serve(async (req) => {
           tool_choice: { type: "function", function: { name: "extract_deck_metadata" } },
         };
 
-        let aiResponse = await fetch(`${baseUrl}/v1/chat/completions`, {
+        const aiResponse = await fetch(`${baseUrl}/v1/chat/completions`, {
           method: "POST",
           headers: aiHeaders,
           body: JSON.stringify(aiPayload),
         });
-
-        // Fallback: if file-based request fails, retry with text-only
-        if (!aiResponse.ok && supportsFileInput && extractedText.length > 0) {
-          console.warn(`File-based AI call failed (${aiResponse.status}), falling back to text-only extraction`);
-          const textToSend = extractedText.slice(0, 50_000);
-          aiPayload.messages = [
-            { role: "system", content: "You are a VC analyst assistant. Analyze startup pitch decks and extract structured metadata. Be precise. Return null for missing fields." },
-            { role: "user", content: [{ type: "text", text: `Here is the full text content of the pitch deck:\n\n${textToSend}\n\nAnalyze this pitch deck and extract metadata using the extract_deck_metadata tool. Return null for fields you cannot determine.` }] },
-          ];
-          aiResponse = await fetch(`${baseUrl}/v1/chat/completions`, {
-            method: "POST",
-            headers: aiHeaders,
-            body: JSON.stringify(aiPayload),
-          });
         }
 
         if (!aiResponse.ok) {
