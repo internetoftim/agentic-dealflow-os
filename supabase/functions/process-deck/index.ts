@@ -614,7 +614,6 @@ Deno.serve(async (req) => {
           headers: aiHeaders,
           body: JSON.stringify(aiPayload),
         });
-        }
 
         if (!aiResponse.ok) {
           const errText = await aiResponse.text();
