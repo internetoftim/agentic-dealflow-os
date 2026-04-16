@@ -18,7 +18,7 @@ type CaptureServiceResponse = {
   title?: string | null;
 };
 
-const OCR_PREVIEW_IMAGE_LIMIT = 6;
+const PREVIEW_IMAGE_LIMIT = 6;
 
 export interface CaptureSyncResult {
   pageCount: number;
@@ -37,7 +37,7 @@ function buildCapturePayload(args: CaptureSyncArgs) {
 
 function samplePreviewImages(
   screenshots: CaptureScreenshot[] | null | undefined,
-  maxImages: number = OCR_PREVIEW_IMAGE_LIMIT,
+  maxImages: number = PREVIEW_IMAGE_LIMIT,
 ): string[] {
   const validImages = (screenshots ?? [])
     .map((shot) => shot?.data_url)
