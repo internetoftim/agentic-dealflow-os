@@ -1,4 +1,4 @@
-import { LayoutDashboard, FileSearch, FolderOpen, Settings, LogOut, Zap } from "lucide-react";
+import { LayoutDashboard, FileSearch, FolderOpen, Settings, LogOut, Zap, Link2 } from "lucide-react";
 import { NavLink } from "@/components/NavLink";
 import { useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
@@ -20,6 +20,7 @@ const navItems = [
   { title: "Deal Workspace", url: "/", icon: FileSearch, disabled: false },
   { title: "Kanban Pipeline", url: "/pipeline", icon: LayoutDashboard, disabled: false },
   { title: "Data Room", url: "/data-room", icon: FolderOpen, disabled: true },
+  { title: "Intake", url: "/intake", icon: Link2, disabled: false },
   { title: "Settings", url: "/settings", icon: Settings, disabled: false },
 ];
 
