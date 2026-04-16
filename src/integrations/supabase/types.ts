@@ -258,7 +258,6 @@ export type Database = {
           naming_pattern: string | null
           recap_naming_pattern: string | null
           spam_filter_enabled: boolean | null
-          text_only_llm: boolean
           updated_at: string
           user_id: string
         }
@@ -279,7 +278,6 @@ export type Database = {
           naming_pattern?: string | null
           recap_naming_pattern?: string | null
           spam_filter_enabled?: boolean | null
-          text_only_llm?: boolean
           updated_at?: string
           user_id: string
         }
@@ -300,7 +298,6 @@ export type Database = {
           naming_pattern?: string | null
           recap_naming_pattern?: string | null
           spam_filter_enabled?: boolean | null
-          text_only_llm?: boolean
           updated_at?: string
           user_id?: string
         }

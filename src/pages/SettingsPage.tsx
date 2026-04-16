@@ -62,7 +62,6 @@ export default function SettingsPage() {
   const [memoPrompt, setMemoPrompt] = useState(DEFAULT_MEMO_PROMPT);
   const [recapPattern, setRecapPattern] = useState(DEFAULT_RECAP_PATTERN);
   const [savingModel, setSavingModel] = useState(false);
-  const [textOnlyLlm, setTextOnlyLlm] = useState(false);
   const [intakeSlug, setIntakeSlug] = useState("");
   const [savingSlug, setSavingSlug] = useState(false);
 
@@ -71,13 +70,12 @@ export default function SettingsPage() {
     if (!user) return;
     supabase
       .from("user_settings")
-      .select("ai_model, gmail_label_enabled, drive_sync_enabled, spam_filter_enabled, deep_research_provider, naming_pattern, naming_mode, drive_folder, memo_prompt, recap_naming_pattern, intake_slug, text_only_llm")
+      .select("ai_model, gmail_label_enabled, drive_sync_enabled, spam_filter_enabled, deep_research_provider, naming_pattern, naming_mode, drive_folder, memo_prompt, recap_naming_pattern, intake_slug")
       .eq("user_id", user.id)
       .single()
       .then(({ data }) => {
         if (data) {
           setAiModel(data.ai_model ?? "gpt-5.4");
-          setTextOnlyLlm(data.text_only_llm ?? false);
           setGmailLabel(data.gmail_label_enabled ?? true);
           setDriveSync(data.drive_sync_enabled ?? true);
           setSpamFilter(data.spam_filter_enabled ?? true);
@@ -202,32 +200,6 @@ export default function SettingsPage() {
                 <p className="text-xs text-muted-foreground mt-0.5">{model.description}</p>
               </button>
             ))}
-          </div>
-
-          {/* Text-only vs Multimodal toggle */}
-          <div className="mt-4 flex items-center justify-between rounded-md border border-border p-3">
-            <div>
-              <p className="text-sm font-medium text-foreground">Text-only LLM mode</p>
-              <p className="text-xs text-muted-foreground mt-0.5">
-                When off, deck pages are sent as images to the LLM (multimodal). When on, only extracted text is sent (faster, less memory).
-              </p>
-            </div>
-            <Toggle
-              checked={textOnlyLlm}
-              onChange={async (v) => {
-                if (!user) return;
-                setTextOnlyLlm(v);
-                const { error } = await supabase
-                  .from("user_settings")
-                  .upsert({ user_id: user.id, text_only_llm: v } as any, { onConflict: "user_id" });
-                if (error) {
-                  toast.error("Failed to save preference");
-                  setTextOnlyLlm(!v);
-                } else {
-                  toast.success(v ? "Text-only mode enabled" : "Multimodal mode enabled");
-                }
-              }}
-            />
           </div>
         </div>
       </section>

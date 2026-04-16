@@ -40,30 +40,8 @@ function deriveSourceType(url: string, fallbackSource?: string | null): string {
   return fallbackSource || "docsend";
 }
 
-/** Decode base64 in aligned chunks to avoid massive intermediate strings. */
 function pdfBytesFromBase64(pdfBase64: string): Uint8Array {
-  // Each 4 base64 chars = 3 bytes; decode in ~48KB chunks (must be multiple of 4)
-  const CHUNK = 65536 - (65536 % 4); // 65536 aligned to 4
-  const parts: Uint8Array[] = [];
-  let totalLen = 0;
-  for (let i = 0; i < pdfBase64.length; i += CHUNK) {
-    const slice = pdfBase64.slice(i, i + CHUNK);
-    const decoded = atob(slice);
-    const chunk = new Uint8Array(decoded.length);
-    for (let j = 0; j < decoded.length; j++) {
-      chunk[j] = decoded.charCodeAt(j);
-    }
-    parts.push(chunk);
-    totalLen += chunk.length;
-  }
-  // Merge into single array
-  const result = new Uint8Array(totalLen);
-  let offset = 0;
-  for (const part of parts) {
-    result.set(part, offset);
-    offset += part.length;
-  }
-  return result;
+  return Uint8Array.from(atob(pdfBase64), (char) => char.charCodeAt(0));
 }
 
 async function markCaptureFailure(
@@ -225,7 +203,7 @@ async function processCaptureInBackground(args: {
   userId: string;
 }) {
   const adminClient = createClient(args.supabaseUrl, args.supabaseServiceKey);
-  let captureResult = await captureSync({
+  const captureResult = await captureSync({
     apiKey: args.captureServiceApiKey,
     baseUrl: args.captureServiceUrl,
     gateEmail: args.gateEmail,
@@ -234,10 +212,6 @@ async function processCaptureInBackground(args: {
   });
 
   const pdfBytes = pdfBytesFromBase64(captureResult.pdfBase64);
-  // Release the base64 string to free memory before uploading
-  (captureResult as any).pdfBase64 = null;
-  captureResult = null as any;
-
   const sizeMB = `${(pdfBytes.length / (1024 * 1024)).toFixed(1)}MB`;
   const storagePath = `${args.userId}/${args.dealId}/deck.pdf`;
   const updatedAt = new Date().toISOString();

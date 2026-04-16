@@ -391,32 +391,38 @@ Deno.serve(async (req) => {
     }
 
     // Determine which steps to skip when resuming
-    const stepOrder = ["converting", "extracting", "searching-website", "compressing", "syncing", "memo-ready"];
+    const stepOrder = ["converting", "compressing", "extracting", "searching-website", "syncing", "memo-ready"];
     const resumeIdx = resumeFrom ? stepOrder.indexOf(resumeFrom) : -1;
     const shouldSkip = (step: string) => resumeFrom ? stepOrder.indexOf(step) < resumeIdx : false;
 
     // Fetch user settings (needed for Google token for conversion + AI model)
     const { data: settings } = await adminClient
       .from("user_settings")
-      .select("ai_model, drive_sync_enabled, google_provider_token, naming_pattern, drive_folder, text_only_llm")
+      .select("ai_model, drive_sync_enabled, google_provider_token, naming_pattern, drive_folder")
       .eq("user_id", userId)
       .single();
     const model = settings?.ai_model ?? "gpt-5.4";
-    const textOnlyLlm = settings?.text_only_llm ?? false;
 
+    // Download file from storage — skip for captured decks during compression
+    // (we still need it for text extraction, but we'll download later in a lighter path)
+    let arrayBuffer: ArrayBuffer | null = null;
     const fileName = storagePath.split("/").pop()?.toLowerCase() ?? "";
     const isPptx = fileName.endsWith(".pptx") || fileName.endsWith(".ppt");
     const isPdf = fileName.endsWith(".pdf");
 
-    // We only download the file when we actually need it — and only once.
-    // For captured decks with pre-extracted text, we skip the download entirely.
-    let arrayBuffer: ArrayBuffer | null = null;
-    let pdfStoragePath = storagePath;
-    let slidesApiText = "";
-    let pageCount = 0;
+    if (!skipCompression) {
+      const { data: fileData, error: downloadError } = await adminClient.storage
+        .from("decks").download(storagePath);
+      if (downloadError || !fileData) {
+        throw new Error(`Failed to download file: ${downloadError?.message}`);
+      }
+      arrayBuffer = await fileData.arrayBuffer();
+    }
 
     // --- STEP 1: Convert PPTX to PDF (if applicable) ---
-    if (isPptx && !shouldSkip("converting")) {
+    let pdfStoragePath = storagePath;
+    let slidesApiText = "";
+    if (isPptx && !shouldSkip("converting") && arrayBuffer) {
       if (await checkAborted(adminClient, dealId, "converting")) {
         await processNextQueued(adminClient, userId, supabaseUrl, supabaseServiceKey);
         return new Response(JSON.stringify({ success: true, cancelled: true, at: "converting" }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
@@ -427,19 +433,12 @@ Deno.serve(async (req) => {
         throw new Error("Google Drive not connected — required for PPTX to PDF conversion");
       }
 
-      // Download PPTX for conversion
-      const { data: fileData, error: downloadError } = await adminClient.storage
-        .from("decks").download(storagePath);
-      if (downloadError || !fileData) throw new Error(`Failed to download file: ${downloadError?.message}`);
-      arrayBuffer = await fileData.arrayBuffer();
-
       console.log("Converting PPTX to PDF via Google Drive API...");
       const conversionResult = await convertPptxToPdfViaDrive(
         arrayBuffer,
         settings.google_provider_token,
         fileName
       );
-      // Release the PPTX buffer, keep only the PDF
       arrayBuffer = conversionResult.pdfBytes.buffer as ArrayBuffer;
       slidesApiText = conversionResult.slidesText;
 
@@ -450,19 +449,60 @@ Deno.serve(async (req) => {
         .upload(pdfStoragePath, new Blob([conversionResult.pdfBytes.buffer as ArrayBuffer], { type: "application/pdf" }), {
           upsert: true,
         });
-      if (pdfUploadError) console.warn("Failed to upload converted PDF:", pdfUploadError.message);
+      if (pdfUploadError) {
+        console.warn("Failed to upload converted PDF:", pdfUploadError.message);
+      }
 
       console.log(`PPTX converted to PDF: ${(conversionResult.pdfBytes.length / (1024 * 1024)).toFixed(1)}MB`);
     } else if (isPptx) {
       pdfStoragePath = storagePath.replace(/\.(pptx|ppt)$/i, ".pdf");
     }
 
-    // Get page count from deal record (set during upload or capture callback)
-    const { data: dealData } = await adminClient.from("deals").select("pages, deck_size").eq("id", dealId).single();
-    pageCount = dealData?.pages ?? 0;
+    // --- STEP 2: Compress PDF ---
+    let compressedPdf: Uint8Array | null = null;
+    let pageCount: number;
 
-    // --- STEP 2: Extracting metadata ---
-    // Memory-efficient: check for pre-extracted text first, download PDF only if needed
+    if (skipCompression) {
+      // Captured decks (DocSend/Papermark): PDF already in storage, skip download+recompress
+      console.log("Skipping compression — captured deck already stored");
+      const { data: dealData } = await adminClient.from("deals").select("pages, deck_size").eq("id", dealId).single();
+      pageCount = dealData?.pages ?? 0;
+      // Briefly show step for UI consistency
+      await setDealStatus(adminClient, dealId, "compressing");
+    } else if (!shouldSkip("compressing")) {
+      if (await checkAborted(adminClient, dealId, "compressing")) {
+        await processNextQueued(adminClient, userId, supabaseUrl, supabaseServiceKey);
+        return new Response(JSON.stringify({ success: true, cancelled: true, at: "compressing" }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      }
+      await setDealStatus(adminClient, dealId, "compressing");
+
+      const pdfBytes = new Uint8Array(arrayBuffer!);
+      const result = await compressPdfToTarget(pdfBytes);
+      compressedPdf = result.compressed;
+      pageCount = result.pages;
+
+      const { error: compressUploadError } = await adminClient.storage
+        .from("decks")
+        .upload(pdfStoragePath, new Blob([compressedPdf.buffer as ArrayBuffer], { type: "application/pdf" }), { upsert: true });
+      if (compressUploadError) console.warn("Failed to upload compressed PDF:", compressUploadError.message);
+
+      await adminClient.from("deals").update({
+        compressed_size: `${(compressedPdf.length / (1024 * 1024)).toFixed(1)}MB`,
+        pages: pageCount,
+        updated_at: new Date().toISOString(),
+      }).eq("id", dealId);
+    } else {
+      // Resuming past compression — re-download the already-compressed PDF
+      const { data: existingPdf } = await adminClient.storage.from("decks").download(pdfStoragePath);
+      if (!existingPdf) throw new Error("Cannot find compressed PDF for resume");
+      compressedPdf = new Uint8Array(await existingPdf.arrayBuffer());
+      const { data: dealData } = await adminClient.from("deals").select("pages").eq("id", dealId).single();
+      pageCount = dealData?.pages ?? 0;
+    }
+
+    // --- STEP 3: Extracting metadata ---
+    // If text was extracted locally (e.g. Florence-2 in-browser), skip server-side extraction
+    // but still run LLM metadata extraction if a cloud model is configured
     const isLocalModel = model === "local-florence2";
 
     if (!shouldSkip("extracting")) {
@@ -475,35 +515,34 @@ Deno.serve(async (req) => {
       let extractedText = "";
       let actualPageCount = pageCount;
 
-      // Priority 1: Check if text was already extracted (capture callback or local inference)
-      const { data: existingSource } = await adminClient.from("sources")
-        .select("extracted_text")
-        .eq("deal_id", dealId)
-        .eq("user_id", userId)
-        .single();
-
-      if (localExtracted && existingSource?.extracted_text) {
-        extractedText = existingSource.extracted_text;
+      // If client already extracted text locally (e.g. Florence-2), load it
+      if (localExtracted) {
+        const { data: existingSource } = await adminClient.from("sources")
+          .select("extracted_text")
+          .eq("deal_id", dealId)
+          .eq("user_id", userId)
+          .single();
+        extractedText = existingSource?.extracted_text ?? "";
         console.log(`Using locally-extracted text: ${extractedText.length} chars`);
-      } else if (existingSource?.extracted_text && existingSource.extracted_text.length >= 200) {
-        // Pre-extracted text from capture callback (DocSend/Papermark) — no download needed
-        extractedText = existingSource.extracted_text;
-        console.log(`Using pre-extracted text from source: ${extractedText.length} chars`);
       } else {
-        // No pre-extracted text — need to download and extract
-        // For PPTX: prefer Slides API text (most accurate)
+        // Server-side text extraction
+        // For PPTX: prefer Slides API text (most accurate), then PPTX XML, then PDF text
         if (isPptx && slidesApiText.length >= 200) {
           extractedText = slidesApiText;
           console.log(`Using Slides API text: ${extractedText.length} chars`);
         } else {
-          // Download PDF on-demand for text extraction (only time we download)
+          // Try PDF text extraction — download on-demand if not already in memory
           try {
-            if (!arrayBuffer) {
+            let pdfBuffer: ArrayBuffer;
+            if (compressedPdf) {
+              pdfBuffer = compressedPdf.buffer as ArrayBuffer;
+            } else {
+              // Lightweight download just for text extraction
               const { data: pdfFile } = await adminClient.storage.from("decks").download(pdfStoragePath);
               if (!pdfFile) throw new Error("Cannot download PDF for text extraction");
-              arrayBuffer = await pdfFile.arrayBuffer();
+              pdfBuffer = await pdfFile.arrayBuffer();
             }
-            const result = extractPdfText(arrayBuffer);
+            const result = extractPdfText(pdfBuffer);
             extractedText = result.text;
             if (result.pageCount > 0) actualPageCount = result.pageCount;
             console.log(`Extracted ${extractedText.length} chars from PDF, ${actualPageCount} pages`);
@@ -516,7 +555,7 @@ Deno.serve(async (req) => {
             if (slidesApiText.length > extractedText.length) {
               extractedText = slidesApiText;
               console.log(`Using Slides API text (short but best available): ${extractedText.length} chars`);
-            } else if (arrayBuffer) {
+            } else {
               try {
                 const { data: origFile } = await adminClient.storage.from("decks").download(storagePath);
                 if (origFile) {
@@ -541,19 +580,17 @@ Deno.serve(async (req) => {
         }
       }
 
-      // Release the PDF buffer — no longer needed after text extraction
-      arrayBuffer = null;
-
-      // For local-florence2 model: skip LLM metadata extraction
+      // For local-florence2 model: skip LLM metadata extraction, use basic heuristic
       if (isLocalModel) {
         console.log("Local model selected — skipping LLM metadata extraction, using heuristic");
         const updatePayload: Record<string, unknown> = {
           updated_at: new Date().toISOString(),
           pages: actualPageCount > 0 ? actualPageCount : null,
         };
+        // Don't blindly set website from text — Step 4 will verify it via search
         await adminClient.from("deals").update(updatePayload).eq("id", dealId);
       } else {
-        // LLM metadata extraction — ALWAYS text-only to avoid memory issues
+        // LLM metadata extraction (cloud models)
         const isSapinsapin = model === "gpt-oss-202b";
         const sapinsapinModel = "/models/gpt-oss-20b-balitanlp-cpt";
         const baseUrl = isSapinsapin ? SAPINSAPIN_BASE : OPENAI_BASE;
@@ -570,67 +607,19 @@ Deno.serve(async (req) => {
           aiHeaders["Authorization"] = `Bearer ${rawApiKey}`;
         }
 
-        // Multimodal mode: encode PDF pages as images one-by-one to avoid memory spikes
-        // Text-only mode: send extracted text only (safer for large decks)
-        const useMultimodal = !textOnlyLlm && !isSapinsapin && isPdf && !skipCompression;
         const userContent: unknown[] = [];
 
-        if (useMultimodal && arrayBuffer === null) {
-          // Re-download PDF for multimodal encoding (we released it earlier)
-          try {
-            const { data: pdfFile } = await adminClient.storage.from("decks").download(pdfStoragePath);
-            if (pdfFile) arrayBuffer = await pdfFile.arrayBuffer();
-          } catch (e) {
-            console.warn("Failed to re-download PDF for multimodal, falling back to text-only:", e);
-          }
-        }
+        // Determine if the model supports file/image input
+        // Skip file input for captured decks (skipCompression) to avoid base64 memory explosion
+        const supportsFileInput = !skipCompression && !isSapinsapin && (model === "gpt-4o" || model === "gpt-5" || model === "gpt-5-mini" || model === "gpt-5.4");
 
-        if (useMultimodal && arrayBuffer) {
-          // Page-by-page encoding: load PDF, render each page to a small base64 image
-          // This avoids holding the entire deck as base64 in memory at once
-          console.log("Multimodal mode: encoding pages as images...");
-          try {
-            const pdfDoc = await PDFDocument.load(arrayBuffer, { ignoreEncryption: true });
-            const totalPages = pdfDoc.getPageCount();
-
-            for (let i = 0; i < totalPages; i++) {
-              // Create a single-page PDF and serialize it
-              const singlePageDoc = await PDFDocument.create();
-              const [copiedPage] = await singlePageDoc.copyPages(pdfDoc, [i]);
-              singlePageDoc.addPage(copiedPage);
-              const singlePageBytes = await singlePageDoc.save();
-
-              // Encode single page as base64 (much smaller than full deck)
-              const base64 = btoa(String.fromCharCode(...new Uint8Array(singlePageBytes)));
-              userContent.push({
-                type: "image_url",
-                image_url: { url: `data:application/pdf;base64,${base64}`, detail: "low" },
-              });
-            }
-            console.log(`Multimodal: encoded all ${totalPages} pages`);
-            // Release PDF buffer after encoding
-            arrayBuffer = null;
-          } catch (e) {
-            console.warn("Multimodal page encoding failed, falling back to text-only:", e);
-          }
-        }
-
-        // If no multimodal content was added (text-only mode or fallback), use text
-        if (userContent.length === 0) {
-          const textToSend = extractedText.length > 0 ? extractedText.slice(0, 50_000) : "No text could be extracted from the deck file.";
-          userContent.push({
-            type: "text",
-            text: `Here is the full text content of the pitch deck:\n\n${textToSend}\n\nAnalyze this pitch deck and extract metadata using the extract_deck_metadata tool. Return null for fields you cannot determine.`,
-          });
-          console.log("Using text-only mode for LLM extraction");
+        if (supportsFileInput && compressedPdf) {
+          const base64 = btoa(new Uint8Array(compressedPdf).reduce((data, byte) => data + String.fromCharCode(byte), ""));
+          userContent.push({ type: "file", file: { filename: "deck.pdf", file_data: `data:application/pdf;base64,${base64}` } });
+          userContent.push({ type: "text", text: "Analyze this pitch deck and extract metadata using the extract_deck_metadata tool." });
         } else {
-          // Add instruction text alongside images
-          const textToSend = extractedText.length > 0 ? extractedText.slice(0, 20_000) : "";
-          userContent.push({
-            type: "text",
-            text: `Above are the pages of a startup pitch deck rendered as images.${textToSend ? `\n\nSupplementary extracted text:\n${textToSend}` : ""}\n\nAnalyze this pitch deck and extract metadata using the extract_deck_metadata tool. Return null for fields you cannot determine.`,
-          });
-          console.log(`Multimodal mode: ${userContent.length - 1} page images + text prompt`);
+          const textToSend = extractedText.length > 0 ? extractedText.slice(0, 50_000) : "No text could be extracted from the deck file.";
+          userContent.push({ type: "text", text: `Here is the full text content of the pitch deck:\n\n${textToSend}\n\nAnalyze this pitch deck and extract metadata using the extract_deck_metadata tool. Return null for fields you cannot determine.` });
         }
 
         const aiPayload = {
@@ -667,11 +656,26 @@ Deno.serve(async (req) => {
           tool_choice: { type: "function", function: { name: "extract_deck_metadata" } },
         };
 
-        const aiResponse = await fetch(`${baseUrl}/v1/chat/completions`, {
+        let aiResponse = await fetch(`${baseUrl}/v1/chat/completions`, {
           method: "POST",
           headers: aiHeaders,
           body: JSON.stringify(aiPayload),
         });
+
+        // Fallback: if file-based request fails, retry with text-only
+        if (!aiResponse.ok && supportsFileInput && extractedText.length > 0) {
+          console.warn(`File-based AI call failed (${aiResponse.status}), falling back to text-only extraction`);
+          const textToSend = extractedText.slice(0, 50_000);
+          aiPayload.messages = [
+            { role: "system", content: "You are a VC analyst assistant. Analyze startup pitch decks and extract structured metadata. Be precise. Return null for missing fields." },
+            { role: "user", content: [{ type: "text", text: `Here is the full text content of the pitch deck:\n\n${textToSend}\n\nAnalyze this pitch deck and extract metadata using the extract_deck_metadata tool. Return null for fields you cannot determine.` }] },
+          ];
+          aiResponse = await fetch(`${baseUrl}/v1/chat/completions`, {
+            method: "POST",
+            headers: aiHeaders,
+            body: JSON.stringify(aiPayload),
+          });
+        }
 
         if (!aiResponse.ok) {
           const errText = await aiResponse.text();
@@ -875,41 +879,6 @@ Deno.serve(async (req) => {
         if (linkedinUrl) webUpdate.linkedin_url = linkedinUrl;
         await adminClient.from("deals").update(webUpdate).eq("id", dealId);
         console.log(`Website search complete: website=${verifiedWebsite || "none"}, linkedin=${linkedinUrl || "none"}`);
-      }
-    }
-
-    // --- STEP 4b: Compress PDF before Drive sync (lightweight, at the end) ---
-    if (!shouldSkip("compressing")) {
-      if (await checkAborted(adminClient, dealId, "compressing")) {
-        await processNextQueued(adminClient, userId, supabaseUrl, supabaseServiceKey);
-        return new Response(JSON.stringify({ success: true, cancelled: true, at: "compressing" }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
-      }
-      await setDealStatus(adminClient, dealId, "compressing");
-
-      try {
-        const { data: pdfFile } = await adminClient.storage.from("decks").download(pdfStoragePath);
-        if (pdfFile) {
-          const pdfBuffer = await pdfFile.arrayBuffer();
-          const originalSize = pdfBuffer.byteLength;
-          const result = await compressPdfToTarget(new Uint8Array(pdfBuffer));
-          const savings = ((1 - result.compressed.length / originalSize) * 100).toFixed(0);
-          console.log(`Compressed PDF: ${(originalSize / (1024 * 1024)).toFixed(1)}MB → ${(result.compressed.length / (1024 * 1024)).toFixed(1)}MB (${savings}% reduction)`);
-
-          // Only re-upload if compression actually saved space
-          if (result.compressed.length < originalSize) {
-            await adminClient.storage
-              .from("decks")
-              .upload(pdfStoragePath, new Blob([result.compressed.buffer as ArrayBuffer], { type: "application/pdf" }), { upsert: true });
-          }
-
-          await adminClient.from("deals").update({
-            compressed_size: `${(result.compressed.length / (1024 * 1024)).toFixed(1)}MB`,
-            pages: result.pages || pageCount,
-            updated_at: new Date().toISOString(),
-          }).eq("id", dealId);
-        }
-      } catch (e) {
-        console.warn("PDF compression failed (non-fatal):", e);
       }
     }
 
