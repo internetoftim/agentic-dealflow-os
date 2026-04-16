@@ -35,6 +35,10 @@ export interface Deal {
   last_funding_round: string | null;
   num_employees: string | null;
   investors: string | null;
+  investor_research: Array<{ name: string; linkedin_url: string | null; crunchbase_url: string | null; tracxn_url: string | null }> | null;
+  latest_articles: Array<{ title: string; url: string; source: string | null; preview: string | null }> | null;
+  research_verification: Array<{ field: string; value: string; matched: boolean }> | null;
+  deck_preview: Array<{ section: "traction" | "ask" | "team"; slide: number; preview_image: string | null; snippet: string }> | null;
   created_at: string;
   updated_at: string;
 }

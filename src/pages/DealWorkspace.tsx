@@ -648,6 +648,77 @@ export default function DealWorkspace() {
                         <span className="text-sm text-muted-foreground">—</span>
                       )}
                     </div>
+                    <div className="flex flex-col">
+                      <span className="text-[11px] uppercase tracking-wider text-muted-foreground mb-0.5">Deck Verification</span>
+                      {Array.isArray((activeDeal as any)?.research_verification) && (activeDeal as any).research_verification.length > 0 ? (
+                        <div className="flex flex-col gap-1.5">
+                          {(activeDeal as any).research_verification.map((item: any, idx: number) => (
+                            <div key={`${item.field}-${idx}`} className="text-xs text-foreground flex items-center gap-1.5">
+                              <span className={item.matched ? "text-success" : "text-warning"}>{item.matched ? "✓" : "!"}</span>
+                              <span className="font-medium">{item.field}:</span>
+                              <span className="truncate">{item.value}</span>
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <span className="text-sm text-muted-foreground">—</span>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {activeDeal && Array.isArray((activeDeal as any)?.investor_research) && (activeDeal as any).investor_research.length > 0 && (
+                <div className="rounded-lg border border-border bg-card p-5 mt-4">
+                  <h3 className="text-sm font-semibold text-foreground mb-4">Investor Research (Crunchbase, Tracxn, LinkedIn)</h3>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    {(activeDeal as any).investor_research.map((investor: any, idx: number) => (
+                      <div key={`${investor.name}-${idx}`} className="rounded-md border border-border bg-background p-3">
+                        <div className="text-sm font-medium text-foreground mb-2">{investor.name}</div>
+                        <div className="space-y-1 text-xs">
+                          {investor.linkedin_url && <a className="text-info hover:underline block" href={investor.linkedin_url} target="_blank" rel="noopener noreferrer">LinkedIn</a>}
+                          {investor.crunchbase_url && <a className="text-info hover:underline block" href={investor.crunchbase_url} target="_blank" rel="noopener noreferrer">Crunchbase</a>}
+                          {investor.tracxn_url && <a className="text-info hover:underline block" href={investor.tracxn_url} target="_blank" rel="noopener noreferrer">Tracxn</a>}
+                          {!investor.linkedin_url && !investor.crunchbase_url && !investor.tracxn_url && (
+                            <span className="text-muted-foreground">No profile links found</span>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {activeDeal && Array.isArray((activeDeal as any)?.latest_articles) && (activeDeal as any).latest_articles.length > 0 && (
+                <div className="rounded-lg border border-border bg-card p-5 mt-4">
+                  <h3 className="text-sm font-semibold text-foreground mb-4">Latest 3 Articles</h3>
+                  <div className="space-y-3">
+                    {(activeDeal as any).latest_articles.slice(0, 3).map((article: any, idx: number) => (
+                      <div key={`${article.url}-${idx}`} className="rounded-md border border-border bg-background p-3">
+                        <a href={article.url} target="_blank" rel="noopener noreferrer" className="text-sm font-medium text-info hover:underline">
+                          {article.title}
+                        </a>
+                        {article.preview && <p className="text-xs text-muted-foreground mt-1 line-clamp-3">{article.preview}</p>}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {activeDeal && Array.isArray((activeDeal as any)?.deck_preview) && (activeDeal as any).deck_preview.length > 0 && (
+                <div className="rounded-lg border border-border bg-card p-5 mt-4">
+                  <h3 className="text-sm font-semibold text-foreground mb-4">Deck Preview (Traction / Ask / Team)</h3>
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                    {(activeDeal as any).deck_preview.map((preview: any, idx: number) => (
+                      <div key={`${preview.section}-${idx}`} className="rounded-md border border-border bg-background p-3">
+                        <div className="text-xs uppercase tracking-wide text-muted-foreground mb-1">{preview.section}</div>
+                        <div className="text-xs text-foreground mb-2">{preview.slide > 0 ? `Slide ${preview.slide}` : "Slide not found"}</div>
+                        {preview.preview_image ? (
+                          <img src={preview.preview_image} alt={`${preview.section} slide preview`} className="w-full rounded border border-border mb-2" />
+                        ) : null}
+                        <p className="text-xs text-muted-foreground line-clamp-4">{preview.snippet || "No slide snippet available."}</p>
+                      </div>
+                    ))}
                   </div>
                 </div>
               )}

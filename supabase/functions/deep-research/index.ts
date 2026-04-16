@@ -10,6 +10,19 @@ const SAPINSAPIN_BASE = "https://apollo-inference-bridge.am1-aks.apolloglobal.ne
 const SAPINSAPIN_MODEL = "/models/gpt-oss-20b-balitanlp-cpt";
 const OPENAI_BASE = "https://api.openai.com";
 
+type SlideMatch = {
+  section: "traction" | "ask" | "team";
+  slide: number;
+  preview_image: string | null;
+  snippet: string;
+};
+
+type VerificationItem = {
+  field: string;
+  value: string;
+  matched: boolean;
+};
+
 function getAiConfig(model: string) {
   const isSapinsapin = model === "gpt-oss-202b";
   const isComputerUse = model === "gpt-5.4";
@@ -20,6 +33,76 @@ function getAiConfig(model: string) {
     modelName: isComputerUse ? "gpt-5.4" : isSapinsapin ? SAPINSAPIN_MODEL : model,
     envKey: isSapinsapin ? "APOLLO_API_KEY" : "OPENAI_API_KEY",
   };
+}
+
+function normalizeText(value: string): string {
+  return value.toLowerCase().replace(/[^a-z0-9\s]/g, " ").replace(/\s+/g, " ").trim();
+}
+
+function parseSlides(extractedText: string): Array<{ slide: number; text: string }> {
+  const matches = Array.from(extractedText.matchAll(/\[Slide\s+(\d+)\]\s*([\s\S]*?)(?=\n\s*\[Slide\s+\d+\]|$)/gi));
+  if (matches.length === 0 && extractedText.trim()) {
+    return [{ slide: 1, text: extractedText.trim() }];
+  }
+  return matches
+    .map((match) => ({
+      slide: Number(match[1]),
+      text: (match[2] ?? "").trim(),
+    }))
+    .filter((item) => Number.isFinite(item.slide) && item.text.length > 0);
+}
+
+function buildDeckPreview(extractedText: string, previewImages: string[]): SlideMatch[] {
+  const slides = parseSlides(extractedText);
+  const sections: Array<{ section: SlideMatch["section"]; keywords: string[] }> = [
+    { section: "traction", keywords: ["traction", "growth", "revenue", "arr", "mrr", "retention", "nrr"] },
+    { section: "ask", keywords: ["ask", "raising", "raise", "funding", "round", "use of funds", "seeking"] },
+    { section: "team", keywords: ["team", "founder", "founders", "leadership", "management", "co-founder"] },
+  ];
+
+  return sections.map((section) => {
+    const match = slides.find((slide) => {
+      const normalized = normalizeText(slide.text);
+      return section.keywords.some((keyword) => normalized.includes(keyword));
+    });
+    if (!match) {
+      return {
+        section: section.section,
+        slide: -1,
+        preview_image: null,
+        snippet: "No matching slide detected in extracted deck text.",
+      };
+    }
+
+    return {
+      section: section.section,
+      slide: match.slide,
+      preview_image: previewImages[match.slide - 1] ?? null,
+      snippet: match.text.slice(0, 320),
+    };
+  });
+}
+
+function buildVerificationSummary(deal: Record<string, unknown>, extractedText: string): VerificationItem[] {
+  const normalizedDeck = normalizeText(extractedText);
+  const checks: Array<{ field: string; value: string | null | undefined }> = [
+    { field: "company_name", value: typeof deal.name === "string" ? deal.name : null },
+    { field: "ask_amount", value: typeof deal.ask_amount === "string" ? deal.ask_amount : null },
+    { field: "team_size", value: typeof deal.team_size === "string" ? deal.team_size : null },
+    { field: "revenue", value: typeof deal.revenue === "string" ? deal.revenue : null },
+    { field: "growth", value: typeof deal.growth === "string" ? deal.growth : null },
+  ];
+
+  return checks
+    .filter((item) => !!item.value)
+    .map((item) => {
+      const normalizedValue = normalizeText(item.value!);
+      return {
+        field: item.field,
+        value: item.value!,
+        matched: normalizedValue.length > 2 && normalizedDeck.includes(normalizedValue),
+      };
+    });
 }
 
 Deno.serve(async (req) => {
@@ -93,12 +176,16 @@ Deno.serve(async (req) => {
       .limit(1)
       .maybeSingle();
 
-    const provider = "firecrawl";
-    const aiModel = settings?.ai_model ?? "gpt-5.4";
-    const deckTextContext = (latestSource?.extracted_text || "").slice(0, 12_000);
     const previewImages = Array.isArray(latestSource?.preview_images)
       ? latestSource.preview_images.filter((item: unknown): item is string => typeof item === "string" && item.startsWith("data:image/"))
       : [];
+    const extractedDeckText = latestSource?.extracted_text || "";
+    const deckPreview = buildDeckPreview(extractedDeckText, previewImages);
+    const verification = buildVerificationSummary(deal as unknown as Record<string, unknown>, extractedDeckText);
+
+    const provider = "firecrawl";
+    const aiModel = settings?.ai_model ?? "gpt-5.4";
+    const deckTextContext = (latestSource?.extracted_text || "").slice(0, 12_000);
 
     // Mark as researching
     await adminClient
@@ -274,6 +361,8 @@ Deno.serve(async (req) => {
     }
 
     let research: { website: string | null; linkedin_url: string | null };
+    const investorResearch: Array<{ name: string; linkedin_url: string | null; crunchbase_url: string | null; tracxn_url: string | null }> = [];
+    const latestArticles: Array<{ title: string; url: string; source: string | null; preview: string | null }> = [];
 
     if (provider === "firecrawl") {
       const websiteUrl = candidateWebsite || null;
@@ -465,10 +554,129 @@ Extract the company's official website URL and LinkedIn company page URL using t
       }
     }
 
+    // Step 3b: Enrich investors with LinkedIn + Crunchbase + Tracxn
+    const investorCandidates = (investors ?? "")
+      .split(/,|;|\||•/g)
+      .map((name) => name.trim())
+      .filter((name) => name.length > 1 && name.length < 120)
+      .slice(0, 8);
+
+    for (const investorName of investorCandidates) {
+      try {
+        const [linkedinRes, crunchbaseRes, tracxnRes] = await Promise.all([
+          fetch("https://api.firecrawl.dev/v1/search", {
+            method: "POST",
+            headers: {
+              Authorization: `Bearer ${firecrawlApiKey}`,
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({ query: `"${investorName}" investor LinkedIn`, limit: 2 }),
+          }),
+          fetch("https://api.firecrawl.dev/v1/search", {
+            method: "POST",
+            headers: {
+              Authorization: `Bearer ${firecrawlApiKey}`,
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({ query: `site:crunchbase.com/organization "${investorName}"`, limit: 2 }),
+          }),
+          fetch("https://api.firecrawl.dev/v1/search", {
+            method: "POST",
+            headers: {
+              Authorization: `Bearer ${firecrawlApiKey}`,
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({ query: `site:tracxn.com "${investorName}"`, limit: 2 }),
+          }),
+        ]);
+
+        const linkedInData = linkedinRes.ok ? await linkedinRes.json() : {};
+        const crunchbaseData = crunchbaseRes.ok ? await crunchbaseRes.json() : {};
+        const tracxnData = tracxnRes.ok ? await tracxnRes.json() : {};
+
+        const linkedinUrl = (linkedInData.data || linkedInData.results || []).find((r: any) => r.url?.includes("linkedin.com"))?.url ?? null;
+        const crunchbaseInvestorUrl = (crunchbaseData.data || crunchbaseData.results || []).find((r: any) => r.url?.includes("crunchbase.com/organization"))?.url ?? null;
+        const tracxnUrl = (tracxnData.data || tracxnData.results || []).find((r: any) => r.url?.includes("tracxn.com"))?.url ?? null;
+
+        investorResearch.push({
+          name: investorName,
+          linkedin_url: linkedinUrl,
+          crunchbase_url: crunchbaseInvestorUrl,
+          tracxn_url: tracxnUrl,
+        });
+      } catch (e) {
+        console.error(`Investor enrichment failed for ${investorName} (non-fatal):`, e);
+      }
+    }
+
+    // Step 3c: Last 3 articles with previews
+    try {
+      const newsSearchResponse = await fetch("https://api.firecrawl.dev/v1/search", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${firecrawlApiKey}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ query: `"${deal.name}" company latest news article`, limit: 10 }),
+      });
+
+      if (newsSearchResponse.ok) {
+        const newsSearchData = await newsSearchResponse.json();
+        const newsCandidates = (newsSearchData.data || newsSearchData.results || [])
+          .filter((item: any) =>
+            item.url &&
+            !item.url.includes("linkedin.com") &&
+            !item.url.includes("crunchbase.com") &&
+            !item.url.includes("tracxn.com")
+          )
+          .slice(0, 6);
+
+        for (const item of newsCandidates) {
+          if (latestArticles.length >= 3) break;
+          const articleUrl = item.url;
+          if (!articleUrl || latestArticles.some((a) => a.url === articleUrl)) continue;
+
+          let preview: string | null = item.description || null;
+          try {
+            const articleScrapeResponse = await fetch("https://api.firecrawl.dev/v1/scrape", {
+              method: "POST",
+              headers: {
+                Authorization: `Bearer ${firecrawlApiKey}`,
+                "Content-Type": "application/json",
+              },
+              body: JSON.stringify({ url: articleUrl, formats: ["markdown"], onlyMainContent: true }),
+            });
+            if (articleScrapeResponse.ok) {
+              const articleData = await articleScrapeResponse.json();
+              const markdown = (articleData.data?.markdown || articleData.markdown || "").replace(/\s+/g, " ").trim();
+              if (markdown.length > 0) {
+                preview = markdown.slice(0, 280);
+              }
+            }
+          } catch (e) {
+            console.error("Article scrape failed (non-fatal):", e);
+          }
+
+          latestArticles.push({
+            title: item.title || articleUrl,
+            url: articleUrl,
+            source: item.metadata?.source || null,
+            preview,
+          });
+        }
+      }
+    } catch (e) {
+      console.error("News search failed (non-fatal):", e);
+    }
+
     // Update deal with research results
     const updatePayload: Record<string, unknown> = {
       deep_research_status: "completed",
       updated_at: new Date().toISOString(),
+      research_verification: verification,
+      investor_research: investorResearch,
+      latest_articles: latestArticles,
+      deck_preview: deckPreview,
     };
 
     if (research.website && !deal.website) {
@@ -651,7 +859,17 @@ Use web_search to find their names, titles, and LinkedIn profile URLs. Then call
     }
 
     return new Response(
-      JSON.stringify({ success: true, provider, research, crunchbase: { crunchbaseUrl, fundingTotal, lastFundingRound, numEmployees }, people }),
+      JSON.stringify({
+        success: true,
+        provider,
+        research,
+        crunchbase: { crunchbaseUrl, fundingTotal, lastFundingRound, numEmployees },
+        people,
+        verification,
+        investorResearch,
+        latestArticles,
+        deckPreview,
+      }),
       { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
   } catch (error) {
