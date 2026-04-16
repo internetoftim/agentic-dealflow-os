@@ -8,6 +8,8 @@ const corsHeaders = {
     "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
 
+const CAPTURED_VIEWER_SOURCES = new Set(["docsend", "pandadoc", "papermark"]);
+
 /** Extract plain text from all slides in a PPTX file (which is a ZIP of XML). */
 async function extractPptxText(arrayBuffer: ArrayBuffer): Promise<{ text: string; pageCount: number }> {
   const zipReader = new ZipReader(new BlobReader(new Blob([arrayBuffer])));
@@ -70,6 +72,10 @@ function extractPdfText(arrayBuffer: ArrayBuffer): { text: string; pageCount: nu
   return { text: textChunks.join(" ").replace(/\s+/g, " ").trim(), pageCount };
 }
 
+function isCapturedViewerSource(sourceType?: string | null): boolean {
+  return CAPTURED_VIEWER_SOURCES.has((sourceType ?? "").toLowerCase());
+}
+
 /** Sanitize a company name: remove slashes, colons, emojis, and other illegal filename chars. */
 function sanitizeCompanyName(name: string): string {
   return name
@@ -116,11 +122,14 @@ async function processNextQueued(adminClient: any, userId: string, supabaseUrl: 
     // Get the source to find storage path
     const { data: sources } = await adminClient
       .from("sources")
-      .select("storage_path")
+      .select("storage_path, source_type")
       .eq("deal_id", nextDeal.id)
+      .order("created_at", { ascending: false })
       .limit(1);
-    const storagePath = sources?.[0]?.storage_path;
+    const nextSource = sources?.[0];
+    const storagePath = nextSource?.storage_path;
     if (!storagePath) return;
+    const skipCompression = isCapturedViewerSource(nextSource?.source_type);
 
     // Update status from queued to uploading
     await adminClient.from("deals").update({ status: "uploading", updated_at: new Date().toISOString() }).eq("id", nextDeal.id);
@@ -133,7 +142,11 @@ async function processNextQueued(adminClient: any, userId: string, supabaseUrl: 
           Authorization: `Bearer ${supabaseServiceKey}`,
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ dealId: nextDeal.id, storagePath }),
+        body: JSON.stringify({
+          dealId: nextDeal.id,
+          storagePath,
+          ...(skipCompression ? { skipCompression: true } : {}),
+        }),
       });
       console.log(`Started queued deal: ${nextDeal.id}`);
     } catch (e) {
@@ -514,16 +527,23 @@ Deno.serve(async (req) => {
 
       let extractedText = "";
       let actualPageCount = pageCount;
+      const { data: existingSource } = await adminClient.from("sources")
+        .select("extracted_text, source_type")
+        .eq("deal_id", dealId)
+        .eq("user_id", userId)
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      const existingSourceText = existingSource?.extracted_text?.trim() ?? "";
+      const hasStoredCapturedText = isCapturedViewerSource(existingSource?.source_type) && existingSourceText.length > 0;
 
       // If client already extracted text locally (e.g. Florence-2), load it
       if (localExtracted) {
-        const { data: existingSource } = await adminClient.from("sources")
-          .select("extracted_text")
-          .eq("deal_id", dealId)
-          .eq("user_id", userId)
-          .single();
-        extractedText = existingSource?.extracted_text ?? "";
+        extractedText = existingSourceText;
         console.log(`Using locally-extracted text: ${extractedText.length} chars`);
+      } else if (hasStoredCapturedText) {
+        extractedText = existingSourceText;
+        console.log(`Using stored OCR fallback text: ${extractedText.length} chars`);
       } else {
         // Server-side text extraction
         // For PPTX: prefer Slides API text (most accurate), then PPTX XML, then PDF text
@@ -570,6 +590,11 @@ Deno.serve(async (req) => {
                 console.warn("PPTX fallback text extraction failed:", e);
               }
             }
+          }
+
+          if (extractedText.length < 200 && hasStoredCapturedText && existingSourceText.length > extractedText.length) {
+            extractedText = existingSourceText;
+            console.log(`Falling back to stored OCR text: ${extractedText.length} chars`);
           }
         }
 
