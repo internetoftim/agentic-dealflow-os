@@ -9,6 +9,7 @@ import KanbanPipeline from "@/pages/KanbanPipeline";
 import DealWorkspace from "@/pages/DealWorkspace";
 import DataRoom from "@/pages/DataRoom";
 import SettingsPage from "@/pages/SettingsPage";
+import IntakePage from "@/pages/IntakePage";
 import LoginPage from "@/pages/LoginPage";
 import NotFound from "@/pages/NotFound";
 import IngestRelay from "@/pages/IngestRelay";
@@ -49,6 +50,7 @@ const App = () => (
                       <Route path="/" element={<DealWorkspace />} />
                       <Route path="/pipeline" element={<KanbanPipeline />} />
                       <Route path="/data-room" element={<DataRoom />} />
+                      <Route path="/intake" element={<IntakePage />} />
                       <Route path="/settings" element={<SettingsPage />} />
                       <Route path="*" element={<NotFound />} />
                     </Routes>
