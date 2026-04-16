@@ -84,9 +84,21 @@ Deno.serve(async (req) => {
       .select("ai_model, deep_research_provider")
       .eq("user_id", user.id)
       .single();
+    const { data: latestSource } = await adminClient
+      .from("sources")
+      .select("extracted_text, preview_images")
+      .eq("deal_id", dealId)
+      .eq("user_id", user.id)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
 
     const provider = "firecrawl";
     const aiModel = settings?.ai_model ?? "gpt-5.4";
+    const deckTextContext = (latestSource?.extracted_text || "").slice(0, 12_000);
+    const previewImages = Array.isArray(latestSource?.preview_images)
+      ? latestSource.preview_images.filter((item: unknown): item is string => typeof item === "string" && item.startsWith("data:image/"))
+      : [];
 
     // Mark as researching
     await adminClient
@@ -295,8 +307,14 @@ Here are initial search results to guide you:
 ${searchSummary}
 
 ${candidateWebsite ? `Candidate website: ${candidateWebsite}` : ""}
+${deckTextContext ? `\nDeck context (from slides):\n${deckTextContext}` : ""}
 
 Use web_search to verify URLs if needed. Once confident, call the extract_company_research function with verified results.`;
+
+        const cuInputContent: Array<Record<string, unknown>> = [{ type: "input_text", text: cuPrompt }];
+        for (const url of previewImages.slice(0, 6)) {
+          cuInputContent.push({ type: "input_image", image_url: url, detail: "low" });
+        }
 
         const cuResponse = await fetch(`${OPENAI_BASE}/v1/responses`, {
           method: "POST",
@@ -331,7 +349,7 @@ Use web_search to verify URLs if needed. Once confident, call the extract_compan
               },
             ],
             instructions: "You are a precise research analyst. Use web_search to verify company information. When confident, call extract_company_research.",
-            input: [{ role: "user", content: cuPrompt }],
+            input: [{ role: "user", content: cuInputContent }],
             max_output_tokens: 4096,
           }),
         });
@@ -373,6 +391,7 @@ SEARCH RESULTS:
 ${searchSummary}
 
 ${websiteContent ? `WEBSITE CONTENT:\n${websiteContent}` : ""}
+${deckTextContext ? `\nDECK CONTEXT:\n${deckTextContext}` : ""}
 
 Extract the company's official website URL and LinkedIn company page URL using the extract_company_research tool. Only return URLs you are confident about. Return null for any field you cannot verify.`;
 
@@ -383,6 +402,13 @@ Extract the company's official website URL and LinkedIn company page URL using t
           aiHeaders["Authorization"] = `Bearer ${rawApiKey}`;
         }
 
+        const userContent: Array<Record<string, unknown>> = [{ type: "text", text: researchPrompt }];
+        if (!config.isSapinsapin) {
+          for (const url of previewImages.slice(0, 6)) {
+            userContent.push({ type: "image_url", image_url: { url, detail: "low" } });
+          }
+        }
+
         const aiResponse = await fetch(`${config.baseUrl}/v1/chat/completions`, {
           method: "POST",
           headers: aiHeaders,
@@ -390,7 +416,7 @@ Extract the company's official website URL and LinkedIn company page URL using t
             model: config.modelName,
             messages: [
               { role: "system", content: "You are a precise research analyst. Only return verified information." },
-              { role: "user", content: researchPrompt },
+              { role: "user", content: userContent },
             ],
             tools: [
               {

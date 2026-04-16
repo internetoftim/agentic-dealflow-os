@@ -404,7 +404,7 @@ Deno.serve(async (req) => {
     }
 
     // Determine which steps to skip when resuming
-    const stepOrder = ["converting", "compressing", "extracting", "searching-website", "syncing", "memo-ready"];
+    const stepOrder = ["converting", "extracting", "compressing", "searching-website", "syncing", "memo-ready"];
     const resumeIdx = resumeFrom ? stepOrder.indexOf(resumeFrom) : -1;
     const shouldSkip = (step: string) => resumeFrom ? stepOrder.indexOf(step) < resumeIdx : false;
 
@@ -416,14 +416,13 @@ Deno.serve(async (req) => {
       .single();
     const model = settings?.ai_model ?? "gpt-5.4";
 
-    // Download file from storage — skip for captured decks during compression
-    // (we still need it for text extraction, but we'll download later in a lighter path)
+    // Download file from storage only when needed (PPTX conversion path).
     let arrayBuffer: ArrayBuffer | null = null;
     const fileName = storagePath.split("/").pop()?.toLowerCase() ?? "";
     const isPptx = fileName.endsWith(".pptx") || fileName.endsWith(".ppt");
     const isPdf = fileName.endsWith(".pdf");
 
-    if (!skipCompression) {
+    if (isPptx && !skipCompression) {
       const { data: fileData, error: downloadError } = await adminClient.storage
         .from("decks").download(storagePath);
       if (downloadError || !fileData) {
@@ -471,49 +470,13 @@ Deno.serve(async (req) => {
       pdfStoragePath = storagePath.replace(/\.(pptx|ppt)$/i, ".pdf");
     }
 
-    // --- STEP 2: Compress PDF ---
+    // --- STEP 2: Extracting metadata ---
     let compressedPdf: Uint8Array | null = null;
-    let pageCount: number;
-
+    let pageCount = 0;
     if (skipCompression) {
-      // Captured decks (DocSend/Papermark): PDF already in storage, skip download+recompress
-      console.log("Skipping compression — captured deck already stored");
-      const { data: dealData } = await adminClient.from("deals").select("pages, deck_size").eq("id", dealId).single();
-      pageCount = dealData?.pages ?? 0;
-      // Briefly show step for UI consistency
-      await setDealStatus(adminClient, dealId, "compressing");
-    } else if (!shouldSkip("compressing")) {
-      if (await checkAborted(adminClient, dealId, "compressing")) {
-        await processNextQueued(adminClient, userId, supabaseUrl, supabaseServiceKey);
-        return new Response(JSON.stringify({ success: true, cancelled: true, at: "compressing" }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
-      }
-      await setDealStatus(adminClient, dealId, "compressing");
-
-      const pdfBytes = new Uint8Array(arrayBuffer!);
-      const result = await compressPdfToTarget(pdfBytes);
-      compressedPdf = result.compressed;
-      pageCount = result.pages;
-
-      const { error: compressUploadError } = await adminClient.storage
-        .from("decks")
-        .upload(pdfStoragePath, new Blob([compressedPdf.buffer as ArrayBuffer], { type: "application/pdf" }), { upsert: true });
-      if (compressUploadError) console.warn("Failed to upload compressed PDF:", compressUploadError.message);
-
-      await adminClient.from("deals").update({
-        compressed_size: `${(compressedPdf.length / (1024 * 1024)).toFixed(1)}MB`,
-        pages: pageCount,
-        updated_at: new Date().toISOString(),
-      }).eq("id", dealId);
-    } else {
-      // Resuming past compression — re-download the already-compressed PDF
-      const { data: existingPdf } = await adminClient.storage.from("decks").download(pdfStoragePath);
-      if (!existingPdf) throw new Error("Cannot find compressed PDF for resume");
-      compressedPdf = new Uint8Array(await existingPdf.arrayBuffer());
       const { data: dealData } = await adminClient.from("deals").select("pages").eq("id", dealId).single();
       pageCount = dealData?.pages ?? 0;
     }
-
-    // --- STEP 3: Extracting metadata ---
     // If text was extracted locally (e.g. Florence-2 in-browser), skip server-side extraction
     // but still run LLM metadata extraction if a cloud model is configured
     const isLocalModel = model === "local-florence2";
@@ -528,13 +491,16 @@ Deno.serve(async (req) => {
       let extractedText = "";
       let actualPageCount = pageCount;
       const { data: existingSource } = await adminClient.from("sources")
-        .select("extracted_text, source_type")
+        .select("extracted_text, source_type, preview_images")
         .eq("deal_id", dealId)
         .eq("user_id", userId)
         .order("created_at", { ascending: false })
         .limit(1)
         .maybeSingle();
       const existingSourceText = existingSource?.extracted_text?.trim() ?? "";
+      const previewImages = Array.isArray(existingSource?.preview_images)
+        ? existingSource.preview_images.filter((item: unknown): item is string => typeof item === "string" && item.startsWith("data:image/"))
+        : [];
       const hasStoredCapturedText = isCapturedViewerSource(existingSource?.source_type) && existingSourceText.length > 0;
 
       // If client already extracted text locally (e.g. Florence-2), load it
@@ -553,15 +519,12 @@ Deno.serve(async (req) => {
         } else {
           // Try PDF text extraction — download on-demand if not already in memory
           try {
-            let pdfBuffer: ArrayBuffer;
-            if (compressedPdf) {
-              pdfBuffer = compressedPdf.buffer as ArrayBuffer;
-            } else {
-              // Lightweight download just for text extraction
-              const { data: pdfFile } = await adminClient.storage.from("decks").download(pdfStoragePath);
-              if (!pdfFile) throw new Error("Cannot download PDF for text extraction");
-              pdfBuffer = await pdfFile.arrayBuffer();
-            }
+            const pdfBuffer: ArrayBuffer = await (async () => {
+            // Lightweight download just for text extraction
+            const { data: pdfFile } = await adminClient.storage.from("decks").download(pdfStoragePath);
+            if (!pdfFile) throw new Error("Cannot download PDF for text extraction");
+            return await pdfFile.arrayBuffer();
+            })();
             const result = extractPdfText(pdfBuffer);
             extractedText = result.text;
             if (result.pageCount > 0) actualPageCount = result.pageCount;
@@ -634,17 +597,13 @@ Deno.serve(async (req) => {
 
         const userContent: unknown[] = [];
 
-        // Determine if the model supports file/image input
-        // Skip file input for captured decks (skipCompression) to avoid base64 memory explosion
-        const supportsFileInput = !skipCompression && !isSapinsapin && (model === "gpt-4o" || model === "gpt-5" || model === "gpt-5-mini" || model === "gpt-5.4");
-
-        if (supportsFileInput && compressedPdf) {
-          const base64 = btoa(new Uint8Array(compressedPdf).reduce((data, byte) => data + String.fromCharCode(byte), ""));
-          userContent.push({ type: "file", file: { filename: "deck.pdf", file_data: `data:application/pdf;base64,${base64}` } });
-          userContent.push({ type: "text", text: "Analyze this pitch deck and extract metadata using the extract_deck_metadata tool." });
-        } else {
-          const textToSend = extractedText.length > 0 ? extractedText.slice(0, 50_000) : "No text could be extracted from the deck file.";
-          userContent.push({ type: "text", text: `Here is the full text content of the pitch deck:\n\n${textToSend}\n\nAnalyze this pitch deck and extract metadata using the extract_deck_metadata tool. Return null for fields you cannot determine.` });
+        const supportsMultimodal = !isSapinsapin && (model === "gpt-4o" || model === "gpt-5" || model === "gpt-5-mini" || model === "gpt-5.4");
+        const textToSend = extractedText.length > 0 ? extractedText.slice(0, 50_000) : "No text could be extracted from the deck file.";
+        userContent.push({ type: "text", text: `Analyze this pitch deck and extract metadata using the extract_deck_metadata tool. Return null for fields you cannot determine.\n\nDeck text (if available):\n${textToSend}` });
+        if (supportsMultimodal && previewImages.length > 0) {
+          for (const url of previewImages.slice(0, 8)) {
+            userContent.push({ type: "image_url", image_url: { url, detail: "low" } });
+          }
         }
 
         const aiPayload = {
@@ -688,12 +647,12 @@ Deno.serve(async (req) => {
         });
 
         // Fallback: if file-based request fails, retry with text-only
-        if (!aiResponse.ok && supportsFileInput && extractedText.length > 0) {
-          console.warn(`File-based AI call failed (${aiResponse.status}), falling back to text-only extraction`);
-          const textToSend = extractedText.slice(0, 50_000);
+        // Keep a lightweight retry with text-only prompt
+        if (!aiResponse.ok && extractedText.length > 0) {
+          console.warn(`AI call failed (${aiResponse.status}), retrying with text-only extraction`);
           aiPayload.messages = [
             { role: "system", content: "You are a VC analyst assistant. Analyze startup pitch decks and extract structured metadata. Be precise. Return null for missing fields." },
-            { role: "user", content: [{ type: "text", text: `Here is the full text content of the pitch deck:\n\n${textToSend}\n\nAnalyze this pitch deck and extract metadata using the extract_deck_metadata tool. Return null for fields you cannot determine.` }] },
+            { role: "user", content: [{ type: "text", text: `Here is the full text content of the pitch deck:\n\n${extractedText.slice(0, 50_000)}\n\nAnalyze this pitch deck and extract metadata using the extract_deck_metadata tool. Return null for fields you cannot determine.` }] },
           ];
           aiResponse = await fetch(`${baseUrl}/v1/chat/completions`, {
             method: "POST",
@@ -729,6 +688,46 @@ Deno.serve(async (req) => {
         updatePayload.pages = actualPageCount > 0 ? actualPageCount : (metadata.page_count ?? null);
 
         await adminClient.from("deals").update(updatePayload).eq("id", dealId);
+      }
+    }
+
+    // --- STEP 3: Compress PDF (run late; skip when already-captured or already small) ---
+    if (!shouldSkip("compressing")) {
+      if (await checkAborted(adminClient, dealId, "compressing")) {
+        await processNextQueued(adminClient, userId, supabaseUrl, supabaseServiceKey);
+        return new Response(JSON.stringify({ success: true, cancelled: true, at: "compressing" }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      }
+      await setDealStatus(adminClient, dealId, "compressing");
+
+      if (skipCompression) {
+        console.log("Skipping compression — captured deck already stored");
+      } else {
+        const { data: pdfFile } = await adminClient.storage.from("decks").download(pdfStoragePath);
+        if (!pdfFile) throw new Error("Cannot download PDF for compression");
+        const pdfBytes = new Uint8Array(await pdfFile.arrayBuffer());
+        const shouldCompress = pdfBytes.length > 10 * 1024 * 1024;
+
+        if (shouldCompress) {
+          const result = await compressPdfToTarget(pdfBytes);
+          compressedPdf = result.compressed;
+          pageCount = result.pages || pageCount;
+          const { error: compressUploadError } = await adminClient.storage
+            .from("decks")
+            .upload(pdfStoragePath, new Blob([compressedPdf.buffer as ArrayBuffer], { type: "application/pdf" }), { upsert: true });
+          if (compressUploadError) console.warn("Failed to upload compressed PDF:", compressUploadError.message);
+          await adminClient.from("deals").update({
+            compressed_size: `${(compressedPdf.length / (1024 * 1024)).toFixed(1)}MB`,
+            pages: pageCount || null,
+            updated_at: new Date().toISOString(),
+          }).eq("id", dealId);
+        } else {
+          console.log("Skipping compression — PDF already <= 10MB");
+          await adminClient.from("deals").update({
+            compressed_size: `${(pdfBytes.length / (1024 * 1024)).toFixed(1)}MB`,
+            pages: pageCount || null,
+            updated_at: new Date().toISOString(),
+          }).eq("id", dealId);
+        }
       }
     }
 
