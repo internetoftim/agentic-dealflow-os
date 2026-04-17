@@ -75,4 +75,4 @@ The code mixes `/v1/chat/completions` and `/v1/responses` payload styles in mult
 - Improved traceability (per-field provenance + confidence)
 
 ## Reference implementation in this repo
-See: `supabase/functions/_shared/agents_sdk_pipeline.ts`
+A previous reference module (`supabase/functions/_shared/agents_sdk_pipeline.ts`) was removed because the `npm:@openai/agents` import broke edge-function deploys. Re-introduce it as a separate, opt-in module with a deno.json import map before wiring it into handlers.
