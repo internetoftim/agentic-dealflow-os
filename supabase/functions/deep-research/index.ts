@@ -25,18 +25,6 @@ type VerificationItem = {
   matched: boolean;
 };
 
-type AgentsSdkPerson = {
-  name: string;
-  title: string | null;
-  linkedin_url: string | null;
-};
-
-type AgentsSdkResearchResult = {
-  website: string | null;
-  linkedin_url: string | null;
-  people: AgentsSdkPerson[];
-};
-
 function getAiConfig(model: string) {
   const isSapinsapin = model === "gpt-oss-202b";
   const isComputerUse = model === "gpt-5.4";
@@ -125,105 +113,6 @@ function resolveDeepResearchProvider(rawProvider: unknown): "firecrawl" | "custo
   if (normalized === "firecrawl") return "firecrawl";
   if (normalized === "custom-agent" || normalized === "custom") return "custom";
   return "custom";
-}
-
-function parseJsonObject(text: string): Record<string, unknown> | null {
-  const trimmed = text.trim();
-  try {
-    return JSON.parse(trimmed) as Record<string, unknown>;
-  } catch {
-    const match = trimmed.match(/\{[\s\S]*\}$/);
-    if (!match) return null;
-    try {
-      return JSON.parse(match[0]) as Record<string, unknown>;
-    } catch {
-      return null;
-    }
-  }
-}
-
-async function runAgentsSdkCompanyAndPeopleResearch(args: {
-  model: string;
-  companyName: string;
-  sector: string | null;
-  stage: string | null;
-  deckTextContext: string;
-  searchSummary: string;
-  candidateWebsite: string | null;
-  existingLinkedinUrl: string | null;
-}): Promise<AgentsSdkResearchResult> {
-  // Keep the specifier dynamic so legacy environments can deploy without hard import resolution.
-  const sdkSpecifier = ["npm:@openai", "/agents"].join("");
-  const sdkMod = await import(sdkSpecifier);
-  const Agent = sdkMod.Agent as any;
-  const run = sdkMod.run as any;
-  const webSearchTool = sdkMod.webSearchTool as any;
-
-  if (!Agent || !run || !webSearchTool) {
-    throw new Error("Agents SDK exports are unavailable in this runtime");
-  }
-
-  const researchAgent = new Agent({
-    name: "DeepResearchWebAgent",
-    model: args.model || "gpt-5.4",
-    instructions:
-      "You are a strict VC research analyst. Use web search to verify official company website, LinkedIn company page, and key leadership. Return JSON only.",
-    tools: [webSearchTool({ searchContextSize: "medium" })],
-  });
-
-  const prompt = `Research this startup:
-- Company: ${args.companyName}
-- Sector: ${args.sector || "unknown"}
-- Stage: ${args.stage || "unknown"}
-- Candidate website: ${args.candidateWebsite || "none"}
-- Existing LinkedIn URL: ${args.existingLinkedinUrl || "none"}
-
-Search evidence:
-${args.searchSummary || "No search summary."}
-
-Deck context:
-${args.deckTextContext || "No deck context."}
-
-Return STRICT JSON only with this schema:
-{
-  "website": "string|null",
-  "linkedin_url": "string|null",
-  "people": [
-    { "name": "string", "title": "string|null", "linkedin_url": "string|null" }
-  ]
-}
-Rules:
-- Include only reasonably verified results.
-- Prefer official domains and linkedin.com/company for company URL.
-- Return empty array for people when uncertain.
-- No markdown.`;
-
-  const result = await run(researchAgent, prompt, { maxTurns: 10 });
-  const outputText =
-    typeof result?.finalOutput === "string"
-      ? result.finalOutput
-      : JSON.stringify(result?.finalOutput ?? {});
-  const parsed = parseJsonObject(outputText);
-  if (!parsed) {
-    throw new Error("Agents SDK returned non-JSON output");
-  }
-
-  const website = typeof parsed.website === "string" ? parsed.website : null;
-  const linkedin = typeof parsed.linkedin_url === "string" ? parsed.linkedin_url : null;
-  const rawPeople = Array.isArray(parsed.people) ? parsed.people : [];
-  const people: AgentsSdkPerson[] = rawPeople
-    .map((item: any) => ({
-      name: typeof item?.name === "string" ? item.name.trim() : "",
-      title: typeof item?.title === "string" ? item.title : null,
-      linkedin_url: typeof item?.linkedin_url === "string" ? item.linkedin_url : null,
-    }))
-    .filter((p) => p.name.length > 0);
-
-  return {
-    website,
-    linkedin_url: linkedin,
-    people,
-  };
 }
 
 async function fetchWithTimeout(url: string, init: RequestInit, timeoutMs = FIRECRAWL_TIMEOUT_MS): Promise<Response> {
@@ -505,8 +394,7 @@ Deno.serve(async (req) => {
       }
     }
 
-    let research: { website: string | null; linkedin_url: string | null } | null = null;
-    let agentsSdkPeople: { name: string; title: string | null; linkedin_url: string | null }[] = [];
+    let research: { website: string | null; linkedin_url: string | null };
     const investorResearch: Array<{ name: string; linkedin_url: string | null; crunchbase_url: string | null; tracxn_url: string | null }> = [];
     const latestArticles: Array<{ title: string; url: string; source: string | null; preview: string | null }> = [];
 
@@ -521,35 +409,6 @@ Deno.serve(async (req) => {
       };
       console.log("Firecrawl-only extraction:", JSON.stringify(research));
     } else {
-      const searchSummary = searchResults
-        .map((r: any, i: number) => `[${i + 1}] ${r.title || ""} - ${r.url || ""}\n${r.description || ""}`)
-        .join("\n\n");
-
-      const useAgentsSdk = (Deno.env.get("ENABLE_AGENTS_SDK") ?? "false").toLowerCase() === "true";
-      if (useAgentsSdk) {
-        try {
-          console.log("ENABLE_AGENTS_SDK=true — trying Agents SDK deep-research path");
-          const sdkResult = await runAgentsSdkCompanyAndPeopleResearch({
-            model: aiModel === "gpt-oss-202b" ? "gpt-5.4" : aiModel,
-            companyName: deal.name,
-            sector: deal.sector,
-            stage: deal.stage,
-            deckTextContext,
-            searchSummary,
-            candidateWebsite: candidateWebsite || null,
-            existingLinkedinUrl: searchResults.find((r: any) => r.url?.includes("linkedin.com/company"))?.url || null,
-          });
-          research = {
-            website: sdkResult.website,
-            linkedin_url: sdkResult.linkedin_url,
-          };
-          agentsSdkPeople = sdkResult.people.slice(0, 10);
-          console.log(`Agents SDK extraction complete (people=${agentsSdkPeople.length})`);
-        } catch (e) {
-          console.warn("Agents SDK path failed, falling back to legacy deep-research flow:", e);
-        }
-      }
-
       // Custom agent mode: use selected LLM for structured extraction
       const config = getAiConfig(aiModel);
       const rawApiKey = Deno.env.get(config.envKey)?.trim().replace(/[\r\n]/g, "");
@@ -557,7 +416,11 @@ Deno.serve(async (req) => {
         throw new Error(`${config.envKey} is not configured`);
       }
 
-      if (!research && config.isComputerUse) {
+      const searchSummary = searchResults
+        .map((r: any, i: number) => `[${i + 1}] ${r.title || ""} - ${r.url || ""}\n${r.description || ""}`)
+        .join("\n\n");
+
+      if (config.isComputerUse) {
         // GPT-5.4 Computer Use path — uses OpenAI Responses API with computer_use_preview tool
         console.log("Using GPT-5.4 with web_search for deep research");
 
@@ -639,7 +502,7 @@ Use web_search to verify URLs if needed. Once confident, call the extract_compan
             linkedin_url: searchResults.find((r: any) => r.url?.includes("linkedin.com/company"))?.url || null,
           };
         }
-      } else if (!research) {
+      } else {
         // Standard LLM tool-calling path
         const researchPrompt = `You are a VC research analyst. Based on the following search results and website content, extract accurate company information.
 
@@ -723,10 +586,6 @@ Extract the company's official website URL and LinkedIn company page URL using t
         research = JSON.parse(toolCall.function.arguments);
         console.log("Custom agent extraction:", JSON.stringify(research));
       }
-    }
-
-    if (!research) {
-      research = { website: candidateWebsite || null, linkedin_url: null };
     }
 
     // Step 3b: Enrich investors with LinkedIn + Crunchbase + Tracxn
@@ -851,7 +710,7 @@ Extract the company's official website URL and LinkedIn company page URL using t
       .eq("user_id", user.id);
 
     // Step 4: Extract key people (GPT web search primary, Firecrawl fallback)
-    let people: { name: string; title: string | null; linkedin_url: string | null }[] = [...agentsSdkPeople];
+    let people: { name: string; title: string | null; linkedin_url: string | null }[] = [];
 
     const openaiKey = Deno.env.get("OPENAI_API_KEY")?.trim().replace(/[\r\n]/g, "");
 

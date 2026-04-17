@@ -197,7 +197,6 @@ export type Database = {
           gmail_message_id: string | null
           id: string
           original_size: string | null
-          preview_images: Json | null
           processing_status: string
           source_type: string
           storage_path: string | null
@@ -212,7 +211,6 @@ export type Database = {
           gmail_message_id?: string | null
           id?: string
           original_size?: string | null
-          preview_images?: Json | null
           processing_status?: string
           source_type?: string
           storage_path?: string | null
@@ -227,7 +225,6 @@ export type Database = {
           gmail_message_id?: string | null
           id?: string
           original_size?: string | null
-          preview_images?: Json | null
           processing_status?: string
           source_type?: string
           storage_path?: string | null

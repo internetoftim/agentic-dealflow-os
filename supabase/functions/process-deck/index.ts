@@ -93,26 +93,6 @@ async function setDealStatus(adminClient: any, dealId: string, status: string) {
     .eq("id", dealId);
 }
 
-async function triggerDeepResearch(
-  supabaseUrl: string,
-  supabaseServiceKey: string,
-  dealId: string,
-) {
-  const response = await fetch(`${supabaseUrl}/functions/v1/deep-research`, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${supabaseServiceKey}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({ dealId }),
-  });
-
-  if (!response.ok) {
-    const errText = await response.text();
-    throw new Error(`deep-research trigger failed [${response.status}]: ${errText}`);
-  }
-}
-
 /** Check if the deal has been cancelled/aborted by the user. If so, exit. */
 async function checkAborted(adminClient: any, dealId: string, currentStep: string): Promise<boolean> {
   const { data } = await adminClient
@@ -353,9 +333,6 @@ async function compressPdfToTarget(
 }
 
 Deno.serve(async (req) => {
-  let adminClient: ReturnType<typeof createClient> | null = null;
-  let dealIdForFailure: string | null = null;
-  let userIdForFailure: string | null = null;
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
   }
@@ -378,7 +355,7 @@ Deno.serve(async (req) => {
     const SAPINSAPIN_BASE = "https://apollo-inference-bridge.am1-aks.apolloglobal.net";
     const OPENAI_BASE = "https://api.openai.com";
 
-    adminClient = createClient(supabaseUrl, supabaseServiceKey);
+    const adminClient = createClient(supabaseUrl, supabaseServiceKey);
 
     // Support two auth modes:
     // 1. User JWT (from frontend) — resolves user via getUser()
@@ -404,7 +381,6 @@ Deno.serve(async (req) => {
 
     const body = await req.json();
     const { dealId, storagePath, resumeFrom, localExtracted, skipCompression } = body;
-    dealIdForFailure = dealId ?? null;
     if (!dealId || !storagePath) {
       return new Response(JSON.stringify({ error: "Missing dealId or storagePath" }), {
         status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
@@ -421,7 +397,6 @@ Deno.serve(async (req) => {
       }
       userId = dealRecord.user_id;
     }
-    userIdForFailure = userId;
 
     // When resuming, clear the paused_at_step
     if (resumeFrom) {
@@ -973,8 +948,15 @@ Deno.serve(async (req) => {
       const drStatus = existingDeal?.deep_research_status;
       if (drStatus !== "researching" && drStatus !== "completed") {
         console.log(`Auto-triggering deep-research for deal ${dealId}`);
-        // Best-effort but awaited so serverless runtime does not drop the request.
-        await triggerDeepResearch(supabaseUrl, supabaseServiceKey, dealId);
+        // Fire-and-forget: don't block process-deck completion
+        fetch(`${supabaseUrl}/functions/v1/deep-research`, {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${supabaseServiceKey}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ dealId }),
+        }).catch((e) => console.warn("Deep-research auto-trigger failed:", e));
       } else {
         console.log(`Skipping auto-trigger; deep_research_status=${drStatus}`);
       }
@@ -991,24 +973,6 @@ Deno.serve(async (req) => {
     );
   } catch (error) {
     console.error("process-deck error:", error);
-    if (adminClient && dealIdForFailure) {
-      try {
-        await adminClient
-          .from("deals")
-          .update({ status: "error", updated_at: new Date().toISOString() })
-          .eq("id", dealIdForFailure);
-        if (userIdForFailure) {
-          await processNextQueued(
-            adminClient,
-            userIdForFailure,
-            Deno.env.get("SUPABASE_URL")!,
-            Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
-          );
-        }
-      } catch (statusError) {
-        console.error("Failed to mark process-deck error status:", statusError);
-      }
-    }
     const message = error instanceof Error ? error.message : "Unknown error";
     return new Response(JSON.stringify({ error: message }), {
       status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },

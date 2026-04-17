@@ -12,14 +12,9 @@ type CaptureScreenshot = {
 };
 
 type CaptureServiceResponse = {
-  data?: CaptureServiceResponse;
   page_count?: number;
-  pageCount?: number;
   pdf_base64?: string;
-  pdfBase64?: string;
   screenshots?: CaptureScreenshot[] | null;
-  preview_images?: string[] | null;
-  previewImages?: string[] | null;
   title?: string | null;
 };
 
@@ -36,9 +31,7 @@ function buildCapturePayload(args: CaptureSyncArgs) {
   return {
     url: args.url,
     max_pages: args.maxPages ?? 50,
-    maxPages: args.maxPages ?? 50,
     ...(args.gateEmail ? { gate_email: args.gateEmail } : {}),
-    ...(args.gateEmail ? { gateEmail: args.gateEmail } : {}),
   };
 }
 
@@ -72,45 +65,12 @@ function samplePreviewImages(
   return sampled;
 }
 
-function unwrapCaptureResponse(raw: CaptureServiceResponse): CaptureServiceResponse {
-  if (raw && typeof raw === "object" && raw.data && typeof raw.data === "object") {
-    return raw.data;
-  }
-  return raw;
-}
-
-function getPageCount(data: CaptureServiceResponse): number {
-  if (typeof data.page_count === "number") return data.page_count;
-  if (typeof data.pageCount === "number") return data.pageCount;
-  return 0;
-}
-
-function getPdfBase64(data: CaptureServiceResponse): string | null {
-  if (typeof data.pdf_base64 === "string" && data.pdf_base64.length > 0) return data.pdf_base64;
-  if (typeof data.pdfBase64 === "string" && data.pdfBase64.length > 0) return data.pdfBase64;
-  return null;
-}
-
-function getPreviewImages(data: CaptureServiceResponse): string[] {
-  if (Array.isArray(data.preview_images)) {
-    return data.preview_images.filter((url): url is string => typeof url === "string" && url.startsWith("data:image/"));
-  }
-
-  if (Array.isArray(data.previewImages)) {
-    return data.previewImages.filter((url): url is string => typeof url === "string" && url.startsWith("data:image/"));
-  }
-
-  return samplePreviewImages(data.screenshots);
-}
-
 export async function captureSync(args: CaptureSyncArgs): Promise<CaptureSyncResult> {
-  const normalizedBaseUrl = args.baseUrl.replace(/\/+$/, "");
-  const response = await fetch(`${normalizedBaseUrl}/capture`, {
+  const response = await fetch(`${args.baseUrl}/capture`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
       "X-API-Key": args.apiKey,
-      Authorization: `Bearer ${args.apiKey}`,
     },
     body: JSON.stringify(buildCapturePayload(args)),
   });
@@ -120,19 +80,16 @@ export async function captureSync(args: CaptureSyncArgs): Promise<CaptureSyncRes
     throw new Error(`Capture service error [${response.status}]: ${errorText}`);
   }
 
-  const raw = (await response.json()) as CaptureServiceResponse;
-  const data = unwrapCaptureResponse(raw);
-  const pdfBase64 = getPdfBase64(data);
-
-  if (!pdfBase64) {
+  const data = (await response.json()) as CaptureServiceResponse;
+  if (!data?.pdf_base64) {
     throw new Error("Capture service returned no PDF data");
   }
 
   return {
     title: data.title ?? null,
-    pageCount: getPageCount(data),
-    pdfBase64,
-    previewImages: getPreviewImages(data),
+    pageCount: typeof data.page_count === "number" ? data.page_count : 0,
+    pdfBase64: data.pdf_base64,
+    previewImages: samplePreviewImages(data.screenshots),
   };
 }
 

@@ -1,5 +1,0 @@
-{
-  "imports": {
-    "@openai/agents": "npm:@openai/agents@latest"
-  }
-}
