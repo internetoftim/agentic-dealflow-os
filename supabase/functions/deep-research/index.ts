@@ -9,6 +9,8 @@ const corsHeaders = {
 const SAPINSAPIN_BASE = "https://apollo-inference-bridge.am1-aks.apolloglobal.net";
 const SAPINSAPIN_MODEL = "/models/gpt-oss-20b-balitanlp-cpt";
 const OPENAI_BASE = "https://api.openai.com";
+const FIRECRAWL_BASE = "https://api.firecrawl.dev/v1";
+const FIRECRAWL_TIMEOUT_MS = 20_000;
 
 type SlideMatch = {
   section: "traction" | "ask" | "team";
@@ -105,7 +107,28 @@ function buildVerificationSummary(deal: Record<string, unknown>, extractedText: 
     });
 }
 
+function resolveDeepResearchProvider(rawProvider: unknown): "firecrawl" | "custom" {
+  if (typeof rawProvider !== "string") return "custom";
+  const normalized = rawProvider.trim().toLowerCase();
+  if (normalized === "firecrawl") return "firecrawl";
+  if (normalized === "custom-agent" || normalized === "custom") return "custom";
+  return "custom";
+}
+
+async function fetchWithTimeout(url: string, init: RequestInit, timeoutMs = FIRECRAWL_TIMEOUT_MS): Promise<Response> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort("timeout"), timeoutMs);
+  try {
+    return await fetch(url, { ...init, signal: controller.signal });
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
 Deno.serve(async (req) => {
+  let adminClient: ReturnType<typeof createClient> | null = null;
+  let dealIdForFailure: string | null = null;
+
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
   }
@@ -128,7 +151,7 @@ Deno.serve(async (req) => {
       throw new Error("FIRECRAWL_API_KEY is not configured");
     }
 
-    const adminClient = createClient(supabaseUrl, supabaseServiceKey);
+    adminClient = createClient(supabaseUrl, supabaseServiceKey);
     const userClient = createClient(supabaseUrl, supabaseAnonKey, {
       global: { headers: { Authorization: authHeader } },
     });
@@ -142,6 +165,7 @@ Deno.serve(async (req) => {
     }
 
     const { dealId } = await req.json();
+    dealIdForFailure = dealId ?? null;
     if (!dealId) {
       return new Response(JSON.stringify({ error: "Missing dealId" }), {
         status: 400,
@@ -183,9 +207,22 @@ Deno.serve(async (req) => {
     const deckPreview = buildDeckPreview(extractedDeckText, previewImages);
     const verification = buildVerificationSummary(deal as unknown as Record<string, unknown>, extractedDeckText);
 
-    const provider = "firecrawl";
+    const provider = resolveDeepResearchProvider(settings?.deep_research_provider);
     const aiModel = settings?.ai_model ?? "gpt-5.4";
     const deckTextContext = (latestSource?.extracted_text || "").slice(0, 12_000);
+    const firecrawlFetch = (path: "/search" | "/scrape", body: Record<string, unknown>) =>
+      fetchWithTimeout(
+        `${FIRECRAWL_BASE}${path}`,
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${firecrawlApiKey}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify(body),
+        },
+        FIRECRAWL_TIMEOUT_MS,
+      );
 
     // Mark as researching
     await adminClient
@@ -199,14 +236,7 @@ Deno.serve(async (req) => {
     const searchQuery = `${deal.name} company ${deal.sector ? deal.sector : ""} official website LinkedIn`;
     console.log("Firecrawl search query:", searchQuery);
 
-    const searchResponse = await fetch("https://api.firecrawl.dev/v1/search", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${firecrawlApiKey}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ query: searchQuery, limit: 10 }),
-    });
+    const searchResponse = await firecrawlFetch("/search", { query: searchQuery, limit: 10 });
 
     if (!searchResponse.ok) {
       const errText = await searchResponse.text();
@@ -227,14 +257,7 @@ Deno.serve(async (req) => {
     if (candidateWebsite) {
       try {
         console.log("Scraping website:", candidateWebsite);
-        const scrapeResponse = await fetch("https://api.firecrawl.dev/v1/scrape", {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${firecrawlApiKey}`,
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({ url: candidateWebsite, formats: ["markdown"], onlyMainContent: true }),
-        });
+        const scrapeResponse = await firecrawlFetch("/scrape", { url: candidateWebsite, formats: ["markdown"], onlyMainContent: true });
 
         if (scrapeResponse.ok) {
           const scrapeData = await scrapeResponse.json();
@@ -266,14 +289,7 @@ Deno.serve(async (req) => {
       try {
         const cbSearchQuery = `site:crunchbase.com/organization ${deal.name}`;
         console.log("Crunchbase search query:", cbSearchQuery);
-        const cbSearchResponse = await fetch("https://api.firecrawl.dev/v1/search", {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${firecrawlApiKey}`,
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({ query: cbSearchQuery, limit: 3 }),
-        });
+        const cbSearchResponse = await firecrawlFetch("/search", { query: cbSearchQuery, limit: 3 });
 
         if (cbSearchResponse.ok) {
           const cbSearchData = await cbSearchResponse.json();
@@ -294,14 +310,7 @@ Deno.serve(async (req) => {
     if (crunchbaseUrl) {
       try {
         console.log("Scraping Crunchbase:", crunchbaseUrl);
-        const cbScrapeResponse = await fetch("https://api.firecrawl.dev/v1/scrape", {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${firecrawlApiKey}`,
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({ url: crunchbaseUrl, formats: ["markdown"], onlyMainContent: true }),
-        });
+        const cbScrapeResponse = await firecrawlFetch("/scrape", { url: crunchbaseUrl, formats: ["markdown"], onlyMainContent: true });
 
         if (cbScrapeResponse.ok) {
           const cbScrapeData = await cbScrapeResponse.json();
@@ -564,30 +573,9 @@ Extract the company's official website URL and LinkedIn company page URL using t
     for (const investorName of investorCandidates) {
       try {
         const [linkedinRes, crunchbaseRes, tracxnRes] = await Promise.all([
-          fetch("https://api.firecrawl.dev/v1/search", {
-            method: "POST",
-            headers: {
-              Authorization: `Bearer ${firecrawlApiKey}`,
-              "Content-Type": "application/json",
-            },
-            body: JSON.stringify({ query: `"${investorName}" investor LinkedIn`, limit: 2 }),
-          }),
-          fetch("https://api.firecrawl.dev/v1/search", {
-            method: "POST",
-            headers: {
-              Authorization: `Bearer ${firecrawlApiKey}`,
-              "Content-Type": "application/json",
-            },
-            body: JSON.stringify({ query: `site:crunchbase.com/organization "${investorName}"`, limit: 2 }),
-          }),
-          fetch("https://api.firecrawl.dev/v1/search", {
-            method: "POST",
-            headers: {
-              Authorization: `Bearer ${firecrawlApiKey}`,
-              "Content-Type": "application/json",
-            },
-            body: JSON.stringify({ query: `site:tracxn.com "${investorName}"`, limit: 2 }),
-          }),
+          firecrawlFetch("/search", { query: `"${investorName}" investor LinkedIn`, limit: 2 }),
+          firecrawlFetch("/search", { query: `site:crunchbase.com/organization "${investorName}"`, limit: 2 }),
+          firecrawlFetch("/search", { query: `site:tracxn.com "${investorName}"`, limit: 2 }),
         ]);
 
         const linkedInData = linkedinRes.ok ? await linkedinRes.json() : {};
@@ -611,14 +599,7 @@ Extract the company's official website URL and LinkedIn company page URL using t
 
     // Step 3c: Last 3 articles with previews
     try {
-      const newsSearchResponse = await fetch("https://api.firecrawl.dev/v1/search", {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${firecrawlApiKey}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ query: `"${deal.name}" company latest news article`, limit: 10 }),
-      });
+      const newsSearchResponse = await firecrawlFetch("/search", { query: `"${deal.name}" company latest news article`, limit: 10 });
 
       if (newsSearchResponse.ok) {
         const newsSearchData = await newsSearchResponse.json();
@@ -638,14 +619,7 @@ Extract the company's official website URL and LinkedIn company page URL using t
 
           let preview: string | null = item.description || null;
           try {
-            const articleScrapeResponse = await fetch("https://api.firecrawl.dev/v1/scrape", {
-              method: "POST",
-              headers: {
-                Authorization: `Bearer ${firecrawlApiKey}`,
-                "Content-Type": "application/json",
-              },
-              body: JSON.stringify({ url: articleUrl, formats: ["markdown"], onlyMainContent: true }),
-            });
+            const articleScrapeResponse = await firecrawlFetch("/scrape", { url: articleUrl, formats: ["markdown"], onlyMainContent: true });
             if (articleScrapeResponse.ok) {
               const articleData = await articleScrapeResponse.json();
               const markdown = (articleData.data?.markdown || articleData.markdown || "").replace(/\s+/g, " ").trim();
@@ -790,14 +764,7 @@ Use web_search to find their names, titles, and LinkedIn profile URLs. Then call
       try {
         console.log("Falling back to Firecrawl for key people search…");
         const peopleSearchQuery = `"${deal.name}" founders CEO CTO site:linkedin.com/in`;
-        const peopleSearchResponse = await fetch("https://api.firecrawl.dev/v1/search", {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${firecrawlApiKey}`,
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({ query: peopleSearchQuery, limit: 10 }),
-        });
+        const peopleSearchResponse = await firecrawlFetch("/search", { query: peopleSearchQuery, limit: 10 });
 
         if (peopleSearchResponse.ok) {
           const peopleSearchData = await peopleSearchResponse.json();
@@ -874,6 +841,17 @@ Use web_search to find their names, titles, and LinkedIn profile URLs. Then call
     );
   } catch (error) {
     console.error("deep-research error:", error);
+
+    if (adminClient && dealIdForFailure) {
+      try {
+        await adminClient
+          .from("deals")
+          .update({ deep_research_status: "failed", updated_at: new Date().toISOString() })
+          .eq("id", dealIdForFailure);
+      } catch (statusError) {
+        console.error("Failed to mark deep_research_status as failed:", statusError);
+      }
+    }
 
     const message = error instanceof Error ? error.message : "Unknown error";
     return new Response(JSON.stringify({ error: message }), {
