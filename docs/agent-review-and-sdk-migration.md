@@ -75,4 +75,9 @@ The code mixes `/v1/chat/completions` and `/v1/responses` payload styles in mult
 - Improved traceability (per-field provenance + confidence)
 
 ## Reference implementation in this repo
-A previous reference module (`supabase/functions/_shared/agents_sdk_pipeline.ts`) was removed because the `npm:@openai/agents` import broke edge-function deploys. Re-introduce it as a separate, opt-in module with a deno.json import map before wiring it into handlers.
+A previous reference module (`supabase/functions/_shared/agents_sdk_pipeline.ts`) was removed because the `npm:@openai/agents` import broke edge-function deploys.
+
+### Current fix for edge deploy compatibility
+- `supabase/functions/deep-research/deno.json` now isolates the SDK dependency per-function (recommended by Supabase docs).
+- `deep-research` now uses an **opt-in** `ENABLE_AGENTS_SDK=true` path that attempts Agents SDK web research and falls back to the legacy implementation on any SDK/runtime failure.
+- The SDK import is loaded dynamically so non-SDK environments can still deploy and run the legacy path.
