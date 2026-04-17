@@ -936,6 +936,34 @@ Deno.serve(async (req) => {
     // --- STEP 6: Final status ---
     await setDealStatus(adminClient, dealId, "memo-ready");
 
+    // --- STEP 7: Auto-trigger deep-research (fire-and-forget) ---
+    // Populates structured fields (ask, valuation, revenue, team, key people) automatically
+    // so users don't have to wait for "Generate Memo" to see metadata.
+    try {
+      const { data: existingDeal } = await adminClient
+        .from("deals")
+        .select("deep_research_status")
+        .eq("id", dealId)
+        .single();
+      const drStatus = existingDeal?.deep_research_status;
+      if (drStatus !== "researching" && drStatus !== "completed") {
+        console.log(`Auto-triggering deep-research for deal ${dealId}`);
+        // Fire-and-forget: don't block process-deck completion
+        fetch(`${supabaseUrl}/functions/v1/deep-research`, {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${supabaseServiceKey}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ dealId }),
+        }).catch((e) => console.warn("Deep-research auto-trigger failed:", e));
+      } else {
+        console.log(`Skipping auto-trigger; deep_research_status=${drStatus}`);
+      }
+    } catch (e) {
+      console.warn("Deep-research auto-trigger setup failed:", e);
+    }
+
     // Process next queued deal for this user
     await processNextQueued(adminClient, userId, supabaseUrl, supabaseServiceKey);
 

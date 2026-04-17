@@ -152,19 +152,14 @@ Deno.serve(async (req) => {
     }
 
     adminClient = createClient(supabaseUrl, supabaseServiceKey);
-    const userClient = createClient(supabaseUrl, supabaseAnonKey, {
-      global: { headers: { Authorization: authHeader } },
-    });
 
-    const { data: { user }, error: userError } = await userClient.auth.getUser();
-    if (userError || !user) {
-      return new Response(JSON.stringify({ error: "Unauthorized" }), {
-        status: 401,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
+    // Support two auth modes:
+    // 1. User JWT (from frontend) — resolves user via getUser()
+    // 2. Service-role key (from process-deck auto-trigger) — userId resolved from deal
+    const isServiceRole = authHeader === `Bearer ${supabaseServiceKey}`;
 
-    const { dealId } = await req.json();
+    const body = await req.json().catch(() => ({}));
+    const { dealId } = body ?? {};
     dealIdForFailure = dealId ?? null;
     if (!dealId) {
       return new Response(JSON.stringify({ error: "Missing dealId" }), {
@@ -172,6 +167,36 @@ Deno.serve(async (req) => {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
+
+    let userId: string;
+    if (isServiceRole) {
+      const { data: dealRecord } = await adminClient
+        .from("deals")
+        .select("user_id")
+        .eq("id", dealId)
+        .single();
+      if (!dealRecord?.user_id) {
+        return new Response(JSON.stringify({ error: "Deal not found" }), {
+          status: 404,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+      userId = dealRecord.user_id as string;
+    } else {
+      const userClient = createClient(supabaseUrl, supabaseAnonKey, {
+        global: { headers: { Authorization: authHeader } },
+      });
+      const { data: { user }, error: userError } = await userClient.auth.getUser();
+      if (userError || !user) {
+        return new Response(JSON.stringify({ error: "Unauthorized" }), {
+          status: 401,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+      userId = user.id;
+    }
+    // Compatibility shim so downstream `user.id` references keep working.
+    const user = { id: userId };
 
     // Fetch deal
     const { data: deal, error: dealError } = await adminClient
