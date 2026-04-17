@@ -92,7 +92,6 @@ export type Database = {
           compressed_size: string | null
           created_at: string
           crunchbase_url: string | null
-          deck_preview: Json | null
           deck_size: string | null
           deep_research_status: string
           funding_total: string | null
@@ -100,9 +99,7 @@ export type Database = {
           growth: string | null
           id: string
           investors: string | null
-          investor_research: Json | null
           last_funding_round: string | null
-          latest_articles: Json | null
           linkedin_url: string | null
           memo_draft: string | null
           name: string
@@ -111,7 +108,6 @@ export type Database = {
           pages: number | null
           paused_at_step: string | null
           revenue: string | null
-          research_verification: Json | null
           sector: string
           source: string
           stage: string
@@ -129,7 +125,6 @@ export type Database = {
           compressed_size?: string | null
           created_at?: string
           crunchbase_url?: string | null
-          deck_preview?: Json | null
           deck_size?: string | null
           deep_research_status?: string
           funding_total?: string | null
@@ -137,9 +132,7 @@ export type Database = {
           growth?: string | null
           id?: string
           investors?: string | null
-          investor_research?: Json | null
           last_funding_round?: string | null
-          latest_articles?: Json | null
           linkedin_url?: string | null
           memo_draft?: string | null
           name: string
@@ -148,7 +141,6 @@ export type Database = {
           pages?: number | null
           paused_at_step?: string | null
           revenue?: string | null
-          research_verification?: Json | null
           sector?: string
           source?: string
           stage?: string
@@ -166,7 +158,6 @@ export type Database = {
           compressed_size?: string | null
           created_at?: string
           crunchbase_url?: string | null
-          deck_preview?: Json | null
           deck_size?: string | null
           deep_research_status?: string
           funding_total?: string | null
@@ -174,9 +165,7 @@ export type Database = {
           growth?: string | null
           id?: string
           investors?: string | null
-          investor_research?: Json | null
           last_funding_round?: string | null
-          latest_articles?: Json | null
           linkedin_url?: string | null
           memo_draft?: string | null
           name?: string
@@ -185,7 +174,6 @@ export type Database = {
           pages?: number | null
           paused_at_step?: string | null
           revenue?: string | null
-          research_verification?: Json | null
           sector?: string
           source?: string
           stage?: string
@@ -209,7 +197,6 @@ export type Database = {
           gmail_message_id: string | null
           id: string
           original_size: string | null
-          preview_images: Json | null
           processing_status: string
           source_type: string
           storage_path: string | null
@@ -224,7 +211,6 @@ export type Database = {
           gmail_message_id?: string | null
           id?: string
           original_size?: string | null
-          preview_images?: Json | null
           processing_status?: string
           source_type?: string
           storage_path?: string | null
@@ -239,7 +225,6 @@ export type Database = {
           gmail_message_id?: string | null
           id?: string
           original_size?: string | null
-          preview_images?: Json | null
           processing_status?: string
           source_type?: string
           storage_path?: string | null
