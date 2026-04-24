@@ -822,6 +822,47 @@ export default function DealWorkspace() {
           )}
         </div>
       </div>
+
+      <AlertDialog
+        open={!!dealPendingDelete}
+        onOpenChange={(open) => {
+          if (!open) setDealPendingDelete(null);
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete this deal?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will permanently delete <span className="font-medium text-foreground">{dealPendingDelete?.name}</span>, along with its sources, capture jobs, key people, and uploaded files. This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deleteDeal.isPending}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              disabled={deleteDeal.isPending}
+              onClick={(e) => {
+                e.preventDefault();
+                if (!dealPendingDelete) return;
+                const { id, name } = dealPendingDelete;
+                toast.promise(
+                  deleteDeal.mutateAsync(id).then(() => {
+                    if (selectedDealId === id) setSelectedDealId(undefined);
+                    setDealPendingDelete(null);
+                  }),
+                  {
+                    loading: `Deleting ${name}…`,
+                    success: `Deleted ${name}`,
+                    error: (err) => `Failed to delete: ${err?.message ?? "unknown error"}`,
+                  }
+                );
+              }}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              {deleteDeal.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : "Delete"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
