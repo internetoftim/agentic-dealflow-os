@@ -346,17 +346,31 @@ export default function DealWorkspace() {
             <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-2.5">Deals</h3>
             <div className="flex flex-col gap-1">
               {deals.map((d) => (
-                <button
+                <div
                   key={d.id}
-                  onClick={() => setSelectedDealId(d.id)}
-                  className={`text-left rounded-md px-3 py-2 text-xs font-medium transition-colors ${
+                  className={`group flex items-center gap-1 rounded-md transition-colors ${
                     activeDeal?.id === d.id
                       ? "bg-primary/10 text-primary"
                       : "text-foreground hover:bg-accent"
                   }`}
                 >
-                  {d.name}
-                </button>
+                  <button
+                    onClick={() => setSelectedDealId(d.id)}
+                    className="flex-1 text-left px-3 py-2 text-xs font-medium truncate"
+                  >
+                    {d.name}
+                  </button>
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setDealPendingDelete({ id: d.id, name: d.name });
+                    }}
+                    aria-label={`Delete ${d.name}`}
+                    className="opacity-0 group-hover:opacity-100 focus:opacity-100 p-1.5 mr-1 rounded text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-opacity"
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </button>
+                </div>
               ))}
             </div>
           </div>
