@@ -1,6 +1,7 @@
 import { useState, useCallback, useRef, useEffect } from "react";
-import { Upload, Link, Cog, Check, Search, Send, FileText, Globe, Layers, Square, Linkedin, Loader2, FileUp, CircleDashed, CircleCheck, Circle, Pause, Clock, Download, Mail, ExternalLink, Users } from "lucide-react";
-import { useDeals, useSources, useLatestCaptureJob, useCreateDealWithUpload, useProcessDocsend, useRetryDocsendCapture, useCancelDeal, WORKFLOW_STEPS, PROCESSING_STATUSES, DOC_VIEWER_SOURCES } from "@/hooks/useDeals";
+import { Upload, Link, Cog, Check, Search, Send, FileText, Globe, Layers, Square, Linkedin, Loader2, FileUp, CircleDashed, CircleCheck, Circle, Pause, Clock, Download, Mail, ExternalLink, Users, Trash2 } from "lucide-react";
+import { useDeals, useSources, useLatestCaptureJob, useCreateDealWithUpload, useProcessDocsend, useRetryDocsendCapture, useCancelDeal, useDeleteDeal, WORKFLOW_STEPS, PROCESSING_STATUSES, DOC_VIEWER_SOURCES } from "@/hooks/useDeals";
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import { useDealChat } from "@/hooks/useDealChat";
 import { useGenerateMemo } from "@/hooks/useGenerateMemo";
@@ -16,6 +17,7 @@ export default function DealWorkspace() {
   const [chatInput, setChatInput] = useState("");
   const [docSendUrl, setDocSendUrl] = useState("");
   const [selectedDealId, setSelectedDealId] = useState<string | undefined>();
+  const [dealPendingDelete, setDealPendingDelete] = useState<{ id: string; name: string } | null>(null);
   const chatEndRef = useRef<HTMLDivElement>(null);
 
   const { data: deals } = useDeals();
@@ -25,6 +27,7 @@ export default function DealWorkspace() {
   const processDocsend = useProcessDocsend();
   const retryDocsendCapture = useRetryDocsendCapture();
   const cancelDeal = useCancelDeal();
+  const deleteDeal = useDeleteDeal();
   const generateMemo = useGenerateMemo();
 
   const { data: latestCaptureJob } = useLatestCaptureJob(activeDeal?.id, activeDeal?.source);
@@ -343,17 +346,31 @@ export default function DealWorkspace() {
             <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-2.5">Deals</h3>
             <div className="flex flex-col gap-1">
               {deals.map((d) => (
-                <button
+                <div
                   key={d.id}
-                  onClick={() => setSelectedDealId(d.id)}
-                  className={`text-left rounded-md px-3 py-2 text-xs font-medium transition-colors ${
+                  className={`group flex items-center gap-1 rounded-md transition-colors ${
                     activeDeal?.id === d.id
                       ? "bg-primary/10 text-primary"
                       : "text-foreground hover:bg-accent"
                   }`}
                 >
-                  {d.name}
-                </button>
+                  <button
+                    onClick={() => setSelectedDealId(d.id)}
+                    className="flex-1 text-left px-3 py-2 text-xs font-medium truncate"
+                  >
+                    {d.name}
+                  </button>
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setDealPendingDelete({ id: d.id, name: d.name });
+                    }}
+                    aria-label={`Delete ${d.name}`}
+                    className="opacity-0 group-hover:opacity-100 focus:opacity-100 p-1.5 mr-1 rounded text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-opacity"
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </button>
+                </div>
               ))}
             </div>
           </div>
@@ -805,6 +822,47 @@ export default function DealWorkspace() {
           )}
         </div>
       </div>
+
+      <AlertDialog
+        open={!!dealPendingDelete}
+        onOpenChange={(open) => {
+          if (!open) setDealPendingDelete(null);
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete this deal?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will permanently delete <span className="font-medium text-foreground">{dealPendingDelete?.name}</span>, along with its sources, capture jobs, key people, and uploaded files. This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deleteDeal.isPending}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              disabled={deleteDeal.isPending}
+              onClick={(e) => {
+                e.preventDefault();
+                if (!dealPendingDelete) return;
+                const { id, name } = dealPendingDelete;
+                toast.promise(
+                  deleteDeal.mutateAsync(id).then(() => {
+                    if (selectedDealId === id) setSelectedDealId(undefined);
+                    setDealPendingDelete(null);
+                  }),
+                  {
+                    loading: `Deleting ${name}…`,
+                    success: `Deleted ${name}`,
+                    error: (err) => `Failed to delete: ${err?.message ?? "unknown error"}`,
+                  }
+                );
+              }}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              {deleteDeal.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : "Delete"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
