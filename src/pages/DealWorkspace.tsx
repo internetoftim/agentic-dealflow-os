@@ -17,6 +17,7 @@ export default function DealWorkspace() {
   const [chatInput, setChatInput] = useState("");
   const [docSendUrl, setDocSendUrl] = useState("");
   const [selectedDealId, setSelectedDealId] = useState<string | undefined>();
+  const [dealPendingDelete, setDealPendingDelete] = useState<{ id: string; name: string } | null>(null);
   const chatEndRef = useRef<HTMLDivElement>(null);
 
   const { data: deals } = useDeals();
@@ -26,6 +27,7 @@ export default function DealWorkspace() {
   const processDocsend = useProcessDocsend();
   const retryDocsendCapture = useRetryDocsendCapture();
   const cancelDeal = useCancelDeal();
+  const deleteDeal = useDeleteDeal();
   const generateMemo = useGenerateMemo();
 
   const { data: latestCaptureJob } = useLatestCaptureJob(activeDeal?.id, activeDeal?.source);
