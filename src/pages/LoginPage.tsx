@@ -21,7 +21,7 @@ const features = [
   {
     icon: KanbanSquare,
     title: "Pipeline & workspace",
-    desc: "A Kanban pipeline and a deal workspace built for analysts — not a generic CRM.",
+    desc: "A Kanban pipeline and a deal workspace built for partners, VCs, and analysts — not a generic CRM.",
   },
 ];
 
@@ -47,13 +47,13 @@ export default function LoginPage() {
             <div className="space-y-4">
               <div className="inline-flex items-center gap-2 rounded-full border border-border bg-card px-3 py-1 text-xs text-muted-foreground">
                 <Sparkles className="h-3 w-3" />
-                The autonomous OS for VC analysts
+                The autonomous OS for investors
               </div>
               <h1 className="text-4xl lg:text-5xl font-semibold tracking-tight text-foreground">
                 EasyVC
               </h1>
               <p className="text-lg text-muted-foreground leading-relaxed">
-                Ingest deal flow, standardize it in a workspace built for analysts,
+                Ingest deal flow, standardize it in a workspace built for investment teams,
                 and generate investment memos — all in one place.
               </p>
             </div>
