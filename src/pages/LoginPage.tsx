@@ -53,7 +53,7 @@ export default function LoginPage() {
                 EasyVC
               </h1>
               <p className="text-lg text-muted-foreground leading-relaxed">
-                Ingest deal flow, standardize it in a workspace built for analysts,
+                Ingest deal flow, standardize it in a workspace built for investment teams,
                 and generate investment memos — all in one place.
               </p>
             </div>
