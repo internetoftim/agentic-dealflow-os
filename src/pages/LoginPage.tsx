@@ -97,7 +97,7 @@ export default function LoginPage() {
               <div className="mt-6 space-y-2 text-xs text-muted-foreground">
                 <p>• Grants Drive access for deck sync</p>
                 <p>• Auto-processes emails with a dedicated Gmail label, or inbound submissions to a dedicated mailbox</p>
-                <p>• Sign-up by approval only</p>
+                
               </div>
             </div>
           </div>
