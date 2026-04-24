@@ -449,7 +449,7 @@ Use web_search to verify URLs if needed. Once confident, call the extract_compan
             model: "gpt-5.4",
             reasoning: { effort: "medium" },
             tools: [
-              { type: "web_search", name: "web_search" },
+              { type: "web_search" },
               {
                 type: "function",
                 name: "extract_company_research",
