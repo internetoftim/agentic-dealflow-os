@@ -20,7 +20,7 @@ const features = [
   },
   {
     icon: KanbanSquare,
-    title: "Your deal desk",
+    title: "Deal Desk",
     desc: "A single deal desk for partners, VCs, and analysts — pipeline, workspace, and notes in one place, not a generic CRM.",
   },
 ];
