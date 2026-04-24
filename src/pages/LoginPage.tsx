@@ -21,7 +21,7 @@ const features = [
   {
     icon: KanbanSquare,
     title: "Pipeline & workspace",
-    desc: "A Kanban pipeline and a deal workspace built for analysts — not a generic CRM.",
+    desc: "A Kanban pipeline and a deal workspace built for partners, VCs, and analysts — not a generic CRM.",
   },
 ];
 
