@@ -143,17 +143,36 @@ Deno.serve(async (req) => {
       );
     }
 
+    // Build a draft note capturing submission metadata
+    const submissionNoteLines = [
+      `**Inbound submission**`,
+      `- Submitted by: ${submitterName} <${submitterEmail}>`,
+      `- Heard about us via: ${referralSource}`,
+    ];
+    if (websiteUrl) submissionNoteLines.push(`- Website: ${websiteUrl}`);
+    if (linkedinUrl) submissionNoteLines.push(`- LinkedIn: ${linkedinUrl}`);
+    if (docsendUrl) submissionNoteLines.push(`- DocSend: ${docsendUrl}`);
+    if (message) submissionNoteLines.push(`\n**Message from founder:**\n${message}`);
+    const memoDraft = submissionNoteLines.join("\n");
+
     // Create deal record
+    const dealInsert: Record<string, unknown> = {
+      user_id: userId,
+      name: companyName,
+      source: "inbound",
+      auto_ingested: true,
+      status: file ? "uploading" : "inbox",
+      memo_draft: memoDraft,
+    };
+    if (file) {
+      dealInsert.deck_size = `${(file.size / (1024 * 1024)).toFixed(1)} MB`;
+    }
+    if (websiteUrl) dealInsert.website = websiteUrl;
+    if (linkedinUrl) dealInsert.linkedin_url = linkedinUrl;
+
     const { data: deal, error: dealError } = await adminClient
       .from("deals")
-      .insert({
-        user_id: userId,
-        name: companyName,
-        source: "inbound",
-        auto_ingested: true,
-        status: "uploading",
-        deck_size: `${(file.size / (1024 * 1024)).toFixed(1)} MB`,
-      })
+      .insert(dealInsert as never)
       .select("id")
       .single();
 
@@ -165,45 +184,60 @@ Deno.serve(async (req) => {
       );
     }
 
-    // Upload file to storage
-    const storagePath = `${userId}/${deal.id}/${file.name}`;
-    const arrayBuffer = await file.arrayBuffer();
-    const { error: uploadError } = await adminClient.storage
-      .from("decks")
-      .upload(storagePath, new Blob([arrayBuffer], { type: file.type }), { upsert: true });
+    let storagePath: string | null = null;
 
-    if (uploadError) {
-      console.error("Storage upload failed:", uploadError);
-      // Clean up the deal
-      await adminClient.from("deals").delete().eq("id", deal.id);
-      return new Response(
-        JSON.stringify({ error: "Failed to upload file" }),
-        { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
+    if (file) {
+      // Upload file to storage
+      storagePath = `${userId}/${deal.id}/${file.name}`;
+      const arrayBuffer = await file.arrayBuffer();
+      const { error: uploadError } = await adminClient.storage
+        .from("decks")
+        .upload(storagePath, new Blob([arrayBuffer], { type: file.type }), { upsert: true });
+
+      if (uploadError) {
+        console.error("Storage upload failed:", uploadError);
+        await adminClient.from("deals").delete().eq("id", deal.id);
+        return new Response(
+          JSON.stringify({ error: "Failed to upload file" }),
+          { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
+      // Create source record
+      await adminClient.from("sources").insert({
+        deal_id: deal.id,
+        user_id: userId,
+        file_name: file.name,
+        source_type: "inbound",
+        processing_status: "pending",
+        storage_path: storagePath,
+        original_size: `${(file.size / (1024 * 1024)).toFixed(1)} MB`,
+      } as never);
+
+      // Fire process-deck (fire-and-forget)
+      fetch(`${supabaseUrl}/functions/v1/process-deck`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${supabaseServiceKey}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ dealId: deal.id, storagePath }),
+      }).catch((e) => console.warn("Failed to trigger process-deck:", e));
+    } else if (docsendUrl) {
+      // No file, but DocSend link provided — kick off link capture
+      fetch(`${supabaseUrl}/functions/v1/ingest-relay`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${supabaseServiceKey}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ dealId: deal.id, url: docsendUrl, userId }),
+      }).catch((e) => console.warn("Failed to trigger ingest-relay:", e));
     }
 
-    // Create source record
-    await adminClient.from("sources").insert({
-      deal_id: deal.id,
-      user_id: userId,
-      file_name: file.name,
-      source_type: "inbound",
-      processing_status: "pending",
-      storage_path: storagePath,
-      original_size: `${(file.size / (1024 * 1024)).toFixed(1)} MB`,
-    });
-
-    // Fire process-deck (fire-and-forget)
-    fetch(`${supabaseUrl}/functions/v1/process-deck`, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${supabaseServiceKey}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ dealId: deal.id, storagePath }),
-    }).catch((e) => console.warn("Failed to trigger process-deck:", e));
-
-    console.log(`Public intake: deal ${deal.id} created for user ${userId}, company "${companyName}", submitter: ${submitterName ?? "anonymous"} (${submitterEmail ?? "no email"})`);
+    console.log(
+      `Public intake: deal ${deal.id} for user ${userId}, company "${companyName}", submitter: ${submitterName} <${submitterEmail}>, source: ${referralSource}, file: ${file ? file.name : "none"}`
+    );
 
     return new Response(
       JSON.stringify({ status: "success", dealId: deal.id }),
