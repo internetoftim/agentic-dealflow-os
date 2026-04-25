@@ -24,34 +24,67 @@ Deno.serve(async (req) => {
     const formData = await req.formData();
     const file = formData.get("file") as File | null;
     let userId = formData.get("userId") as string | null;
-    const companyName = (formData.get("companyName") as string | "").trim();
-    const submitterName = (formData.get("submitterName") as string | "")?.trim() || null;
-    const submitterEmail = (formData.get("submitterEmail") as string | "")?.trim() || null;
+    const companyNameRaw = ((formData.get("companyName") as string) || "").trim();
+    const submitterName = ((formData.get("submitterName") as string) || "").trim();
+    const submitterEmail = ((formData.get("submitterEmail") as string) || "").trim();
+    const referralSource = ((formData.get("referralSource") as string) || "").trim();
+    const docsendUrl = ((formData.get("docsendUrl") as string) || "").trim();
+    const linkedinUrl = ((formData.get("linkedinUrl") as string) || "").trim();
+    const websiteUrl = ((formData.get("websiteUrl") as string) || "").trim();
+    const message = ((formData.get("message") as string) || "").trim();
 
-    // Validate required fields
-    if (!file || !userId || !companyName) {
+    // Validate required fields: userId, submitterName, submitterEmail, referralSource
+    if (!userId || !submitterName || !submitterEmail || !referralSource) {
       return new Response(
-        JSON.stringify({ error: "Missing required fields: file, userId, companyName" }),
+        JSON.stringify({ error: "Missing required fields: name, email, referral source" }),
         { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
 
-    // Validate file extension
-    const fileName = file.name.toLowerCase();
-    const ext = fileName.slice(fileName.lastIndexOf("."));
-    if (!ALLOWED_EXTENSIONS.includes(ext)) {
+    // Validate email format
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(submitterEmail)) {
       return new Response(
-        JSON.stringify({ error: "Only PDF and PPTX files are accepted" }),
+        JSON.stringify({ error: "Invalid email address" }),
         { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
 
-    // Validate file size
-    if (file.size > MAX_FILE_SIZE) {
+    // Length limits
+    if (
+      submitterName.length > 100 ||
+      submitterEmail.length > 255 ||
+      referralSource.length > 200 ||
+      companyNameRaw.length > 150 ||
+      docsendUrl.length > 500 ||
+      linkedinUrl.length > 500 ||
+      websiteUrl.length > 500 ||
+      message.length > 2000
+    ) {
       return new Response(
-        JSON.stringify({ error: "File must be under 20MB" }),
+        JSON.stringify({ error: "One or more fields exceed maximum length" }),
         { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
+    }
+
+    // Fall back company name when not provided
+    const companyName = companyNameRaw || (websiteUrl ? websiteUrl.replace(/^https?:\/\//, "").split("/")[0] : submitterName);
+
+    // Validate file (only if provided)
+    if (file) {
+      const fileName = file.name.toLowerCase();
+      const ext = fileName.slice(fileName.lastIndexOf("."));
+      if (!ALLOWED_EXTENSIONS.includes(ext)) {
+        return new Response(
+          JSON.stringify({ error: "Only PDF and PPTX files are accepted" }),
+          { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+      if (file.size > MAX_FILE_SIZE) {
+        return new Response(
+          JSON.stringify({ error: "File must be under 20MB" }),
+          { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
     }
 
     // Resolve userId: could be a UUID or a custom intake_slug
@@ -110,17 +143,36 @@ Deno.serve(async (req) => {
       );
     }
 
+    // Build a draft note capturing submission metadata
+    const submissionNoteLines = [
+      `**Inbound submission**`,
+      `- Submitted by: ${submitterName} <${submitterEmail}>`,
+      `- Heard about us via: ${referralSource}`,
+    ];
+    if (websiteUrl) submissionNoteLines.push(`- Website: ${websiteUrl}`);
+    if (linkedinUrl) submissionNoteLines.push(`- LinkedIn: ${linkedinUrl}`);
+    if (docsendUrl) submissionNoteLines.push(`- DocSend: ${docsendUrl}`);
+    if (message) submissionNoteLines.push(`\n**Message from founder:**\n${message}`);
+    const memoDraft = submissionNoteLines.join("\n");
+
     // Create deal record
+    const dealInsert: Record<string, unknown> = {
+      user_id: userId,
+      name: companyName,
+      source: "inbound",
+      auto_ingested: true,
+      status: file ? "uploading" : "inbox",
+      memo_draft: memoDraft,
+    };
+    if (file) {
+      dealInsert.deck_size = `${(file.size / (1024 * 1024)).toFixed(1)} MB`;
+    }
+    if (websiteUrl) dealInsert.website = websiteUrl;
+    if (linkedinUrl) dealInsert.linkedin_url = linkedinUrl;
+
     const { data: deal, error: dealError } = await adminClient
       .from("deals")
-      .insert({
-        user_id: userId,
-        name: companyName,
-        source: "inbound",
-        auto_ingested: true,
-        status: "uploading",
-        deck_size: `${(file.size / (1024 * 1024)).toFixed(1)} MB`,
-      })
+      .insert(dealInsert as never)
       .select("id")
       .single();
 
@@ -132,45 +184,60 @@ Deno.serve(async (req) => {
       );
     }
 
-    // Upload file to storage
-    const storagePath = `${userId}/${deal.id}/${file.name}`;
-    const arrayBuffer = await file.arrayBuffer();
-    const { error: uploadError } = await adminClient.storage
-      .from("decks")
-      .upload(storagePath, new Blob([arrayBuffer], { type: file.type }), { upsert: true });
+    let storagePath: string | null = null;
 
-    if (uploadError) {
-      console.error("Storage upload failed:", uploadError);
-      // Clean up the deal
-      await adminClient.from("deals").delete().eq("id", deal.id);
-      return new Response(
-        JSON.stringify({ error: "Failed to upload file" }),
-        { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
+    if (file) {
+      // Upload file to storage
+      storagePath = `${userId}/${deal.id}/${file.name}`;
+      const arrayBuffer = await file.arrayBuffer();
+      const { error: uploadError } = await adminClient.storage
+        .from("decks")
+        .upload(storagePath, new Blob([arrayBuffer], { type: file.type }), { upsert: true });
+
+      if (uploadError) {
+        console.error("Storage upload failed:", uploadError);
+        await adminClient.from("deals").delete().eq("id", deal.id);
+        return new Response(
+          JSON.stringify({ error: "Failed to upload file" }),
+          { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
+      // Create source record
+      await adminClient.from("sources").insert({
+        deal_id: deal.id,
+        user_id: userId,
+        file_name: file.name,
+        source_type: "inbound",
+        processing_status: "pending",
+        storage_path: storagePath,
+        original_size: `${(file.size / (1024 * 1024)).toFixed(1)} MB`,
+      } as never);
+
+      // Fire process-deck (fire-and-forget)
+      fetch(`${supabaseUrl}/functions/v1/process-deck`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${supabaseServiceKey}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ dealId: deal.id, storagePath }),
+      }).catch((e) => console.warn("Failed to trigger process-deck:", e));
+    } else if (docsendUrl) {
+      // No file, but DocSend link provided — kick off link capture
+      fetch(`${supabaseUrl}/functions/v1/ingest-relay`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${supabaseServiceKey}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ dealId: deal.id, url: docsendUrl, userId }),
+      }).catch((e) => console.warn("Failed to trigger ingest-relay:", e));
     }
 
-    // Create source record
-    await adminClient.from("sources").insert({
-      deal_id: deal.id,
-      user_id: userId,
-      file_name: file.name,
-      source_type: "inbound",
-      processing_status: "pending",
-      storage_path: storagePath,
-      original_size: `${(file.size / (1024 * 1024)).toFixed(1)} MB`,
-    });
-
-    // Fire process-deck (fire-and-forget)
-    fetch(`${supabaseUrl}/functions/v1/process-deck`, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${supabaseServiceKey}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ dealId: deal.id, storagePath }),
-    }).catch((e) => console.warn("Failed to trigger process-deck:", e));
-
-    console.log(`Public intake: deal ${deal.id} created for user ${userId}, company "${companyName}", submitter: ${submitterName ?? "anonymous"} (${submitterEmail ?? "no email"})`);
+    console.log(
+      `Public intake: deal ${deal.id} for user ${userId}, company "${companyName}", submitter: ${submitterName} <${submitterEmail}>, source: ${referralSource}, file: ${file ? file.name : "none"}`
+    );
 
     return new Response(
       JSON.stringify({ status: "success", dealId: deal.id }),
