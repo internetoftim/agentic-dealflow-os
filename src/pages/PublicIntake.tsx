@@ -3,11 +3,30 @@ import { useParams } from "react-router-dom";
 import { Upload, Check, AlertCircle, Loader2, FileUp } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { Progress } from "@/components/ui/progress";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 
 const MAX_FILE_SIZE = 20 * 1024 * 1024;
 const ALLOWED_EXTENSIONS = [".pdf", ".pptx", ".ppt"];
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
+
+const REFERRAL_OPTIONS = [
+  "LinkedIn",
+  "Twitter / X",
+  "A founder / friend",
+  "An investor",
+  "Newsletter",
+  "Conference / Event",
+  "Search engine",
+  "Other",
+];
 
 type UploadState = "idle" | "uploading" | "success" | "error";
 
@@ -20,6 +39,12 @@ export default function PublicIntake() {
   const [companyName, setCompanyName] = useState("");
   const [submitterName, setSubmitterName] = useState("");
   const [submitterEmail, setSubmitterEmail] = useState("");
+  const [docsendUrl, setDocsendUrl] = useState("");
+  const [linkedinUrl, setLinkedinUrl] = useState("");
+  const [websiteUrl, setWebsiteUrl] = useState("");
+  const [message, setMessage] = useState("");
+  const [referralSource, setReferralSource] = useState("");
+  const [referralOther, setReferralOther] = useState("");
   const [file, setFile] = useState<File | null>(null);
   const [uploadState, setUploadState] = useState<UploadState>("idle");
   const [progress, setProgress] = useState(0);
@@ -61,8 +86,20 @@ export default function PublicIntake() {
     [handleFileSelect]
   );
 
+  const isEmailValid = (email: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+
+  const resolvedReferral =
+    referralSource === "Other" ? referralOther.trim() : referralSource;
+
+  const canSubmit =
+    !!userId &&
+    submitterName.trim().length > 0 &&
+    isEmailValid(submitterEmail.trim()) &&
+    resolvedReferral.length > 0 &&
+    uploadState !== "uploading";
+
   const handleSubmit = async () => {
-    if (!file || !companyName.trim() || !userId) return;
+    if (!canSubmit) return;
 
     setUploadState("uploading");
     setProgress(10);
@@ -70,11 +107,16 @@ export default function PublicIntake() {
 
     try {
       const formData = new FormData();
-      formData.append("file", file);
-      formData.append("userId", userId);
-      formData.append("companyName", companyName.trim());
-      if (submitterName.trim()) formData.append("submitterName", submitterName.trim());
-      if (submitterEmail.trim()) formData.append("submitterEmail", submitterEmail.trim());
+      if (file) formData.append("file", file);
+      formData.append("userId", userId!);
+      formData.append("companyName", companyName.trim() || "Unknown");
+      formData.append("submitterName", submitterName.trim());
+      formData.append("submitterEmail", submitterEmail.trim());
+      formData.append("referralSource", resolvedReferral);
+      if (docsendUrl.trim()) formData.append("docsendUrl", docsendUrl.trim());
+      if (linkedinUrl.trim()) formData.append("linkedinUrl", linkedinUrl.trim());
+      if (websiteUrl.trim()) formData.append("websiteUrl", websiteUrl.trim());
+      if (message.trim()) formData.append("message", message.trim());
 
       setProgress(30);
 
@@ -88,7 +130,7 @@ export default function PublicIntake() {
       const data = await res.json();
 
       if (!res.ok) {
-        throw new Error(data.error || "Upload failed");
+        throw new Error(data.error || "Submission failed");
       }
 
       setProgress(100);
@@ -104,6 +146,12 @@ export default function PublicIntake() {
     setCompanyName("");
     setSubmitterName("");
     setSubmitterEmail("");
+    setDocsendUrl("");
+    setLinkedinUrl("");
+    setWebsiteUrl("");
+    setMessage("");
+    setReferralSource("");
+    setReferralOther("");
     setUploadState("idle");
     setProgress(0);
     setErrorMessage("");
@@ -125,9 +173,9 @@ export default function PublicIntake() {
           <div className="inline-flex items-center justify-center h-12 w-12 rounded-xl bg-primary/10 mb-4">
             <FileUp className="h-6 w-6 text-primary" />
           </div>
-          <h1 className="text-xl font-semibold text-foreground">Submit Your Deck</h1>
+          <h1 className="text-xl font-semibold text-foreground">Submit Your Deal</h1>
           <p className="text-sm text-muted-foreground mt-1">
-            Upload your pitch deck for review. We accept PDF and PPTX files up to 20MB.
+            Share your pitch deck or links for review.
           </p>
         </div>
 
@@ -138,7 +186,7 @@ export default function PublicIntake() {
             </div>
             <h2 className="text-lg font-semibold text-foreground mb-1">Thank You!</h2>
             <p className="text-sm text-muted-foreground mb-6">
-              Your deck has been submitted successfully. We'll review it shortly.
+              Your submission has been received. We'll review it shortly.
             </p>
             <Button variant="outline" onClick={resetForm}>
               Submit Another
@@ -146,23 +194,129 @@ export default function PublicIntake() {
           </div>
         ) : (
           <div className="rounded-lg border border-border bg-card p-6 space-y-4">
-            {/* Company Name */}
+            {/* Required: Name + Email */}
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="text-sm font-medium text-foreground mb-1.5 block">
+                  Your Name <span className="text-destructive">*</span>
+                </label>
+                <Input
+                  value={submitterName}
+                  onChange={(e) => setSubmitterName(e.target.value)}
+                  placeholder="Jane Doe"
+                  maxLength={100}
+                  disabled={uploadState === "uploading"}
+                />
+              </div>
+              <div>
+                <label className="text-sm font-medium text-foreground mb-1.5 block">
+                  Your Email <span className="text-destructive">*</span>
+                </label>
+                <Input
+                  value={submitterEmail}
+                  onChange={(e) => setSubmitterEmail(e.target.value)}
+                  placeholder="jane@acme.com"
+                  type="email"
+                  maxLength={255}
+                  disabled={uploadState === "uploading"}
+                />
+              </div>
+            </div>
+
+            {/* Required: Referral source */}
             <div>
               <label className="text-sm font-medium text-foreground mb-1.5 block">
-                Company Name <span className="text-destructive">*</span>
+                Where did you hear about us? <span className="text-destructive">*</span>
+              </label>
+              <Select
+                value={referralSource}
+                onValueChange={setReferralSource}
+                disabled={uploadState === "uploading"}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Select an option" />
+                </SelectTrigger>
+                <SelectContent>
+                  {REFERRAL_OPTIONS.map((opt) => (
+                    <SelectItem key={opt} value={opt}>
+                      {opt}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {referralSource === "Other" && (
+                <Input
+                  value={referralOther}
+                  onChange={(e) => setReferralOther(e.target.value)}
+                  placeholder="Please specify"
+                  maxLength={200}
+                  disabled={uploadState === "uploading"}
+                  className="mt-2"
+                />
+              )}
+            </div>
+
+            {/* Optional: Company */}
+            <div>
+              <label className="text-sm font-medium text-foreground mb-1.5 block">
+                Company Name
               </label>
               <Input
                 value={companyName}
                 onChange={(e) => setCompanyName(e.target.value)}
                 placeholder="Acme Corp"
+                maxLength={150}
                 disabled={uploadState === "uploading"}
               />
             </div>
 
-            {/* File Upload */}
+            {/* Optional: Links */}
+            <div className="grid grid-cols-1 gap-3">
+              <div>
+                <label className="text-sm font-medium text-foreground mb-1.5 block">
+                  Website URL
+                </label>
+                <Input
+                  value={websiteUrl}
+                  onChange={(e) => setWebsiteUrl(e.target.value)}
+                  placeholder="https://acme.com"
+                  type="url"
+                  maxLength={500}
+                  disabled={uploadState === "uploading"}
+                />
+              </div>
+              <div>
+                <label className="text-sm font-medium text-foreground mb-1.5 block">
+                  DocSend URL
+                </label>
+                <Input
+                  value={docsendUrl}
+                  onChange={(e) => setDocsendUrl(e.target.value)}
+                  placeholder="https://docsend.com/view/..."
+                  type="url"
+                  maxLength={500}
+                  disabled={uploadState === "uploading"}
+                />
+              </div>
+              <div>
+                <label className="text-sm font-medium text-foreground mb-1.5 block">
+                  LinkedIn
+                </label>
+                <Input
+                  value={linkedinUrl}
+                  onChange={(e) => setLinkedinUrl(e.target.value)}
+                  placeholder="https://linkedin.com/in/..."
+                  type="url"
+                  maxLength={500}
+                  disabled={uploadState === "uploading"}
+                />
+              </div>
+            </div>
+
+            {/* Optional: Pitch deck */}
             <div>
               <label className="text-sm font-medium text-foreground mb-1.5 block">
-                Pitch Deck <span className="text-destructive">*</span>
+                Pitch Deck
               </label>
               <div
                 onDragOver={(e) => {
@@ -213,31 +367,19 @@ export default function PublicIntake() {
               </div>
             </div>
 
-            {/* Optional Fields */}
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="text-sm font-medium text-foreground mb-1.5 block">
-                  Your Name
-                </label>
-                <Input
-                  value={submitterName}
-                  onChange={(e) => setSubmitterName(e.target.value)}
-                  placeholder="Jane Doe"
-                  disabled={uploadState === "uploading"}
-                />
-              </div>
-              <div>
-                <label className="text-sm font-medium text-foreground mb-1.5 block">
-                  Your Email
-                </label>
-                <Input
-                  value={submitterEmail}
-                  onChange={(e) => setSubmitterEmail(e.target.value)}
-                  placeholder="jane@acme.com"
-                  type="email"
-                  disabled={uploadState === "uploading"}
-                />
-              </div>
+            {/* Optional: Message */}
+            <div>
+              <label className="text-sm font-medium text-foreground mb-1.5 block">
+                Message
+              </label>
+              <Textarea
+                value={message}
+                onChange={(e) => setMessage(e.target.value)}
+                placeholder="Anything else you'd like us to know?"
+                maxLength={2000}
+                rows={3}
+                disabled={uploadState === "uploading"}
+              />
             </div>
 
             {/* Error */}
@@ -256,18 +398,18 @@ export default function PublicIntake() {
             {/* Submit */}
             <Button
               onClick={handleSubmit}
-              disabled={!file || !companyName.trim() || uploadState === "uploading"}
+              disabled={!canSubmit}
               className="w-full"
             >
               {uploadState === "uploading" ? (
                 <>
                   <Loader2 className="h-4 w-4 animate-spin" />
-                  Uploading…
+                  Submitting…
                 </>
               ) : (
                 <>
                   <Upload className="h-4 w-4" />
-                  Submit Deck
+                  Submit
                 </>
               )}
             </Button>
