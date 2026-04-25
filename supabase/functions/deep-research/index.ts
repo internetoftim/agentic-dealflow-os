@@ -126,7 +126,7 @@ async function fetchWithTimeout(url: string, init: RequestInit, timeoutMs = FIRE
 }
 
 Deno.serve(async (req) => {
-  let adminClient: ReturnType<typeof createClient> | null = null;
+  let adminClient: any = null;
   let dealIdForFailure: string | null = null;
 
   if (req.method === "OPTIONS") {
