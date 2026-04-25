@@ -1,7 +1,20 @@
-import { useDeals, useCancelDeal, type Deal, WORKFLOW_STEPS, PROCESSING_STATUSES } from "@/hooks/useDeals";
+import { useState } from "react";
+import { useDeals, useCancelDeal, useDeleteDeals, type Deal, WORKFLOW_STEPS, PROCESSING_STATUSES } from "@/hooks/useDeals";
 import { sourceConfig as mockSourceConfig } from "@/data/mockDeals";
-import { Loader2, Check, Globe, Upload, FileArchive, FileSearch, CloudUpload, ArrowRightLeft, Pause, Play, Clock } from "lucide-react";
+import { Loader2, Check, Globe, Upload, FileArchive, FileSearch, CloudUpload, ArrowRightLeft, Pause, Clock, Trash2, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import { toast } from "@/hooks/use-toast";
 
 const columns = [
   { key: "inbox", title: "Inbox" },
@@ -116,7 +129,17 @@ function WorkflowProgress({ deal, onCancel, isCancelling }: {
   );
 }
 
-function DealCard({ deal }: { deal: Deal }) {
+function DealCard({
+  deal,
+  selected,
+  onToggleSelect,
+  selectionActive,
+}: {
+  deal: Deal;
+  selected: boolean;
+  onToggleSelect: (id: string) => void;
+  selectionActive: boolean;
+}) {
   const source = sourceConfig[deal.source] ?? sourceConfig.manual;
   const isProcessing = PROCESSING_STATUSES.includes(deal.status);
   const isQueued = deal.status === "queued";
@@ -125,9 +148,30 @@ function DealCard({ deal }: { deal: Deal }) {
 
   const cancelMutation = useCancelDeal();
 
+  const handleCardClick = (e: React.MouseEvent) => {
+    if (selectionActive) {
+      e.preventDefault();
+      onToggleSelect(deal.id);
+    }
+  };
+
   return (
-    <div className="rounded-lg border border-border bg-card p-3.5 shadow-surface hover:shadow-surface-md transition-shadow cursor-pointer group">
-      <div className="flex items-start justify-between mb-2">
+    <div
+      className={`relative rounded-lg border bg-card p-3.5 shadow-surface hover:shadow-surface-md transition-all cursor-pointer group ${
+        selected ? "border-primary ring-2 ring-primary/30" : "border-border"
+      }`}
+      onClick={handleCardClick}
+    >
+      <div
+        className={`absolute top-2.5 left-2.5 transition-opacity ${
+          selected || selectionActive ? "opacity-100" : "opacity-0 group-hover:opacity-100"
+        }`}
+        onClick={(e) => { e.stopPropagation(); onToggleSelect(deal.id); }}
+      >
+        <Checkbox checked={selected} onCheckedChange={() => onToggleSelect(deal.id)} />
+      </div>
+
+      <div className="flex items-start justify-between mb-2 pl-6">
         <h3 className="text-sm font-semibold text-card-foreground group-hover:text-primary transition-colors">
           {deal.name}
         </h3>
@@ -143,8 +187,8 @@ function DealCard({ deal }: { deal: Deal }) {
           </span>
         )}
       </div>
-      <p className="text-xs text-muted-foreground mb-2.5">{deal.stage} · {deal.sector}</p>
-      <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium ${source.bgClass} ${source.colorClass}`}>
+      <p className="text-xs text-muted-foreground mb-2.5 pl-6">{deal.stage} · {deal.sector}</p>
+      <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium ml-6 ${source.bgClass} ${source.colorClass}`}>
         {source.label}
       </span>
       {showWorkflow && (
@@ -160,6 +204,20 @@ function DealCard({ deal }: { deal: Deal }) {
 
 export default function KanbanPipeline() {
   const { data: deals, isLoading } = useDeals();
+  const deleteDeals = useDeleteDeals();
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [confirmOpen, setConfirmOpen] = useState(false);
+
+  const toggleSelect = (id: string) => {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const clearSelection = () => setSelected(new Set());
 
   const grouped = columns.map((col) => ({
     ...col,
@@ -168,11 +226,44 @@ export default function KanbanPipeline() {
     ),
   }));
 
+  const handleDelete = () => {
+    const ids = Array.from(selected);
+    deleteDeals.mutateAsync(ids).then(() => {
+      toast({ title: "Deals deleted", description: `${ids.length} deal${ids.length === 1 ? "" : "s"} removed.` });
+      clearSelection();
+      setConfirmOpen(false);
+    }).catch((err) => {
+      toast({ title: "Failed to delete", description: err.message, variant: "destructive" });
+    });
+  };
+
+  const selectionActive = selected.size > 0;
+
   return (
     <div className="p-6">
-      <div className="mb-6">
-        <h1 className="text-xl font-semibold text-foreground">Deal Pipeline</h1>
-        <p className="text-sm text-muted-foreground mt-1">Track deals across your ingestion pipeline</p>
+      <div className="mb-6 flex items-start justify-between gap-4">
+        <div>
+          <h1 className="text-xl font-semibold text-foreground">Deal Pipeline</h1>
+          <p className="text-sm text-muted-foreground mt-1">Track deals across your ingestion pipeline</p>
+        </div>
+        {selectionActive && (
+          <div className="flex items-center gap-2">
+            <span className="text-sm text-muted-foreground">{selected.size} selected</span>
+            <Button variant="ghost" size="sm" onClick={clearSelection} className="gap-1">
+              <X className="h-4 w-4" /> Clear
+            </Button>
+            <Button
+              variant="destructive"
+              size="sm"
+              onClick={() => setConfirmOpen(true)}
+              disabled={deleteDeals.isPending}
+              className="gap-1"
+            >
+              {deleteDeals.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
+              Delete
+            </Button>
+          </div>
+        )}
       </div>
       {isLoading ? (
         <div className="flex items-center justify-center h-40">
@@ -193,13 +284,40 @@ export default function KanbanPipeline() {
                   <p className="text-xs text-muted-foreground text-center mt-8">No deals</p>
                 )}
                 {col.deals.map((deal) => (
-                  <DealCard key={deal.id} deal={deal} />
+                  <DealCard
+                    key={deal.id}
+                    deal={deal}
+                    selected={selected.has(deal.id)}
+                    onToggleSelect={toggleSelect}
+                    selectionActive={selectionActive}
+                  />
                 ))}
               </div>
             </div>
           ))}
         </div>
       )}
+
+      <AlertDialog open={confirmOpen} onOpenChange={setConfirmOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete {selected.size} deal{selected.size === 1 ? "" : "s"}?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This permanently removes the selected deals along with their sources, capture jobs, and uploaded files. This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deleteDeals.isPending}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={(e) => { e.preventDefault(); handleDelete(); }}
+              disabled={deleteDeals.isPending}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              {deleteDeals.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : "Delete"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

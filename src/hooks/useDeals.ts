@@ -256,6 +256,64 @@ export function useDeleteDeal() {
   });
 }
 
+export function useDeleteDeals() {
+  const queryClient = useQueryClient();
+  const { user } = useAuth();
+
+  return useMutation({
+    mutationFn: async (dealIds: string[]) => {
+      if (!user) throw new Error("Not authenticated");
+      if (dealIds.length === 0) return { dealIds };
+
+      // 1. Gather all source storage paths across selected deals
+      const { data: sourceRows, error: sourcesFetchError } = await supabase
+        .from("sources")
+        .select("storage_path")
+        .in("deal_id", dealIds);
+      if (sourcesFetchError) throw sourcesFetchError;
+
+      const storagePaths = (sourceRows ?? [])
+        .map((s) => s.storage_path)
+        .filter((p): p is string => !!p);
+
+      // 2. Remove files from storage (best-effort)
+      if (storagePaths.length > 0) {
+        const { error: removeError } = await supabase.storage
+          .from("decks")
+          .remove(storagePaths);
+        if (removeError) {
+          console.warn("Failed to remove some deck files from storage:", removeError);
+        }
+      }
+
+      // 3. Delete dependent rows
+      const [capRes, srcRes, peopleRes] = await Promise.all([
+        supabase.from("capture_jobs").delete().in("deal_id", dealIds),
+        supabase.from("sources").delete().in("deal_id", dealIds),
+        supabase.from("deal_people").delete().in("deal_id", dealIds),
+      ]);
+      if (capRes.error) throw capRes.error;
+      if (srcRes.error) throw srcRes.error;
+      if (peopleRes.error) throw peopleRes.error;
+
+      // 4. Delete the deals
+      const { error: dealError } = await supabase
+        .from("deals")
+        .delete()
+        .in("id", dealIds);
+      if (dealError) throw dealError;
+
+      return { dealIds };
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["deals"] });
+      queryClient.invalidateQueries({ queryKey: ["sources"] });
+      queryClient.invalidateQueries({ queryKey: ["latest-capture-job"] });
+      queryClient.invalidateQueries({ queryKey: ["capture-job-url"] });
+    },
+  });
+}
+
 export function useCreateDealWithUpload() {
   const queryClient = useQueryClient();
   const { user } = useAuth();
