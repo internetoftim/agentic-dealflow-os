@@ -756,14 +756,11 @@ Deno.serve(async (req) => {
             const searchPrompt = `Find the official company website and LinkedIn company page for "${companyName}"${sectorHint ? ` (${sectorHint} sector)` : ""}. This is a startup. Search the web and return the verified URLs. Do NOT guess — only return URLs you find in search results. Exclude aggregator sites like Crunchbase, PitchBook, etc.`;
 
             const searchPayload = {
-              model: "gpt-5-search-api",
-              messages: [
-                { role: "system", content: "You are a research assistant. Find official company websites and LinkedIn pages. Use the find_company_urls tool to return results." },
-                { role: "user", content: searchPrompt },
-              ],
-              tools: [{
-                type: "function",
-                function: {
+              model: "gpt-5-mini",
+              tools: [
+                { type: "web_search" },
+                {
+                  type: "function",
                   name: "find_company_urls",
                   description: "Return the verified company website and LinkedIn URLs found via web search.",
                   parameters: {
@@ -777,11 +774,13 @@ Deno.serve(async (req) => {
                     additionalProperties: false,
                   },
                 },
-              }],
-              tool_choice: { type: "function", function: { name: "find_company_urls" } },
+              ],
+              instructions: "You are a research assistant. Use web_search to find the official company website and LinkedIn page. Once you have the URLs, call find_company_urls with the verified results.",
+              input: [{ role: "user", content: searchPrompt }],
+              max_output_tokens: 2048,
             };
 
-            const searchRes = await fetch("https://api.openai.com/v1/chat/completions", {
+            const searchRes = await fetch("https://api.openai.com/v1/responses", {
               method: "POST",
               headers: {
                 "Authorization": `Bearer ${openaiApiKey?.trim().replace(/[\r\n]/g, "")}`,
@@ -792,9 +791,9 @@ Deno.serve(async (req) => {
 
             if (searchRes.ok) {
               const searchResult = await searchRes.json();
-              const toolCall = searchResult.choices?.[0]?.message?.tool_calls?.[0];
-              if (toolCall) {
-                const urls = JSON.parse(toolCall.function.arguments);
+              const fnCall = (searchResult.output ?? []).find((o: any) => o.type === "function_call" && o.name === "find_company_urls");
+              if (fnCall) {
+                const urls = JSON.parse(fnCall.arguments);
                 console.log("GPT-5 web search result:", JSON.stringify(urls));
 
                 if (urls.website && urls.confidence >= 60) {
