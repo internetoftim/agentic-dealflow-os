@@ -24,34 +24,67 @@ Deno.serve(async (req) => {
     const formData = await req.formData();
     const file = formData.get("file") as File | null;
     let userId = formData.get("userId") as string | null;
-    const companyName = (formData.get("companyName") as string | "").trim();
-    const submitterName = (formData.get("submitterName") as string | "")?.trim() || null;
-    const submitterEmail = (formData.get("submitterEmail") as string | "")?.trim() || null;
+    const companyNameRaw = ((formData.get("companyName") as string) || "").trim();
+    const submitterName = ((formData.get("submitterName") as string) || "").trim();
+    const submitterEmail = ((formData.get("submitterEmail") as string) || "").trim();
+    const referralSource = ((formData.get("referralSource") as string) || "").trim();
+    const docsendUrl = ((formData.get("docsendUrl") as string) || "").trim();
+    const linkedinUrl = ((formData.get("linkedinUrl") as string) || "").trim();
+    const websiteUrl = ((formData.get("websiteUrl") as string) || "").trim();
+    const message = ((formData.get("message") as string) || "").trim();
 
-    // Validate required fields
-    if (!file || !userId || !companyName) {
+    // Validate required fields: userId, submitterName, submitterEmail, referralSource
+    if (!userId || !submitterName || !submitterEmail || !referralSource) {
       return new Response(
-        JSON.stringify({ error: "Missing required fields: file, userId, companyName" }),
+        JSON.stringify({ error: "Missing required fields: name, email, referral source" }),
         { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
 
-    // Validate file extension
-    const fileName = file.name.toLowerCase();
-    const ext = fileName.slice(fileName.lastIndexOf("."));
-    if (!ALLOWED_EXTENSIONS.includes(ext)) {
+    // Validate email format
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(submitterEmail)) {
       return new Response(
-        JSON.stringify({ error: "Only PDF and PPTX files are accepted" }),
+        JSON.stringify({ error: "Invalid email address" }),
         { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
 
-    // Validate file size
-    if (file.size > MAX_FILE_SIZE) {
+    // Length limits
+    if (
+      submitterName.length > 100 ||
+      submitterEmail.length > 255 ||
+      referralSource.length > 200 ||
+      companyNameRaw.length > 150 ||
+      docsendUrl.length > 500 ||
+      linkedinUrl.length > 500 ||
+      websiteUrl.length > 500 ||
+      message.length > 2000
+    ) {
       return new Response(
-        JSON.stringify({ error: "File must be under 20MB" }),
+        JSON.stringify({ error: "One or more fields exceed maximum length" }),
         { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
+    }
+
+    // Fall back company name when not provided
+    const companyName = companyNameRaw || (websiteUrl ? websiteUrl.replace(/^https?:\/\//, "").split("/")[0] : submitterName);
+
+    // Validate file (only if provided)
+    if (file) {
+      const fileName = file.name.toLowerCase();
+      const ext = fileName.slice(fileName.lastIndexOf("."));
+      if (!ALLOWED_EXTENSIONS.includes(ext)) {
+        return new Response(
+          JSON.stringify({ error: "Only PDF and PPTX files are accepted" }),
+          { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+      if (file.size > MAX_FILE_SIZE) {
+        return new Response(
+          JSON.stringify({ error: "File must be under 20MB" }),
+          { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
     }
 
     // Resolve userId: could be a UUID or a custom intake_slug
