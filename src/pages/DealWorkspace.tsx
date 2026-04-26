@@ -274,7 +274,7 @@ export default function DealWorkspace() {
 
                     if (step.key === "deep-research") {
                       isCompleted = activeDeal.deep_research_status === "completed";
-                      isActive = ["queued", "running", "pending"].includes(activeDeal.deep_research_status) && (isTerminal || currentIndex >= stepIndex);
+                      isActive = ["queued", "running", "pending"].includes(activeDeal.deep_research_status) && (isTerminal || currentIndex >= stepIndex) && activeDeal.deep_research_status !== "skipped";
                     } else if (step.key === "memo-ready") {
                       isCompleted = activeDeal.status === "memo-ready";
                       isActive = false;

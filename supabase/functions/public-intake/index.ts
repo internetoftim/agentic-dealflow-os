@@ -155,6 +155,10 @@ Deno.serve(async (req) => {
     if (message) submissionNoteLines.push(`\n**Message from founder:**\n${message}`);
     const memoDraft = submissionNoteLines.join("\n");
 
+    // Determine if any agentic processing should run.
+    // No deck and no DocSend URL ⇒ this is a "lead-only" submission; skip all agents.
+    const hasProcessableSource = Boolean(file) || Boolean(docsendUrl);
+
     // Create deal record
     const dealInsert: Record<string, unknown> = {
       user_id: userId,
@@ -163,6 +167,9 @@ Deno.serve(async (req) => {
       auto_ingested: true,
       status: file ? "uploading" : "inbox",
       memo_draft: memoDraft,
+      // If there is nothing to process, mark deep research as skipped so the
+      // workspace UI does not show a perpetually "pending" agent step.
+      deep_research_status: hasProcessableSource ? "pending" : "skipped",
     };
     if (file) {
       dealInsert.deck_size = `${(file.size / (1024 * 1024)).toFixed(1)} MB`;
