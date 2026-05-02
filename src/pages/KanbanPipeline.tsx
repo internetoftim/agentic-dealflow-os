@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useDeals, useCancelDeal, useDeleteDeals, type Deal, WORKFLOW_STEPS, PROCESSING_STATUSES } from "@/hooks/useDeals";
 import { sourceConfig as mockSourceConfig } from "@/data/mockDeals";
-import { Loader2, Check, Globe, Upload, FileArchive, FileSearch, CloudUpload, ArrowRightLeft, Pause, Clock, Trash2, X } from "lucide-react";
+import { Loader2, Check, Globe, Upload, FileArchive, FileSearch, CloudUpload, ArrowRightLeft, Pause, Clock, Trash2, X, Share2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
@@ -15,6 +15,9 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { toast } from "@/hooks/use-toast";
+import { useAuth } from "@/contexts/AuthContext";
+
+type DealFilter = "all" | "mine" | "shared";
 
 const columns = [
   { key: "inbox", title: "Inbox" },
@@ -134,22 +137,24 @@ function DealCard({
   selected,
   onToggleSelect,
   selectionActive,
+  isShared,
 }: {
   deal: Deal;
   selected: boolean;
   onToggleSelect: (id: string) => void;
   selectionActive: boolean;
+  isShared: boolean;
 }) {
   const source = sourceConfig[deal.source] ?? sourceConfig.manual;
   const isProcessing = PROCESSING_STATUSES.includes(deal.status);
   const isQueued = deal.status === "queued";
   const isCancelled = deal.status === "cancelled";
-  const showWorkflow = isProcessing || isQueued || isCancelled;
+  const showWorkflow = (isProcessing || isQueued || isCancelled) && !isShared;
 
   const cancelMutation = useCancelDeal();
 
   const handleCardClick = (e: React.MouseEvent) => {
-    if (selectionActive) {
+    if (selectionActive && !isShared) {
       e.preventDefault();
       onToggleSelect(deal.id);
     }
@@ -162,35 +167,47 @@ function DealCard({
       }`}
       onClick={handleCardClick}
     >
-      <div
-        className={`absolute top-2.5 left-2.5 transition-opacity ${
-          selected || selectionActive ? "opacity-100" : "opacity-0 group-hover:opacity-100"
-        }`}
-        onClick={(e) => { e.stopPropagation(); onToggleSelect(deal.id); }}
-      >
-        <Checkbox checked={selected} onCheckedChange={() => onToggleSelect(deal.id)} />
-      </div>
+      {!isShared && (
+        <div
+          className={`absolute top-2.5 left-2.5 transition-opacity ${
+            selected || selectionActive ? "opacity-100" : "opacity-0 group-hover:opacity-100"
+          }`}
+          onClick={(e) => { e.stopPropagation(); onToggleSelect(deal.id); }}
+        >
+          <Checkbox checked={selected} onCheckedChange={() => onToggleSelect(deal.id)} />
+        </div>
+      )}
 
       <div className="flex items-start justify-between mb-2 pl-6">
-        <h3 className="text-sm font-semibold text-card-foreground group-hover:text-primary transition-colors">
-          {deal.name}
+        <h3 className="text-sm font-semibold text-card-foreground group-hover:text-primary transition-colors flex items-center gap-1.5">
+          <span className="truncate">{deal.name}</span>
+          {isShared && (
+            <Share2 className="h-3 w-3 text-info shrink-0" aria-label="Shared with you" />
+          )}
         </h3>
-        {(deal.auto_ingested || isProcessing) && (
+        {(deal.auto_ingested || isProcessing) && !isShared && (
           <span className="relative flex h-2.5 w-2.5 shrink-0 mt-1">
             <span className="animate-pulse-dot absolute inline-flex h-full w-full rounded-full bg-success opacity-75" />
             <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-success" />
           </span>
         )}
-        {isQueued && (
+        {isQueued && !isShared && (
           <span className="relative flex h-2.5 w-2.5 shrink-0 mt-1">
             <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-warning" />
           </span>
         )}
       </div>
       <p className="text-xs text-muted-foreground mb-2.5 pl-6">{deal.stage} · {deal.sector}</p>
-      <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium ml-6 ${source.bgClass} ${source.colorClass}`}>
-        {source.label}
-      </span>
+      <div className="flex items-center gap-1.5 ml-6 flex-wrap">
+        <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium ${source.bgClass} ${source.colorClass}`}>
+          {source.label}
+        </span>
+        {isShared && (
+          <span className="inline-flex items-center gap-1 rounded-full bg-info-muted px-2 py-0.5 text-[11px] font-medium text-info">
+            <Share2 className="h-2.5 w-2.5" /> Shared
+          </span>
+        )}
+      </div>
       {showWorkflow && (
         <WorkflowProgress
           deal={deal}
@@ -203,10 +220,12 @@ function DealCard({
 }
 
 export default function KanbanPipeline() {
+  const { user } = useAuth();
   const { data: deals, isLoading } = useDeals();
   const deleteDeals = useDeleteDeals();
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [confirmOpen, setConfirmOpen] = useState(false);
+  const [filter, setFilter] = useState<DealFilter>("all");
 
   const toggleSelect = (id: string) => {
     setSelected((prev) => {
@@ -219,9 +238,19 @@ export default function KanbanPipeline() {
 
   const clearSelection = () => setSelected(new Set());
 
+  const isOwn = (d: Deal) => !!user && d.user_id === user.id;
+
+  const sharedCount = (deals ?? []).filter((d) => !isOwn(d)).length;
+
+  const visibleDeals = (deals ?? []).filter((d) => {
+    if (filter === "mine") return isOwn(d);
+    if (filter === "shared") return !isOwn(d);
+    return true;
+  });
+
   const grouped = columns.map((col) => ({
     ...col,
-    deals: (deals ?? []).filter((d) =>
+    deals: visibleDeals.filter((d) =>
       "matchFn" in col && col.matchFn ? col.matchFn(d.status) : d.status === col.key
     ),
   }));
@@ -239,6 +268,17 @@ export default function KanbanPipeline() {
 
   const selectionActive = selected.size > 0;
 
+  const filterButton = (key: DealFilter, label: string, count?: number) => (
+    <button
+      onClick={() => setFilter(key)}
+      className={`px-2.5 py-1 rounded-md text-xs font-medium transition-colors ${
+        filter === key ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-accent"
+      }`}
+    >
+      {label}{typeof count === "number" && count > 0 ? ` (${count})` : ""}
+    </button>
+  );
+
   return (
     <div className="p-6">
       <div className="mb-6 flex items-start justify-between gap-4">
@@ -246,24 +286,31 @@ export default function KanbanPipeline() {
           <h1 className="text-xl font-semibold text-foreground">Deal Pipeline</h1>
           <p className="text-sm text-muted-foreground mt-1">Track deals across your ingestion pipeline</p>
         </div>
-        {selectionActive && (
-          <div className="flex items-center gap-2">
-            <span className="text-sm text-muted-foreground">{selected.size} selected</span>
-            <Button variant="ghost" size="sm" onClick={clearSelection} className="gap-1">
-              <X className="h-4 w-4" /> Clear
-            </Button>
-            <Button
-              variant="destructive"
-              size="sm"
-              onClick={() => setConfirmOpen(true)}
-              disabled={deleteDeals.isPending}
-              className="gap-1"
-            >
-              {deleteDeals.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
-              Delete
-            </Button>
+        <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1 rounded-md border border-border p-0.5 bg-card">
+            {filterButton("all", "All")}
+            {filterButton("mine", "Mine")}
+            {filterButton("shared", "Shared", sharedCount)}
           </div>
-        )}
+          {selectionActive && (
+            <>
+              <span className="text-sm text-muted-foreground">{selected.size} selected</span>
+              <Button variant="ghost" size="sm" onClick={clearSelection} className="gap-1">
+                <X className="h-4 w-4" /> Clear
+              </Button>
+              <Button
+                variant="destructive"
+                size="sm"
+                onClick={() => setConfirmOpen(true)}
+                disabled={deleteDeals.isPending}
+                className="gap-1"
+              >
+                {deleteDeals.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
+                Delete
+              </Button>
+            </>
+          )}
+        </div>
       </div>
       {isLoading ? (
         <div className="flex items-center justify-center h-40">
@@ -290,6 +337,7 @@ export default function KanbanPipeline() {
                     selected={selected.has(deal.id)}
                     onToggleSelect={toggleSelect}
                     selectionActive={selectionActive}
+                    isShared={!isOwn(deal)}
                   />
                 ))}
               </div>

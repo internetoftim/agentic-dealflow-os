@@ -1,5 +1,6 @@
 import { useState, useCallback, useRef, useEffect } from "react";
-import { Upload, Link, Cog, Check, Search, Send, FileText, Globe, Layers, Square, Linkedin, Loader2, FileUp, CircleDashed, CircleCheck, Circle, Pause, Clock, Download, Mail, ExternalLink, Users, Trash2 } from "lucide-react";
+import { useSearchParams } from "react-router-dom";
+import { Upload, Link, Cog, Check, Search, Send, FileText, Globe, Layers, Square, Linkedin, Loader2, FileUp, CircleDashed, CircleCheck, Circle, Pause, Clock, Download, Mail, ExternalLink, Users, Trash2, Share2 } from "lucide-react";
 import { useDeals, useSources, useLatestCaptureJob, useCreateDealWithUpload, useProcessDocsend, useRetryDocsendCapture, useCancelDeal, useDeleteDeal, WORKFLOW_STEPS, PROCESSING_STATUSES, DOC_VIEWER_SOURCES } from "@/hooks/useDeals";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
@@ -10,6 +11,8 @@ import ReactMarkdown from "react-markdown";
 import { supabase } from "@/integrations/supabase/client";
 import { sourceConfig } from "@/data/mockDeals";
 import { useQuery } from "@tanstack/react-query";
+import { useAuth } from "@/contexts/AuthContext";
+import { ShareDealDialog } from "@/components/ShareDealDialog";
 const quickActions = ["Extract Cap Table", "Calculate Burn Rate", "Team Background", "Market Size"];
 
 export default function DealWorkspace() {
@@ -18,7 +21,10 @@ export default function DealWorkspace() {
   const [docSendUrl, setDocSendUrl] = useState("");
   const [selectedDealId, setSelectedDealId] = useState<string | undefined>();
   const [dealPendingDelete, setDealPendingDelete] = useState<{ id: string; name: string } | null>(null);
+  const [shareOpen, setShareOpen] = useState(false);
   const chatEndRef = useRef<HTMLDivElement>(null);
+  const { user } = useAuth();
+  const [searchParams, setSearchParams] = useSearchParams();
 
   const { data: deals } = useDeals();
   const activeDeal = deals?.find((d) => d.id === selectedDealId) ?? deals?.[0];
@@ -37,6 +43,18 @@ export default function DealWorkspace() {
   const isCloudCaptureActive = activeDeal?.status === "scraping" && ["pending", "processing"].includes(latestCaptureJob?.status ?? "");
   const isCloudCaptureFailed = latestCaptureJob?.status === "failed";
   const captureFailureMessage = latestCaptureJob?.error_message?.trim() || null;
+  const isOwnerOfActive = !!user && !!activeDeal && activeDeal.user_id === user.id;
+  const isSharedWithMe = !!user && !!activeDeal && activeDeal.user_id !== user.id;
+
+  // Sync ?deal=... URL param into selection (e.g. arriving from share accept)
+  useEffect(() => {
+    const dealParam = searchParams.get("deal");
+    if (dealParam && deals?.some((d) => d.id === dealParam)) {
+      setSelectedDealId(dealParam);
+      searchParams.delete("deal");
+      setSearchParams(searchParams, { replace: true });
+    }
+  }, [searchParams, deals, setSearchParams]);
 
   // Fetch key people for active deal
   const { data: dealPeople } = useQuery({
@@ -356,20 +374,25 @@ export default function DealWorkspace() {
                 >
                   <button
                     onClick={() => setSelectedDealId(d.id)}
-                    className="flex-1 text-left px-3 py-2 text-xs font-medium truncate"
+                    className="flex-1 text-left px-3 py-2 text-xs font-medium truncate flex items-center gap-1.5"
                   >
-                    {d.name}
+                    <span className="truncate">{d.name}</span>
+                    {user && d.user_id !== user.id && (
+                      <Share2 className="h-3 w-3 text-info shrink-0" aria-label="Shared with you" />
+                    )}
                   </button>
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setDealPendingDelete({ id: d.id, name: d.name });
-                    }}
-                    aria-label={`Delete ${d.name}`}
-                    className="opacity-0 group-hover:opacity-100 focus:opacity-100 p-1.5 mr-1 rounded text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-opacity"
-                  >
-                    <Trash2 className="h-3.5 w-3.5" />
-                  </button>
+                  {user && d.user_id === user.id && (
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setDealPendingDelete({ id: d.id, name: d.name });
+                      }}
+                      aria-label={`Delete ${d.name}`}
+                      className="opacity-0 group-hover:opacity-100 focus:opacity-100 p-1.5 mr-1 rounded text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-opacity"
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </button>
+                  )}
                 </div>
               ))}
             </div>
@@ -504,7 +527,30 @@ export default function DealWorkspace() {
               <Check className="h-3 w-3" /> Synced to Drive
             </a>
           )}
+          {isSharedWithMe && (
+            <span className="inline-flex items-center gap-1.5 rounded-full bg-info-muted px-2.5 py-1 text-xs font-medium text-info">
+              <Share2 className="h-3 w-3" /> Shared with you
+            </span>
+          )}
+          {activeDeal && isOwnerOfActive && (
+            <button
+              onClick={() => setShareOpen(true)}
+              className="ml-auto inline-flex items-center gap-1.5 rounded-full border border-border bg-background px-2.5 py-1 text-xs font-medium text-foreground hover:bg-accent transition-colors"
+            >
+              <Share2 className="h-3 w-3" /> Share
+            </button>
+          )}
         </div>
+
+        {activeDeal && isOwnerOfActive && (
+          <ShareDealDialog
+            open={shareOpen}
+            onOpenChange={setShareOpen}
+            dealId={activeDeal.id}
+            dealName={activeDeal.name}
+            ownerId={activeDeal.user_id}
+          />
+        )}
 
         {/* Tabs */}
         <div className="flex items-center gap-0 px-5 border-b border-border bg-card shrink-0">
