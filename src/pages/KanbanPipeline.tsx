@@ -220,10 +220,12 @@ function DealCard({
 }
 
 export default function KanbanPipeline() {
+  const { user } = useAuth();
   const { data: deals, isLoading } = useDeals();
   const deleteDeals = useDeleteDeals();
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [confirmOpen, setConfirmOpen] = useState(false);
+  const [filter, setFilter] = useState<DealFilter>("all");
 
   const toggleSelect = (id: string) => {
     setSelected((prev) => {
@@ -236,9 +238,19 @@ export default function KanbanPipeline() {
 
   const clearSelection = () => setSelected(new Set());
 
+  const isOwn = (d: Deal) => !!user && d.user_id === user.id;
+
+  const sharedCount = (deals ?? []).filter((d) => !isOwn(d)).length;
+
+  const visibleDeals = (deals ?? []).filter((d) => {
+    if (filter === "mine") return isOwn(d);
+    if (filter === "shared") return !isOwn(d);
+    return true;
+  });
+
   const grouped = columns.map((col) => ({
     ...col,
-    deals: (deals ?? []).filter((d) =>
+    deals: visibleDeals.filter((d) =>
       "matchFn" in col && col.matchFn ? col.matchFn(d.status) : d.status === col.key
     ),
   }));
@@ -256,6 +268,17 @@ export default function KanbanPipeline() {
 
   const selectionActive = selected.size > 0;
 
+  const filterButton = (key: DealFilter, label: string, count?: number) => (
+    <button
+      onClick={() => setFilter(key)}
+      className={`px-2.5 py-1 rounded-md text-xs font-medium transition-colors ${
+        filter === key ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-accent"
+      }`}
+    >
+      {label}{typeof count === "number" && count > 0 ? ` (${count})` : ""}
+    </button>
+  );
+
   return (
     <div className="p-6">
       <div className="mb-6 flex items-start justify-between gap-4">
@@ -263,24 +286,31 @@ export default function KanbanPipeline() {
           <h1 className="text-xl font-semibold text-foreground">Deal Pipeline</h1>
           <p className="text-sm text-muted-foreground mt-1">Track deals across your ingestion pipeline</p>
         </div>
-        {selectionActive && (
-          <div className="flex items-center gap-2">
-            <span className="text-sm text-muted-foreground">{selected.size} selected</span>
-            <Button variant="ghost" size="sm" onClick={clearSelection} className="gap-1">
-              <X className="h-4 w-4" /> Clear
-            </Button>
-            <Button
-              variant="destructive"
-              size="sm"
-              onClick={() => setConfirmOpen(true)}
-              disabled={deleteDeals.isPending}
-              className="gap-1"
-            >
-              {deleteDeals.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
-              Delete
-            </Button>
+        <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1 rounded-md border border-border p-0.5 bg-card">
+            {filterButton("all", "All")}
+            {filterButton("mine", "Mine")}
+            {filterButton("shared", "Shared", sharedCount)}
           </div>
-        )}
+          {selectionActive && (
+            <>
+              <span className="text-sm text-muted-foreground">{selected.size} selected</span>
+              <Button variant="ghost" size="sm" onClick={clearSelection} className="gap-1">
+                <X className="h-4 w-4" /> Clear
+              </Button>
+              <Button
+                variant="destructive"
+                size="sm"
+                onClick={() => setConfirmOpen(true)}
+                disabled={deleteDeals.isPending}
+                className="gap-1"
+              >
+                {deleteDeals.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
+                Delete
+              </Button>
+            </>
+          )}
+        </div>
       </div>
       {isLoading ? (
         <div className="flex items-center justify-center h-40">
@@ -307,6 +337,7 @@ export default function KanbanPipeline() {
                     selected={selected.has(deal.id)}
                     onToggleSelect={toggleSelect}
                     selectionActive={selectionActive}
+                    isShared={!isOwn(deal)}
                   />
                 ))}
               </div>
