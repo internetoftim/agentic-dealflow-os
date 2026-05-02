@@ -41,7 +41,7 @@ const App = () => (
           <Routes>
             <Route path="/login" element={<LoginPage />} />
             <Route path="/intake/:userId" element={<PublicIntake />} />
-            <Route path="/share/:token" element={<ProtectedRoute><AcceptShare /></ProtectedRoute>} />
+            <Route path="/share/:token" element={<AcceptShare />} />
             <Route path="/ingest-relay" element={<ProtectedRoute><IngestRelay /></ProtectedRoute>} />
             <Route
               path="/*"
