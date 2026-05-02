@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useDeals, useCancelDeal, useDeleteDeals, type Deal, WORKFLOW_STEPS, PROCESSING_STATUSES } from "@/hooks/useDeals";
 import { sourceConfig as mockSourceConfig } from "@/data/mockDeals";
-import { Loader2, Check, Globe, Upload, FileArchive, FileSearch, CloudUpload, ArrowRightLeft, Pause, Clock, Trash2, X } from "lucide-react";
+import { Loader2, Check, Globe, Upload, FileArchive, FileSearch, CloudUpload, ArrowRightLeft, Pause, Clock, Trash2, X, Share2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
@@ -15,6 +15,9 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { toast } from "@/hooks/use-toast";
+import { useAuth } from "@/contexts/AuthContext";
+
+type DealFilter = "all" | "mine" | "shared";
 
 const columns = [
   { key: "inbox", title: "Inbox" },
