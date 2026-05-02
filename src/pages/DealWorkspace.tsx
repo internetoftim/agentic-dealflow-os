@@ -1,5 +1,6 @@
 import { useState, useCallback, useRef, useEffect } from "react";
-import { Upload, Link, Cog, Check, Search, Send, FileText, Globe, Layers, Square, Linkedin, Loader2, FileUp, CircleDashed, CircleCheck, Circle, Pause, Clock, Download, Mail, ExternalLink, Users, Trash2 } from "lucide-react";
+import { useSearchParams } from "react-router-dom";
+import { Upload, Link, Cog, Check, Search, Send, FileText, Globe, Layers, Square, Linkedin, Loader2, FileUp, CircleDashed, CircleCheck, Circle, Pause, Clock, Download, Mail, ExternalLink, Users, Trash2, Share2 } from "lucide-react";
 import { useDeals, useSources, useLatestCaptureJob, useCreateDealWithUpload, useProcessDocsend, useRetryDocsendCapture, useCancelDeal, useDeleteDeal, WORKFLOW_STEPS, PROCESSING_STATUSES, DOC_VIEWER_SOURCES } from "@/hooks/useDeals";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
@@ -10,6 +11,8 @@ import ReactMarkdown from "react-markdown";
 import { supabase } from "@/integrations/supabase/client";
 import { sourceConfig } from "@/data/mockDeals";
 import { useQuery } from "@tanstack/react-query";
+import { useAuth } from "@/contexts/AuthContext";
+import { ShareDealDialog } from "@/components/ShareDealDialog";
 const quickActions = ["Extract Cap Table", "Calculate Burn Rate", "Team Background", "Market Size"];
 
 export default function DealWorkspace() {
@@ -18,7 +21,10 @@ export default function DealWorkspace() {
   const [docSendUrl, setDocSendUrl] = useState("");
   const [selectedDealId, setSelectedDealId] = useState<string | undefined>();
   const [dealPendingDelete, setDealPendingDelete] = useState<{ id: string; name: string } | null>(null);
+  const [shareOpen, setShareOpen] = useState(false);
   const chatEndRef = useRef<HTMLDivElement>(null);
+  const { user } = useAuth();
+  const [searchParams, setSearchParams] = useSearchParams();
 
   const { data: deals } = useDeals();
   const activeDeal = deals?.find((d) => d.id === selectedDealId) ?? deals?.[0];
