@@ -522,7 +522,30 @@ export default function DealWorkspace() {
               <Check className="h-3 w-3" /> Synced to Drive
             </a>
           )}
+          {isSharedWithMe && (
+            <span className="inline-flex items-center gap-1.5 rounded-full bg-info-muted px-2.5 py-1 text-xs font-medium text-info">
+              <Share2 className="h-3 w-3" /> Shared with you
+            </span>
+          )}
+          {activeDeal && isOwnerOfActive && (
+            <button
+              onClick={() => setShareOpen(true)}
+              className="ml-auto inline-flex items-center gap-1.5 rounded-full border border-border bg-background px-2.5 py-1 text-xs font-medium text-foreground hover:bg-accent transition-colors"
+            >
+              <Share2 className="h-3 w-3" /> Share
+            </button>
+          )}
         </div>
+
+        {activeDeal && isOwnerOfActive && (
+          <ShareDealDialog
+            open={shareOpen}
+            onOpenChange={setShareOpen}
+            dealId={activeDeal.id}
+            dealName={activeDeal.name}
+            ownerId={activeDeal.user_id}
+          />
+        )}
 
         {/* Tabs */}
         <div className="flex items-center gap-0 px-5 border-b border-border bg-card shrink-0">
