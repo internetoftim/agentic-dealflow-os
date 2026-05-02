@@ -374,20 +374,25 @@ export default function DealWorkspace() {
                 >
                   <button
                     onClick={() => setSelectedDealId(d.id)}
-                    className="flex-1 text-left px-3 py-2 text-xs font-medium truncate"
+                    className="flex-1 text-left px-3 py-2 text-xs font-medium truncate flex items-center gap-1.5"
                   >
-                    {d.name}
+                    <span className="truncate">{d.name}</span>
+                    {user && d.user_id !== user.id && (
+                      <Share2 className="h-3 w-3 text-info shrink-0" aria-label="Shared with you" />
+                    )}
                   </button>
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setDealPendingDelete({ id: d.id, name: d.name });
-                    }}
-                    aria-label={`Delete ${d.name}`}
-                    className="opacity-0 group-hover:opacity-100 focus:opacity-100 p-1.5 mr-1 rounded text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-opacity"
-                  >
-                    <Trash2 className="h-3.5 w-3.5" />
-                  </button>
+                  {user && d.user_id === user.id && (
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setDealPendingDelete({ id: d.id, name: d.name });
+                      }}
+                      aria-label={`Delete ${d.name}`}
+                      className="opacity-0 group-hover:opacity-100 focus:opacity-100 p-1.5 mr-1 rounded text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-opacity"
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </button>
+                  )}
                 </div>
               ))}
             </div>
