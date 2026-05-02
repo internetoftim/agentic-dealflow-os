@@ -43,6 +43,18 @@ export default function DealWorkspace() {
   const isCloudCaptureActive = activeDeal?.status === "scraping" && ["pending", "processing"].includes(latestCaptureJob?.status ?? "");
   const isCloudCaptureFailed = latestCaptureJob?.status === "failed";
   const captureFailureMessage = latestCaptureJob?.error_message?.trim() || null;
+  const isOwnerOfActive = !!user && !!activeDeal && activeDeal.user_id === user.id;
+  const isSharedWithMe = !!user && !!activeDeal && activeDeal.user_id !== user.id;
+
+  // Sync ?deal=... URL param into selection (e.g. arriving from share accept)
+  useEffect(() => {
+    const dealParam = searchParams.get("deal");
+    if (dealParam && deals?.some((d) => d.id === dealParam)) {
+      setSelectedDealId(dealParam);
+      searchParams.delete("deal");
+      setSearchParams(searchParams, { replace: true });
+    }
+  }, [searchParams, deals, setSearchParams]);
 
   // Fetch key people for active deal
   const { data: dealPeople } = useQuery({
