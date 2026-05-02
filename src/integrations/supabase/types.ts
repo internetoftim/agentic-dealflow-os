@@ -85,6 +85,77 @@ export type Database = {
         }
         Relationships: []
       }
+      deal_share_access: {
+        Row: {
+          accepted_at: string
+          deal_id: string
+          id: string
+          owner_id: string
+          permission: string
+          revoked_at: string | null
+          share_id: string
+          user_id: string
+        }
+        Insert: {
+          accepted_at?: string
+          deal_id: string
+          id?: string
+          owner_id: string
+          permission?: string
+          revoked_at?: string | null
+          share_id: string
+          user_id: string
+        }
+        Update: {
+          accepted_at?: string
+          deal_id?: string
+          id?: string
+          owner_id?: string
+          permission?: string
+          revoked_at?: string | null
+          share_id?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "deal_share_access_share_id_fkey"
+            columns: ["share_id"]
+            isOneToOne: false
+            referencedRelation: "deal_shares"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      deal_shares: {
+        Row: {
+          created_at: string
+          deal_id: string
+          id: string
+          owner_id: string
+          permission: string
+          revoked_at: string | null
+          token: string
+        }
+        Insert: {
+          created_at?: string
+          deal_id: string
+          id?: string
+          owner_id: string
+          permission?: string
+          revoked_at?: string | null
+          token: string
+        }
+        Update: {
+          created_at?: string
+          deal_id?: string
+          id?: string
+          owner_id?: string
+          permission?: string
+          revoked_at?: string | null
+          token?: string
+        }
+        Relationships: []
+      }
       deals: {
         Row: {
           ask_amount: string | null
@@ -392,6 +463,11 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      accept_share_token: { Args: { _token: string }; Returns: string }
+      can_access_deal: {
+        Args: { _deal_id: string; _user_id: string }
+        Returns: boolean
+      }
       has_role: {
         Args: {
           _role: Database["public"]["Enums"]["app_role"]
@@ -400,6 +476,15 @@ export type Database = {
         Returns: boolean
       }
       is_user_approved: { Args: { _user_id: string }; Returns: boolean }
+      lookup_share_token: {
+        Args: { _token: string }
+        Returns: {
+          deal_id: string
+          deal_name: string
+          owner_display_name: string
+          revoked: boolean
+        }[]
+      }
       sync_my_profile: {
         Args: { _avatar_url: string; _display_name: string; _email: string }
         Returns: {
