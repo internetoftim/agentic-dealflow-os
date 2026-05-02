@@ -14,6 +14,7 @@ import LoginPage from "@/pages/LoginPage";
 import NotFound from "@/pages/NotFound";
 import IngestRelay from "@/pages/IngestRelay";
 import PublicIntake from "@/pages/PublicIntake";
+import AcceptShare from "@/pages/AcceptShare";
 
 const queryClient = new QueryClient();
 
@@ -40,6 +41,7 @@ const App = () => (
           <Routes>
             <Route path="/login" element={<LoginPage />} />
             <Route path="/intake/:userId" element={<PublicIntake />} />
+            <Route path="/share/:token" element={<ProtectedRoute><AcceptShare /></ProtectedRoute>} />
             <Route path="/ingest-relay" element={<ProtectedRoute><IngestRelay /></ProtectedRoute>} />
             <Route
               path="/*"
