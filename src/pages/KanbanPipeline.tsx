@@ -137,22 +137,24 @@ function DealCard({
   selected,
   onToggleSelect,
   selectionActive,
+  isShared,
 }: {
   deal: Deal;
   selected: boolean;
   onToggleSelect: (id: string) => void;
   selectionActive: boolean;
+  isShared: boolean;
 }) {
   const source = sourceConfig[deal.source] ?? sourceConfig.manual;
   const isProcessing = PROCESSING_STATUSES.includes(deal.status);
   const isQueued = deal.status === "queued";
   const isCancelled = deal.status === "cancelled";
-  const showWorkflow = isProcessing || isQueued || isCancelled;
+  const showWorkflow = (isProcessing || isQueued || isCancelled) && !isShared;
 
   const cancelMutation = useCancelDeal();
 
   const handleCardClick = (e: React.MouseEvent) => {
-    if (selectionActive) {
+    if (selectionActive && !isShared) {
       e.preventDefault();
       onToggleSelect(deal.id);
     }
@@ -165,14 +167,16 @@ function DealCard({
       }`}
       onClick={handleCardClick}
     >
-      <div
-        className={`absolute top-2.5 left-2.5 transition-opacity ${
-          selected || selectionActive ? "opacity-100" : "opacity-0 group-hover:opacity-100"
-        }`}
-        onClick={(e) => { e.stopPropagation(); onToggleSelect(deal.id); }}
-      >
-        <Checkbox checked={selected} onCheckedChange={() => onToggleSelect(deal.id)} />
-      </div>
+      {!isShared && (
+        <div
+          className={`absolute top-2.5 left-2.5 transition-opacity ${
+            selected || selectionActive ? "opacity-100" : "opacity-0 group-hover:opacity-100"
+          }`}
+          onClick={(e) => { e.stopPropagation(); onToggleSelect(deal.id); }}
+        >
+          <Checkbox checked={selected} onCheckedChange={() => onToggleSelect(deal.id)} />
+        </div>
+      )}
 
       <div className="flex items-start justify-between mb-2 pl-6">
         <h3 className="text-sm font-semibold text-card-foreground group-hover:text-primary transition-colors">
