@@ -179,25 +179,35 @@ function DealCard({
       )}
 
       <div className="flex items-start justify-between mb-2 pl-6">
-        <h3 className="text-sm font-semibold text-card-foreground group-hover:text-primary transition-colors">
-          {deal.name}
+        <h3 className="text-sm font-semibold text-card-foreground group-hover:text-primary transition-colors flex items-center gap-1.5">
+          <span className="truncate">{deal.name}</span>
+          {isShared && (
+            <Share2 className="h-3 w-3 text-info shrink-0" aria-label="Shared with you" />
+          )}
         </h3>
-        {(deal.auto_ingested || isProcessing) && (
+        {(deal.auto_ingested || isProcessing) && !isShared && (
           <span className="relative flex h-2.5 w-2.5 shrink-0 mt-1">
             <span className="animate-pulse-dot absolute inline-flex h-full w-full rounded-full bg-success opacity-75" />
             <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-success" />
           </span>
         )}
-        {isQueued && (
+        {isQueued && !isShared && (
           <span className="relative flex h-2.5 w-2.5 shrink-0 mt-1">
             <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-warning" />
           </span>
         )}
       </div>
       <p className="text-xs text-muted-foreground mb-2.5 pl-6">{deal.stage} · {deal.sector}</p>
-      <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium ml-6 ${source.bgClass} ${source.colorClass}`}>
-        {source.label}
-      </span>
+      <div className="flex items-center gap-1.5 ml-6 flex-wrap">
+        <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium ${source.bgClass} ${source.colorClass}`}>
+          {source.label}
+        </span>
+        {isShared && (
+          <span className="inline-flex items-center gap-1 rounded-full bg-info-muted px-2 py-0.5 text-[11px] font-medium text-info">
+            <Share2 className="h-2.5 w-2.5" /> Shared
+          </span>
+        )}
+      </div>
       {showWorkflow && (
         <WorkflowProgress
           deal={deal}
