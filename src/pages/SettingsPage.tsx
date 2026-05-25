@@ -682,6 +682,8 @@ export default function SettingsPage() {
         </div>
       </section>
 
+      <StorageCleanupSection userId={user?.id} />
+
       {/* DocSend Bookmarklet - DISABLED */}
       {/* <section className="mb-8">
         <h2 className="text-sm font-semibold text-foreground mb-4">DocSend Ingestion</h2>
