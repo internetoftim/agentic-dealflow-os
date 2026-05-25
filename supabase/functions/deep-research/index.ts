@@ -1,4 +1,5 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { classifyWebsiteConfidence, decideValidationState, withRetry, toErrorMessage } from "../_shared/dealflow-reliability.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -261,7 +262,17 @@ Deno.serve(async (req) => {
     const searchQuery = `${deal.name} company ${deal.sector ? deal.sector : ""} official website LinkedIn`;
     console.log("Firecrawl search query:", searchQuery);
 
-    const searchResponse = await firecrawlFetch("/search", { query: searchQuery, limit: 10 });
+    const searchResponse = await withRetry(
+      () => firecrawlFetch("/search", { query: searchQuery, limit: 10 }),
+      {
+        retries: 2,
+        baseDelayMs: 500,
+        maxDelayMs: 3_000,
+        timeoutMs: FIRECRAWL_TIMEOUT_MS + 2_000,
+        step: "firecrawl_search",
+        onAttempt: ({ attempt, maxAttempts, delayMs, error }) => console.warn(`firecrawl_search attempt ${attempt}/${maxAttempts} failed: ${toErrorMessage(error)}. Retrying in ${delayMs}ms`),
+      },
+    );
 
     if (!searchResponse.ok) {
       const errText = await searchResponse.text();
@@ -282,7 +293,10 @@ Deno.serve(async (req) => {
     if (candidateWebsite) {
       try {
         console.log("Scraping website:", candidateWebsite);
-        const scrapeResponse = await firecrawlFetch("/scrape", { url: candidateWebsite, formats: ["markdown"], onlyMainContent: true });
+        const scrapeResponse = await withRetry(
+          () => firecrawlFetch("/scrape", { url: candidateWebsite, formats: ["markdown"], onlyMainContent: true }),
+          { retries: 1, baseDelayMs: 500, maxDelayMs: 1500, timeoutMs: FIRECRAWL_TIMEOUT_MS + 2000, step: "firecrawl_scrape_website" },
+        );
 
         if (scrapeResponse.ok) {
           const scrapeData = await scrapeResponse.json();
@@ -668,11 +682,29 @@ Extract the company's official website URL and LinkedIn company page URL using t
       console.error("News search failed (non-fatal):", e);
     }
 
+
+    const websiteValidation = classifyWebsiteConfidence({
+      companyName: deal.name || "",
+      candidateUrl: (research.website || candidateWebsite || null),
+      title: searchResults.find((r: any) => r.url === (research.website || candidateWebsite))?.title || null,
+      contentSample: websiteContent,
+      corroborationCount: [research.website, research.linkedin_url, crunchbaseUrl].filter(Boolean).length - 1,
+      redirectChain: research.website ? [research.website] : undefined,
+      isReachable: !!(research.website || candidateWebsite),
+    });
+
+    const validationState = decideValidationState({
+      citations: searchResults.length + (crunchbaseUrl ? 1 : 0),
+      contradictions: 0,
+      confidence: websiteValidation.score,
+      requiredFieldsMissing: [research.website, research.linkedin_url].filter((v) => !v).length,
+    });
+
     // Update deal with research results
     const updatePayload: Record<string, unknown> = {
       deep_research_status: "completed",
       updated_at: new Date().toISOString(),
-      research_verification: verification,
+      research_verification: { checks: verification, website_validation: websiteValidation, validation_state: validationState },
       investor_research: investorResearch,
       latest_articles: latestArticles,
       deck_preview: deckPreview,
@@ -861,6 +893,8 @@ Use web_search to find their names, titles, and LinkedIn profile URLs. Then call
         investorResearch,
         latestArticles,
         deckPreview,
+        websiteValidation,
+        validationState,
       }),
       { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
