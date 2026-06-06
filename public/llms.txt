@@ -1,0 +1,19 @@
+# EasyVC
+
+> Autonomous OS for VC analysts — ingest deal flow from any source, standardize it in a workspace, and generate investment memos automatically.
+
+EasyVC helps venture capital teams turn unstructured deal flow (pitch decks, DocSend links, founder emails, web pages) into a structured, searchable pipeline. It extracts metadata, runs deep research on companies and founders, and drafts investment memos exported to Google Drive.
+
+Built by 1.6 (onepointsix.ai). Stack: React + Supabase + Google Workspace + multi-model AI (Gemini, GPT, local WebGPU inference).
+
+## Pages
+- [Home](https://onepointsix.ai/): Product overview and sign-in entry point.
+- [Public Intake](https://onepointsix.ai/intake): Founder-facing form to submit a deal directly to an EasyVC workspace.
+- [Login](https://onepointsix.ai/login): Google sign-in for analysts.
+
+## API
+- [Public intake endpoint](https://fbiigltzcxkqjjadqzgl.supabase.co/functions/v1/public-intake): Programmatic deal submission for partners and inbound channels.
+- [MCP server](https://fbiigltzcxkqjjadqzgl.supabase.co/functions/v1/mcp-server): Model Context Protocol server exposing EasyVC tools (list/search/get deals, ingest URLs, run deep research, generate memos) to AI agents like Claude Desktop, Cursor, and the AI SDK. Requires a personal access token from Settings → AI Agents.
+
+## Optional
+- [Custom domain](https://www.onepointsix.ai): Canonical marketing URL.

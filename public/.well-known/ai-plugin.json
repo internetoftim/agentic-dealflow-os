@@ -1,0 +1,18 @@
+{
+  "schema_version": "v1",
+  "name_for_human": "EasyVC",
+  "name_for_model": "easyvc",
+  "description_for_human": "Autonomous OS for VC analysts — ingest deal flow, run research, and draft investment memos.",
+  "description_for_model": "EasyVC exposes tools to list, search, and read venture capital deals from the authenticated user's workspace; ingest new deals from URLs, decks, or DocSend links; run deep research on companies and founders; and generate investment memos exported to Google Drive. Use the MCP server endpoint for tool access.",
+  "auth": {
+    "type": "user_http",
+    "authorization_type": "bearer"
+  },
+  "api": {
+    "type": "mcp",
+    "url": "https://fbiigltzcxkqjjadqzgl.supabase.co/functions/v1/mcp-server"
+  },
+  "logo_url": "https://onepointsix.ai/placeholder.svg",
+  "contact_email": "support@onepointsix.ai",
+  "legal_info_url": "https://onepointsix.ai/"
+}
