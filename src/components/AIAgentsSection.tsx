@@ -60,7 +60,7 @@ export function AIAgentsSection({ userId }: { userId?: string }) {
       const bytes = new Uint8Array(32);
       crypto.getRandomValues(bytes);
       const b64 = btoa(String.fromCharCode(...bytes))
-        .replaceAll("+", "-").replaceAll("/", "_").replaceAll("=", "");
+        .replace(/\+/g, "-").replace(/\//g, "_").replace(/=/g, "");
       const token = `pat_${b64}`;
       const hashBuf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(token));
       const hash = Array.from(new Uint8Array(hashBuf)).map((b) => b.toString(16).padStart(2, "0")).join("");
