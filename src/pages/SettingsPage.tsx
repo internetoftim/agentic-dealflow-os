@@ -5,6 +5,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { toast } from "sonner";
 // import { BookmarkletInstaller } from "@/components/BookmarkletInstaller";
 import { StorageCleanupSection } from "@/components/StorageCleanupSection";
+import { AIAgentsSection } from "@/components/AIAgentsSection";
 
 const DEFAULT_PATTERN = "<WEBSITE> deck <MonthYYYY> p<pages>.pdf";
 const DEFAULT_RECAP_PATTERN = "<WEBSITE> recap <MonthYYYY> p<pages>";
@@ -682,6 +683,8 @@ export default function SettingsPage() {
           </div>
         </div>
       </section>
+
+      <AIAgentsSection userId={user?.id} />
 
       <StorageCleanupSection userId={user?.id} />
 
