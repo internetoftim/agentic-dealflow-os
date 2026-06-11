@@ -15,6 +15,7 @@ import NotFound from "@/pages/NotFound";
 import IngestRelay from "@/pages/IngestRelay";
 import PublicIntake from "@/pages/PublicIntake";
 import AcceptShare from "@/pages/AcceptShare";
+import McpAuthorize from "@/pages/McpAuthorize";
 
 const queryClient = new QueryClient();
 
@@ -42,6 +43,7 @@ const App = () => (
             <Route path="/login" element={<LoginPage />} />
             <Route path="/intake/:userId" element={<PublicIntake />} />
             <Route path="/share/:token" element={<AcceptShare />} />
+            <Route path="/mcp/authorize" element={<McpAuthorize />} />
             <Route path="/ingest-relay" element={<ProtectedRoute><IngestRelay /></ProtectedRoute>} />
             <Route
               path="/*"

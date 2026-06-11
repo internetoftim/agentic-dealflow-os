@@ -32,3 +32,6 @@ verify_jwt = false
 
 [functions.docsend-callback]
 verify_jwt = false
+
+[functions.mcp-server]
+verify_jwt = false

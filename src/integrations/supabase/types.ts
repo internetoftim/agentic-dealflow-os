@@ -258,6 +258,141 @@ export type Database = {
         }
         Relationships: []
       }
+      mcp_access_tokens: {
+        Row: {
+          created_at: string
+          id: string
+          last_used_at: string | null
+          name: string
+          revoked_at: string | null
+          token_hash: string
+          token_prefix: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          last_used_at?: string | null
+          name: string
+          revoked_at?: string | null
+          token_hash: string
+          token_prefix: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          last_used_at?: string | null
+          name?: string
+          revoked_at?: string | null
+          token_hash?: string
+          token_prefix?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      mcp_oauth_clients: {
+        Row: {
+          client_id: string
+          client_name: string | null
+          created_at: string
+          grant_types: Json
+          redirect_uris: Json
+          token_endpoint_auth_method: string
+        }
+        Insert: {
+          client_id: string
+          client_name?: string | null
+          created_at?: string
+          grant_types?: Json
+          redirect_uris: Json
+          token_endpoint_auth_method?: string
+        }
+        Update: {
+          client_id?: string
+          client_name?: string | null
+          created_at?: string
+          grant_types?: Json
+          redirect_uris?: Json
+          token_endpoint_auth_method?: string
+        }
+        Relationships: []
+      }
+      mcp_oauth_codes: {
+        Row: {
+          client_id: string
+          code: string
+          code_challenge: string
+          code_challenge_method: string
+          consumed_at: string | null
+          created_at: string
+          expires_at: string
+          redirect_uri: string
+          scope: string | null
+          user_id: string
+        }
+        Insert: {
+          client_id: string
+          code: string
+          code_challenge: string
+          code_challenge_method?: string
+          consumed_at?: string | null
+          created_at?: string
+          expires_at: string
+          redirect_uri: string
+          scope?: string | null
+          user_id: string
+        }
+        Update: {
+          client_id?: string
+          code?: string
+          code_challenge?: string
+          code_challenge_method?: string
+          consumed_at?: string | null
+          created_at?: string
+          expires_at?: string
+          redirect_uri?: string
+          scope?: string | null
+          user_id?: string
+        }
+        Relationships: []
+      }
+      mcp_oauth_tokens: {
+        Row: {
+          access_token_hash: string
+          client_id: string
+          created_at: string
+          expires_at: string
+          id: string
+          refresh_token_hash: string | null
+          revoked_at: string | null
+          scope: string | null
+          user_id: string
+        }
+        Insert: {
+          access_token_hash: string
+          client_id: string
+          created_at?: string
+          expires_at: string
+          id?: string
+          refresh_token_hash?: string | null
+          revoked_at?: string | null
+          scope?: string | null
+          user_id: string
+        }
+        Update: {
+          access_token_hash?: string
+          client_id?: string
+          created_at?: string
+          expires_at?: string
+          id?: string
+          refresh_token_hash?: string | null
+          revoked_at?: string | null
+          scope?: string | null
+          user_id?: string
+        }
+        Relationships: []
+      }
       profiles: {
         Row: {
           admin_notes: string | null
