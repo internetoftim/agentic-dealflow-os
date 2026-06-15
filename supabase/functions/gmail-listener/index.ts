@@ -226,6 +226,56 @@ Deno.serve(async (req) => {
     const supabaseAnonKey = Deno.env.get("SUPABASE_ANON_KEY")!;
     const adminClient = createClient(supabaseUrl, supabaseServiceKey);
 
+    // ---- Recovery path: re-dispatch process-deck for a specific stalled deal.
+    // Lets us recover deals that got stuck in "extracting" because a previous
+    // listener run awaited process-deck and was killed mid-flight. Body:
+    //   { "retryDealId": "<uuid>", "resumeFrom"?: "extracting" }
+    if (req.method === "POST") {
+      let body: any = null;
+      try { body = await req.clone().json(); } catch { /* not JSON */ }
+      if (body?.retryDealId) {
+        const { data: deal } = await adminClient
+          .from("deals")
+          .select("id, user_id")
+          .eq("id", body.retryDealId)
+          .maybeSingle();
+        if (!deal) {
+          return new Response(JSON.stringify({ error: "deal not found" }), {
+            status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" },
+          });
+        }
+        const { data: source } = await adminClient
+          .from("sources")
+          .select("storage_path")
+          .eq("deal_id", body.retryDealId)
+          .order("created_at", { ascending: false })
+          .limit(1)
+          .maybeSingle();
+        if (!source?.storage_path) {
+          return new Response(JSON.stringify({ error: "no source storage_path" }), {
+            status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
+          });
+        }
+        const r = await fetch(`${supabaseUrl}/functions/v1/process-deck`, {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${supabaseServiceKey}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            dealId: body.retryDealId,
+            storagePath: source.storage_path,
+            ...(body.resumeFrom ? { resumeFrom: body.resumeFrom } : {}),
+          }),
+        });
+        return new Response(
+          JSON.stringify({ dispatched: r.ok, status: r.status }),
+          { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+    }
+
+
     // Fetch all users with gmail_label_enabled and a valid Google token
     const { data: eligibleUsers, error: usersError } = await adminClient
       .from("user_settings")
