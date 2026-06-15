@@ -369,9 +369,13 @@ Deno.serve(async (req) => {
                 processing_status: "uploaded",
               });
 
-              // 10. Trigger process-deck pipeline (fire-and-forget)
-              // Use service role auth since this is a cron/system call
-              const processResponse = await fetch(
+              // 10. Trigger process-deck pipeline (true fire-and-forget).
+              // We MUST NOT await the response — process-deck runs for minutes
+              // and would otherwise kill this listener's request budget,
+              // aborting process-deck mid-run (was leaving deals stuck in "extracting").
+              // EdgeRuntime.waitUntil keeps the runtime alive long enough to
+              // dispatch the request, but this handler returns immediately.
+              const dispatch = fetch(
                 `${supabaseUrl}/functions/v1/process-deck`,
                 {
                   method: "POST",
@@ -384,15 +388,24 @@ Deno.serve(async (req) => {
                     storagePath,
                   }),
                 }
-              );
-
-              if (!processResponse.ok) {
-                console.warn(
-                  `process-deck invocation failed for deal ${deal.id}:`,
-                  await processResponse.text()
-                );
-              } else {
-                console.log(`Triggered processing pipeline for deal ${deal.id} (${dealName})`);
+              ).then(async (r) => {
+                if (!r.ok) {
+                  console.warn(
+                    `process-deck dispatch returned ${r.status} for deal ${deal.id}:`,
+                    await r.text().catch(() => "")
+                  );
+                } else {
+                  console.log(`Dispatched process-deck for deal ${deal.id} (${dealName})`);
+                  // Drain body so the connection can close cleanly.
+                  await r.text().catch(() => "");
+                }
+              }).catch((e) => {
+                console.warn(`process-deck dispatch error for deal ${deal.id}:`, e);
+              });
+              // @ts-expect-error EdgeRuntime is provided by Supabase Edge Functions.
+              if (typeof EdgeRuntime !== "undefined" && EdgeRuntime?.waitUntil) {
+                // @ts-expect-error see above
+                EdgeRuntime.waitUntil(dispatch);
               }
 
               totalProcessed++;
