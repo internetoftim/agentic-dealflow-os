@@ -147,10 +147,6 @@ Deno.serve(async (req) => {
     const supabaseAnonKey = Deno.env.get("SUPABASE_ANON_KEY")!;
     const firecrawlApiKey = Deno.env.get("FIRECRAWL_API_KEY");
 
-    if (!firecrawlApiKey) {
-      throw new Error("FIRECRAWL_API_KEY is not configured");
-    }
-
     adminClient = createClient(supabaseUrl, supabaseServiceKey);
 
     // Support two auth modes:
@@ -166,6 +162,12 @@ Deno.serve(async (req) => {
         status: 400,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
+    }
+
+    // Validate required keys AFTER dealIdForFailure is set so the catch block can
+    // mark deep_research_status="failed" for this deal.
+    if (!firecrawlApiKey) {
+      throw new Error("FIRECRAWL_API_KEY is not configured");
     }
 
     let userId: string;
@@ -439,7 +441,7 @@ Use web_search to verify URLs if needed. Once confident, call the extract_compan
           cuInputContent.push({ type: "input_image", image_url: url, detail: "low" });
         }
 
-        const cuResponse = await fetch(`${OPENAI_BASE}/v1/responses`, {
+        const cuResponse = await fetchWithTimeout(`${OPENAI_BASE}/v1/responses`, {
           method: "POST",
           headers: {
             Authorization: `Bearer ${rawApiKey}`,
@@ -475,7 +477,7 @@ Use web_search to verify URLs if needed. Once confident, call the extract_compan
             input: [{ role: "user", content: cuInputContent }],
             max_output_tokens: 4096,
           }),
-        });
+        }, 90_000);
 
         if (!cuResponse.ok) {
           const errText = await cuResponse.text();
@@ -595,8 +597,9 @@ Extract the company's official website URL and LinkedIn company page URL using t
       .filter((name) => name.length > 1 && name.length < 120)
       .slice(0, 8);
 
-    for (const investorName of investorCandidates) {
-      try {
+    // Parallelize investor enrichment — sequential loop blew the wall-clock budget.
+    const investorResults = await Promise.allSettled(
+      investorCandidates.map(async (investorName) => {
         const [linkedinRes, crunchbaseRes, tracxnRes] = await Promise.all([
           firecrawlFetch("/search", { query: `"${investorName}" investor LinkedIn`, limit: 2 }),
           firecrawlFetch("/search", { query: `site:crunchbase.com/organization "${investorName}"`, limit: 2 }),
@@ -611,14 +614,19 @@ Extract the company's official website URL and LinkedIn company page URL using t
         const crunchbaseInvestorUrl = (crunchbaseData.data || crunchbaseData.results || []).find((r: any) => r.url?.includes("crunchbase.com/organization"))?.url ?? null;
         const tracxnUrl = (tracxnData.data || tracxnData.results || []).find((r: any) => r.url?.includes("tracxn.com"))?.url ?? null;
 
-        investorResearch.push({
+        return {
           name: investorName,
           linkedin_url: linkedinUrl,
           crunchbase_url: crunchbaseInvestorUrl,
           tracxn_url: tracxnUrl,
-        });
-      } catch (e) {
-        console.error(`Investor enrichment failed for ${investorName} (non-fatal):`, e);
+        };
+      })
+    );
+    for (const result of investorResults) {
+      if (result.status === "fulfilled") {
+        investorResearch.push(result.value);
+      } else {
+        console.error("Investor enrichment failed (non-fatal):", result.reason);
       }
     }
 
@@ -637,31 +645,35 @@ Extract the company's official website URL and LinkedIn company page URL using t
           )
           .slice(0, 6);
 
-        for (const item of newsCandidates) {
-          if (latestArticles.length >= 3) break;
-          const articleUrl = item.url;
-          if (!articleUrl || latestArticles.some((a) => a.url === articleUrl)) continue;
-
-          let preview: string | null = item.description || null;
-          try {
-            const articleScrapeResponse = await firecrawlFetch("/scrape", { url: articleUrl, formats: ["markdown"], onlyMainContent: true });
-            if (articleScrapeResponse.ok) {
-              const articleData = await articleScrapeResponse.json();
-              const markdown = (articleData.data?.markdown || articleData.markdown || "").replace(/\s+/g, " ").trim();
-              if (markdown.length > 0) {
-                preview = markdown.slice(0, 280);
+        // Parallelize article scrapes — sequential loop was 6×20s worst case.
+        const uniqueCandidates = newsCandidates.filter(
+          (item: any, idx: number, arr: any[]) =>
+            item.url && arr.findIndex((x: any) => x.url === item.url) === idx
+        );
+        const articleResults = await Promise.allSettled(
+          uniqueCandidates.map(async (item: any) => {
+            let preview: string | null = item.description || null;
+            try {
+              const articleScrapeResponse = await firecrawlFetch("/scrape", { url: item.url, formats: ["markdown"], onlyMainContent: true });
+              if (articleScrapeResponse.ok) {
+                const articleData = await articleScrapeResponse.json();
+                const markdown = (articleData.data?.markdown || articleData.markdown || "").replace(/\s+/g, " ").trim();
+                if (markdown.length > 0) preview = markdown.slice(0, 280);
               }
+            } catch (e) {
+              console.error("Article scrape failed (non-fatal):", e);
             }
-          } catch (e) {
-            console.error("Article scrape failed (non-fatal):", e);
-          }
-
-          latestArticles.push({
-            title: item.title || articleUrl,
-            url: articleUrl,
-            source: item.metadata?.source || null,
-            preview,
-          });
+            return {
+              title: item.title || item.url,
+              url: item.url,
+              source: item.metadata?.source || null,
+              preview,
+            };
+          })
+        );
+        for (const result of articleResults) {
+          if (latestArticles.length >= 3) break;
+          if (result.status === "fulfilled") latestArticles.push(result.value);
         }
       }
     } catch (e) {
@@ -722,7 +734,7 @@ Extract the company's official website URL and LinkedIn company page URL using t
 
 Use web_search to find their names, titles, and LinkedIn profile URLs. Then call extract_people with verified results. Only include people you are confident about.`;
 
-        const gptResponse = await fetch(`${OPENAI_BASE}/v1/responses`, {
+        const gptResponse = await fetchWithTimeout(`${OPENAI_BASE}/v1/responses`, {
           method: "POST",
           headers: {
             Authorization: `Bearer ${openaiKey}`,
@@ -762,7 +774,7 @@ Use web_search to find their names, titles, and LinkedIn profile URLs. Then call
             input: [{ role: "user", content: peoplePrompt }],
             max_output_tokens: 4096,
           }),
-        });
+        }, 90_000);
 
         if (gptResponse.ok) {
           const gptResult = await gptResponse.json();

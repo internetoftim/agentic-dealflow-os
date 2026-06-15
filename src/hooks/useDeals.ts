@@ -111,7 +111,12 @@ export function useDeals() {
   });
 
   // Poll every 3s when any deal is actively processing (realtime can be unreliable)
-  const hasProcessing = query.data?.some((d) => PROCESSING_STATUSES.includes(d.status) || d.status === "queued");
+  const hasProcessing = query.data?.some(
+    (d) =>
+      PROCESSING_STATUSES.includes(d.status) ||
+      d.status === "queued" ||
+      d.deep_research_status === "researching"
+  );
   useEffect(() => {
     if (!hasProcessing) return;
     const interval = setInterval(() => {

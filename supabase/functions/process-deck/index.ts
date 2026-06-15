@@ -935,7 +935,7 @@ Deno.serve(async (req) => {
     // --- STEP 6: Final status ---
     await setDealStatus(adminClient, dealId, "memo-ready");
 
-    // --- STEP 7: Auto-trigger deep-research (fire-and-forget) ---
+    // --- STEP 7: Auto-trigger deep-research ---
     // Populates structured fields (ask, valuation, revenue, team, key people) automatically
     // so users don't have to wait for "Generate Memo" to see metadata.
     try {
@@ -947,15 +947,48 @@ Deno.serve(async (req) => {
       const drStatus = existingDeal?.deep_research_status;
       if (drStatus !== "researching" && drStatus !== "completed") {
         console.log(`Auto-triggering deep-research for deal ${dealId}`);
-        // Fire-and-forget: don't block process-deck completion
-        fetch(`${supabaseUrl}/functions/v1/deep-research`, {
+
+        // Mark as researching up-front so the UI can show progress and the
+        // frontend polling loop keeps refreshing until completion.
+        await adminClient
+          .from("deals")
+          .update({ deep_research_status: "researching", updated_at: new Date().toISOString() })
+          .eq("id", dealId);
+
+        const drInvocation = fetch(`${supabaseUrl}/functions/v1/deep-research`, {
           method: "POST",
           headers: {
             Authorization: `Bearer ${supabaseServiceKey}`,
             "Content-Type": "application/json",
           },
           body: JSON.stringify({ dealId }),
-        }).catch((e) => console.warn("Deep-research auto-trigger failed:", e));
+        })
+          .then(async (res) => {
+            if (!res.ok) {
+              const errText = await res.text().catch(() => "");
+              console.error("Deep-research auto-trigger HTTP error:", res.status, errText);
+              await adminClient
+                .from("deals")
+                .update({ deep_research_status: "failed", updated_at: new Date().toISOString() })
+                .eq("id", dealId)
+                .catch(() => {});
+            }
+          })
+          .catch(async (e) => {
+            console.error("Deep-research auto-trigger failed:", e);
+            await adminClient
+              .from("deals")
+              .update({ deep_research_status: "failed", updated_at: new Date().toISOString() })
+              .eq("id", dealId)
+              .catch(() => {});
+          });
+
+        // Keep the edge runtime alive until the request actually flushes — bare
+        // fire-and-forget can be killed mid-flight when the response returns.
+        const edgeRuntime = (globalThis as any).EdgeRuntime;
+        if (edgeRuntime?.waitUntil) {
+          edgeRuntime.waitUntil(drInvocation);
+        }
       } else {
         console.log(`Skipping auto-trigger; deep_research_status=${drStatus}`);
       }
