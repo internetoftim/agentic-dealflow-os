@@ -774,7 +774,7 @@ Use web_search to find their names, titles, and LinkedIn profile URLs. Then call
             input: [{ role: "user", content: peoplePrompt }],
             max_output_tokens: 4096,
           }),
-        });
+        }, 90_000);
 
         if (gptResponse.ok) {
           const gptResult = await gptResponse.json();
