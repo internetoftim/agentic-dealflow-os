@@ -115,26 +115,12 @@ Deno.serve(async (req) => {
     const settings = settingsResult.data;
     const memoPrompt = (settings as any)?.memo_prompt || DEFAULT_MEMO_PROMPT;
 
-    // Step 1: Trigger deep research if not completed
+    // Note: deep-research is auto-triggered by process-deck after extraction completes.
+    // We deliberately do NOT block memo generation on it — a sync call here would
+    // double the timeout window and was a primary cause of stalls. Memo uses whatever
+    // research has been populated so far; users can re-run after deep-research finishes.
     if (deal.deep_research_status !== "completed") {
-      console.log("Deep research not completed, triggering...");
-      const drRes = await fetch(`${supabaseUrl}/functions/v1/deep-research`, {
-        method: "POST",
-        headers: {
-          Authorization: authHeader,
-          "Content-Type": "application/json",
-          apikey: supabaseAnonKey,
-        },
-        body: JSON.stringify({ dealId }),
-      });
-      if (!drRes.ok) {
-        console.warn("Deep research failed:", await drRes.text());
-      } else {
-        console.log("Deep research completed");
-      }
-      // Re-fetch deal after deep research
-      const { data: updatedDeal } = await adminClient.from("deals").select("*").eq("id", dealId).single();
-      if (updatedDeal) Object.assign(deal, updatedDeal);
+      console.log(`Generating memo without completed deep-research (status=${deal.deep_research_status ?? "none"})`);
     }
 
     // Step 2: Build context for memo generation
