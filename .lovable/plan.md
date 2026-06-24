@@ -1,107 +1,54 @@
-# Make EasyVC discoverable to AI agents + expose services via MCP
+# Fix AI-visibility blocker: parseable JSON-LD on public pages
 
-Two tracks: (1) **passive discoverability** so crawlers/LLMs understand the app, (2) **active tool access** so AI agents can call EasyVC capabilities through MCP.
+## What the audit found (verified)
 
----
+I fetched the live site. Every public route returns the same stale static HTML:
 
-## Track 1 — AI Discoverability (passive)
+- `https://www.onepointsix.ai/` → `<title>EasyVC</title>`, no JSON-LD
+- `/intake`, `/login`, `/docs/mcp` → identical, no JSON-LD, no canonical
 
-Goal: when ChatGPT, Claude, Perplexity, or an indexing crawler hits onepointsix.ai, they get a clean, structured description of what EasyVC does and how to use it.
+The repo's `index.html` already contains `SoftwareApplication` + `Organization` JSON-LD and the better title/description — but the **deployed** build is older. On top of that, no route emits page-specific JSON-LD (Article/Breadcrumb/etc.), so even after republish only the sitewide schema would be visible.
 
-### 1.1 `/llms.txt`
-Add `public/llms.txt` (spec: llmstxt.org) with:
-- H1: `EasyVC`
-- Blockquote: one-line summary ("Autonomous OS for VC analysts — ingest deal flow, standardize in a workspace, draft investment memos.")
-- Free-form paragraph on positioning + stack
-- `## Pages` — only public surfaces: `/` (workspace overview), `/intake` (public submission portal), `/login`
-- `## API` — link to the MCP endpoint (Track 2) and the public intake endpoint
-- `## Optional` — pricing/about if/when those exist
+## Plan
 
-Exclude every authenticated route (`/pipeline`, `/data-room`, `/settings`, `/deal/:id`, admin functions).
+### 1. Republish (immediate win)
 
-### 1.2 SEO / metadata polish in `index.html`
-- Tighten `<title>` to keyword-bearing (<60 chars): "EasyVC — Autonomous OS for VC Analysts"
-- Add canonical link (`https://onepointsix.ai/`)
-- Add JSON-LD `SoftwareApplication` schema (name, description, url, applicationCategory: BusinessApplication)
-- Add JSON-LD `Organization` schema
-- Keep existing OG/Twitter tags
+Re-publish from current `main` so the live HTML picks up the existing `index.html`:
+- `<title>EasyVC — Autonomous OS for VC Analysts`
+- `meta description`, `canonical`, OG/Twitter
+- `SoftwareApplication` + `Organization` JSON-LD
 
-### 1.3 `robots.txt`
-- Explicitly allow `GPTBot`, `OAI-SearchBot`, `ChatGPT-User`, `ClaudeBot`, `anthropic-ai`, `PerplexityBot`, `Google-Extended`
-- Add `Sitemap:` line
-- Block authenticated paths (`/settings`, `/pipeline`, `/data-room`)
+This alone fixes the "no parseable JSON-LD in raw HTML" blocker on `/` for crawlers that read static HTML.
 
-### 1.4 `sitemap.xml`
-Static `public/sitemap.xml` listing only public URLs (`/`, `/intake`, `/login`).
+### 2. Add per-route head + JSON-LD on public pages
 
-### 1.5 `.well-known/ai-plugin.json` (optional, lightweight)
-Legacy ChatGPT plugin manifest — cheap to add, points to the MCP server. Helps some discovery tools.
+Install `react-helmet-async`, wrap `<App>` in `<HelmetProvider>` in `src/main.tsx`, then add `<Helmet>` blocks to the three public pages:
 
----
-
-## Track 2 — Expose EasyVC as an MCP Server (active)
-
-Goal: any MCP-capable agent (Claude Desktop, Cursor, ChatGPT, custom AI SDK app) can connect to EasyVC and call its core capabilities on behalf of a user.
-
-### 2.1 Architecture
-New Supabase edge function `mcp-server` using **mcp-lite** (latest, ≥0.10.0) over Streamable HTTP, mounted at:
-
-```
-https://<project>.supabase.co/functions/v1/mcp-server
-```
-
-Authentication: per-user via Supabase JWT in `Authorization: Bearer <token>`. Each tool call resolves `auth.uid()` and scopes all DB/storage access to that user (matches existing RLS).
-
-For agents that can't easily pass a Supabase JWT, add a **personal access token** flow:
-- New table `mcp_access_tokens` (id, user_id, token_hash, name, last_used_at, created_at, revoked_at) with RLS
-- Settings → "MCP Access" panel to generate/revoke tokens
-- mcp-server accepts `Bearer pat_xxx` and resolves to user_id
-
-### 2.2 Tools to expose (v1)
-Mirror what the in-app agent already does, read-heavy first:
-
-**Read**
-- `list_deals(stage?, status?, sector?, limit?)` → deals belonging to caller
-- `get_deal(deal_id)` → full deal + sources + people
-- `search_deals(query)` → uses existing hybrid search
-- `get_deal_chat_context(deal_id)` → extracted text from sources (capped)
-
-**Write / actions**
-- `ingest_deal_from_url(url, notes?)` → wraps `ingest-relay` / `process-docsend`
-- `ingest_deal_from_text(company_name, description, ...)` → manual create
-- `run_deep_research(deal_id)` → triggers `deep-research`
-- `generate_memo(deal_id)` → triggers `generate-memo`, returns Drive link
-- `update_deal_status(deal_id, status)` → kanban move
-
-All write tools persist via service-role client but **always** filter by resolved user_id.
-
-### 2.3 Discovery surface for the MCP server
-- Add MCP URL to `/llms.txt` API section
-- Add a `/settings` → "Connect to AI Agents" section with copy-paste config snippets for Claude Desktop, Cursor, and the AI SDK MCP client (see `ai-sdk-mcp-client` knowledge)
-- Public docs page `/docs/mcp` (unauthenticated) describing the server, tool list, and auth flow
-
-### 2.4 OAuth (phase 2, optional)
-For polished UX (no manual token paste), add OAuth 2.1 with dynamic client registration on the MCP server so Claude/ChatGPT can do one-click connect. Defer unless needed — PAT flow ships faster.
-
----
-
-## Phasing
-
-| Phase | Scope | Effort |
+| Route | Title | JSON-LD |
 |---|---|---|
-| 1 | Track 1 entirely (llms.txt, SEO, robots, sitemap) | Small |
-| 2 | MCP server skeleton + PAT auth + 4 read tools | Medium |
-| 3 | Write tools (ingest, research, memo) + Settings UI | Medium |
-| 4 | OAuth 2.1 dynamic client reg | Larger, optional |
+| `/` (workspace landing / login redirect) | EasyVC — Autonomous OS for VC Analysts | keep sitewide `SoftwareApplication` + `Organization` in `index.html` |
+| `/intake` (`PublicIntake.tsx`) | Submit your deal to EasyVC | `WebPage` + `BreadcrumbList` (Home → Intake) |
+| `/login` (`LoginPage.tsx`) | Sign in — EasyVC | `WebPage` + `BreadcrumbList` |
+| `/docs/mcp` (if it exists as a public route) | EasyVC MCP Server — Docs | `TechArticle` + `BreadcrumbList` |
+
+Each Helmet block also sets a self-referencing `canonical` and `og:url` (per head-meta rules), and removes the sitewide `<link rel="canonical">` from `index.html` so per-route canonicals don't conflict.
+
+Sitewide `og:*` stays in `index.html` as the fallback for non-JS social crawlers.
+
+### 3. Verify
+
+- After republish: `curl -sL https://www.onepointsix.ai/ | grep ld+json` should return the schema blocks.
+- Run the SEO scanner (`seo_chat--trigger_scan`) to confirm the JSON-LD finding clears.
+- Note to user: Helmet mutates `document.head` client-side, so JS-executing crawlers (Googlebot, ChatGPT browser) see per-route JSON-LD, but pure-HTML scrapers only see the sitewide schema. That's acceptable for this fix; full per-route static rendering would require SSR.
+
+### Out of scope
+
+- No backend / edge-function changes.
+- No design changes.
+- No OpenAI key / process-deck work (separate thread).
 
 ## Technical notes
 
-- mcp-lite + Hono in a Supabase edge function (per `mcp-server-supabase-edge-functions` knowledge); set Accept header `application/json, text/event-stream` for any outbound MCP calls
-- Reuse existing edge functions internally — MCP tool handlers should `fetch` `process-docsend`, `deep-research`, `generate-memo` with the resolved user's JWT to keep one code path
-- Rate-limit per token in the MCP handler (simple in-memory or `mcp_access_tokens.last_used_at` window)
-- Never expose service-role key; PAT verification uses `crypto.subtle` SHA-256 against `token_hash`
-
-## Questions before building
-1. Should v1 ship **read-only** tools first (safer for external agents), or include write/ingest from day one?
-2. PAT auth only, or also OAuth 2.1 in v1?
-3. Should the public `/docs/mcp` page live in-app (React route) or as a static markdown page?
+- `react-helmet-async` chosen over alternatives because it's the convention already referenced in project knowledge and supports the existing Vite + React 18 stack.
+- `Organization.sameAs` could later include LinkedIn / X handles once provided — leave the array as-is for now.
+- `BreadcrumbList` items use absolute `https://www.onepointsix.ai/...` URLs to match `canonical`.
