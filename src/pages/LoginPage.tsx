@@ -57,6 +57,15 @@ export default function LoginPage() {
 
   return (
     <div className="min-h-screen bg-background">
+      <Helmet>
+        <title>Sign in — EasyVC</title>
+        <meta name="description" content="Sign in to EasyVC — the autonomous OS for VC analysts. Ingest deal flow, run deep research, and draft investment memos." />
+        <link rel="canonical" href="https://www.onepointsix.ai/login" />
+        <meta property="og:title" content="Sign in — EasyVC" />
+        <meta property="og:url" content="https://www.onepointsix.ai/login" />
+        <meta property="og:description" content="Sign in to EasyVC — the autonomous OS for VC analysts." />
+        <script type="application/ld+json">{JSON.stringify(LOGIN_JSONLD)}</script>
+      </Helmet>
       <div className="mx-auto max-w-6xl px-6 py-12 lg:py-20">
         <div className="grid gap-12 lg:grid-cols-2 lg:gap-16 items-center">
           {/* Left: Product pitch */}
