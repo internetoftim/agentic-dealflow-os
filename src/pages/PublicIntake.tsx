@@ -184,6 +184,15 @@ export default function PublicIntake() {
 
   return (
     <div className="min-h-screen bg-background flex items-center justify-center p-4">
+      <Helmet>
+        <title>Submit your deal — EasyVC</title>
+        <meta name="description" content="Submit your pitch deck or deal materials for review. EasyVC standardizes deal flow and drafts investment memos for venture capital teams." />
+        <link rel="canonical" href="https://www.onepointsix.ai/intake" />
+        <meta property="og:title" content="Submit your deal — EasyVC" />
+        <meta property="og:url" content="https://www.onepointsix.ai/intake" />
+        <meta property="og:description" content="Share your pitch deck or links for review." />
+        <script type="application/ld+json">{JSON.stringify(INTAKE_JSONLD)}</script>
+      </Helmet>
       <div className="w-full max-w-md">
         {/* Header */}
         <div className="text-center mb-8">
