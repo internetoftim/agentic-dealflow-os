@@ -1,6 +1,23 @@
 import { useAuth } from "@/contexts/AuthContext";
 import { Navigate } from "react-router-dom";
+import { Helmet } from "react-helmet-async";
 import { Inbox, FileText, Sparkles, KanbanSquare, ShieldCheck, Workflow } from "lucide-react";
+
+const LOGIN_JSONLD = {
+  "@context": "https://schema.org",
+  "@type": "WebPage",
+  name: "Sign in — EasyVC",
+  url: "https://www.onepointsix.ai/login",
+  description: "Sign in to EasyVC, the autonomous OS for VC analysts.",
+  isPartOf: { "@type": "WebSite", name: "EasyVC", url: "https://www.onepointsix.ai/" },
+  breadcrumb: {
+    "@type": "BreadcrumbList",
+    itemListElement: [
+      { "@type": "ListItem", position: 1, name: "Home", item: "https://www.onepointsix.ai/" },
+      { "@type": "ListItem", position: 2, name: "Sign in", item: "https://www.onepointsix.ai/login" },
+    ],
+  },
+};
 
 const features = [
   {
