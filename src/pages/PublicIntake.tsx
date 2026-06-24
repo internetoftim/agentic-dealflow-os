@@ -1,6 +1,23 @@
 import { useState, useCallback, useRef } from "react";
 import { useParams } from "react-router-dom";
+import { Helmet } from "react-helmet-async";
 import { Upload, Check, AlertCircle, Loader2, FileUp } from "lucide-react";
+
+const INTAKE_JSONLD = {
+  "@context": "https://schema.org",
+  "@type": "WebPage",
+  name: "Submit your deal to EasyVC",
+  url: "https://www.onepointsix.ai/intake",
+  description: "Submit your pitch deck or deal materials for review by an EasyVC-powered investor.",
+  isPartOf: { "@type": "WebSite", name: "EasyVC", url: "https://www.onepointsix.ai/" },
+  breadcrumb: {
+    "@type": "BreadcrumbList",
+    itemListElement: [
+      { "@type": "ListItem", position: 1, name: "Home", item: "https://www.onepointsix.ai/" },
+      { "@type": "ListItem", position: 2, name: "Intake", item: "https://www.onepointsix.ai/intake" },
+    ],
+  },
+};
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
