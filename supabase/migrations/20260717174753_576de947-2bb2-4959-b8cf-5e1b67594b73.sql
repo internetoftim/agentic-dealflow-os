@@ -1,0 +1,1 @@
+DROP POLICY IF EXISTS "Anyone can look up intake slug" ON public.user_settings;
