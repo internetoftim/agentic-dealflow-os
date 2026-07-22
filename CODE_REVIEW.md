@@ -131,6 +131,36 @@ The MCP server exposes captures with no auth while holding `SERVICE_API_KEY`, tu
 
 ---
 
+## GCP deployment / Cloud Run (reviewed on request)
+
+The GCP-deployed "cloud function" is the `docsend_capture_service`, shipped as **two Cloud
+Run services** — `docsend-backend` (the FastAPI capture app) and `docsend-mcp` (the MCP
+server) — plus a frontend, via `deploy-backend.sh` / `deploy-mcp.sh` / `deploy.sh` and the
+`Deploy Backend` GitHub Action. The service *code* is reviewed above (C2, H4, H5, M9–M11,
+L9–L10). The deploy pipeline adds infra-level findings:
+
+- **G1 (High — infra root cause of C2 + H5).** Both services deploy with
+  **`--allow-unauthenticated`** (`deploy-backend.sh:51`, `deploy-mcp.sh:47`). The MCP server
+  is public, holds `SERVICE_API_KEY`, and forwards to the backend — so the capture SSRF
+  (C2) is reachable **without any credential** by anyone on the internet (H5). *Fix: require
+  auth on the Cloud Run ingress (drop `--allow-unauthenticated`; use IAM / an authenticating
+  proxy), or at minimum gate the MCP server with its own token.*
+- **G2 (Low).** The auto-generated `SERVICE_API_KEY` is echoed to stdout
+  (`deploy-backend.sh:24`), so it lands in CI/terminal logs. *Fix: don't print generated
+  secrets.*
+- **G3 (Low — hygiene, not a leak).** `.env` is **tracked in git** despite the `*.env`
+  gitignore rule (committed before the rule took effect). It currently contains only the
+  public Supabase URL + anon/publishable key (no service-role/OpenAI/service secret; the
+  backend `.env` with real secrets is correctly untracked), so there is no secret exposure
+  today — but it should be `git rm --cached .env` to prevent a future real secret from being
+  committed to that path.
+- **G4 (Info).** `_common.sh:16` hardcodes a developer's local SDK path
+  (`/Users/tims/google-cloud-sdk/bin`); harmless but non-portable.
+- **Clean:** the Action (`.github/workflows/deploy.yml`) prefers Workload Identity
+  Federation with an SA-key fallback and requests least-privilege token scopes
+  (`contents: read`, `id-token: write`); secrets are stored in Secret Manager and mounted
+  via `--set-secrets`, not baked into images.
+
 ## What looked clean (verified)
 
 - **RLS tenant isolation** across `deals`, `sources`, `user_settings`, `capture_jobs`, `deal_people`, `profiles`, `user_roles`, `deal_shares`, `deal_share_access`, `mcp_*` — enabled with correct `USING`/`WITH CHECK`; the only `USING (true)` policies are `TO service_role`. A historical hole (anon could read `google_provider_token` via the intake-slug SELECT policy, `20260413150139`) was **dropped** by the final migration `20260717174753`.
