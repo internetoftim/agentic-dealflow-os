@@ -1,14 +1,24 @@
-import { useState, useCallback, useRef } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import { supabase } from "@/integrations/supabase/client";
 
 export type ChatMessage = { role: "user" | "assistant"; content: string };
 
+const INTRO_MESSAGE: ChatMessage = {
+  role: "assistant",
+  content: "Upload a deck to get started. I'll analyze it and extract key data points automatically.",
+};
+
 export function useDealChat(dealId?: string) {
-  const [messages, setMessages] = useState<ChatMessage[]>([
-    { role: "assistant", content: "Upload a deck to get started. I'll analyze it and extract key data points automatically." },
-  ]);
+  const [messages, setMessages] = useState<ChatMessage[]>([INTRO_MESSAGE]);
   const [isStreaming, setIsStreaming] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
+
+  // Reset the conversation when switching deals so one deal's chat history is
+  // never sent as context to another deal's chat request.
+  useEffect(() => {
+    abortRef.current?.abort();
+    setMessages([INTRO_MESSAGE]);
+  }, [dealId]);
 
   const send = useCallback(async (input: string) => {
     if (!input.trim() || isStreaming) return;

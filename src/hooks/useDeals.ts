@@ -56,7 +56,7 @@ export interface CaptureJob {
 
 export const DOC_VIEWER_SOURCES = ["docsend", "pandadoc", "papermark"] as const;
 
-function isDocViewerSource(source?: string) {
+export function isDocViewerSource(source?: string) {
   return DOC_VIEWER_SOURCES.includes((source ?? "") as (typeof DOC_VIEWER_SOURCES)[number]);
 }
 
