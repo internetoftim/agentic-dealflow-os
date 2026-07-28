@@ -1,54 +1,48 @@
-# Fix AI-visibility blocker: parseable JSON-LD on public pages
+## Overview
 
-## What the audit found (verified)
+A public, no-auth page where anyone can paste a DocSend or Papermark link, provide their email, and optionally add deal info. The link gets captured to PDF via the existing `run-docsend-capture` pipeline. When it finishes, the submitter gets a Resend email with a unique dashboard URL. That dashboard is soft-gated: visitor types the same email to unlock it, then can view the deal info and download the PDF.
 
-I fetched the live site. Every public route returns the same stale static HTML:
+## User flow
 
-- `https://www.onepointsix.ai/` → `<title>EasyVC</title>`, no JSON-LD
-- `/intake`, `/login`, `/docs/mcp` → identical, no JSON-LD, no canonical
+1. Visitor lands on `/convert` (public, no auth).
+2. Fills form: email (required), link (required), optional company name, website, LinkedIn, notes.
+3. Submits → row created in new `conversion_jobs` table, capture kicked off in background.
+4. Confirmation screen shows: "We'll email you at ... when it's ready" + copyable dashboard URL.
+5. Backend captures deck (Cloud Run Playwright service, already deployed) → uploads PDF to storage → marks job complete → sends Resend email.
+6. Recipient clicks link `/converted/<token>` → enters submitting email → dashboard shows deal details + PDF download button.
 
-The repo's `index.html` already contains `SoftwareApplication` + `Organization` JSON-LD and the better title/description — but the **deployed** build is older. On top of that, no route emits page-specific JSON-LD (Article/Breadcrumb/etc.), so even after republish only the sitewide schema would be visible.
+## What gets built
 
-## Plan
+### Database (new migration)
+- Table `conversion_jobs` (separate from `deals`, not tied to any user):
+  - `id`, `token` (unguessable), `email`, `source_url`, `company_name`, `website`, `linkedin_url`, `notes`
+  - `status` (pending/capturing/complete/failed), `error_message`
+  - `pdf_storage_path`, `page_count`, `title`
+  - `notified_at`, `created_at`, `updated_at`
+- RLS: no anon or authenticated SELECT — all reads go through security-definer RPC `get_conversion_job(_token, _email)` that returns the row only if email matches (case-insensitive). Inserts happen via edge function with service role.
+- New public storage prefix `conversions/<token>.pdf` in existing `decks` bucket (served via signed URL).
 
-### 1. Republish (immediate win)
+### Edge functions
+- `submit-conversion` (public, no JWT): validates email + URL, inserts `conversion_jobs` row, fires `run-conversion` in background via `EdgeRuntime.waitUntil`, returns `{token, dashboardUrl}`.
+- `run-conversion` (internal): calls the existing Cloud Run capture service, uploads PDF to `decks/conversions/<token>.pdf`, updates job row, then calls `send-conversion-email`.
+- `send-conversion-email` (internal): posts to Resend via the connector gateway with a small HTML template containing the dashboard link. Requires the Resend connector to be linked (I'll prompt for connect).
+- `get-conversion` (public): thin wrapper around the `get_conversion_job` RPC that also returns a short-lived signed URL for the PDF.
 
-Re-publish from current `main` so the live HTML picks up the existing `index.html`:
-- `<title>EasyVC — Autonomous OS for VC Analysts`
-- `meta description`, `canonical`, OG/Twitter
-- `SoftwareApplication` + `Organization` JSON-LD
+### Frontend
+- `src/pages/ConvertLink.tsx` at route `/convert` — the intake form, styled to match `PublicIntake.tsx`.
+- `src/pages/ConversionDashboard.tsx` at route `/converted/:token` — email gate → deal detail card → PDF download button. Polls `get-conversion` every 5s while status is not terminal.
+- Wire routes in `src/App.tsx`.
+- Add JSON-LD/meta via Helmet to match SEO patterns.
 
-This alone fixes the "no parseable JSON-LD in raw HTML" blocker on `/` for crawlers that read static HTML.
+### Secrets / connectors
+- Requires the **Resend** connector. I'll surface the `standard_connectors--connect` card before wiring the email function; if you skip, I'll still ship the flow and just show the dashboard URL on the confirmation screen (email disabled until connected).
 
-### 2. Add per-route head + JSON-LD on public pages
+## Non-goals
+- No account creation, no login, no link to your authenticated deal pipeline.
+- No editing after submission (one-shot).
+- No sharing beyond whoever has token + email.
 
-Install `react-helmet-async`, wrap `<App>` in `<HelmetProvider>` in `src/main.tsx`, then add `<Helmet>` blocks to the three public pages:
-
-| Route | Title | JSON-LD |
-|---|---|---|
-| `/` (workspace landing / login redirect) | EasyVC — Autonomous OS for VC Analysts | keep sitewide `SoftwareApplication` + `Organization` in `index.html` |
-| `/intake` (`PublicIntake.tsx`) | Submit your deal to EasyVC | `WebPage` + `BreadcrumbList` (Home → Intake) |
-| `/login` (`LoginPage.tsx`) | Sign in — EasyVC | `WebPage` + `BreadcrumbList` |
-| `/docs/mcp` (if it exists as a public route) | EasyVC MCP Server — Docs | `TechArticle` + `BreadcrumbList` |
-
-Each Helmet block also sets a self-referencing `canonical` and `og:url` (per head-meta rules), and removes the sitewide `<link rel="canonical">` from `index.html` so per-route canonicals don't conflict.
-
-Sitewide `og:*` stays in `index.html` as the fallback for non-JS social crawlers.
-
-### 3. Verify
-
-- After republish: `curl -sL https://www.onepointsix.ai/ | grep ld+json` should return the schema blocks.
-- Run the SEO scanner (`seo_chat--trigger_scan`) to confirm the JSON-LD finding clears.
-- Note to user: Helmet mutates `document.head` client-side, so JS-executing crawlers (Googlebot, ChatGPT browser) see per-route JSON-LD, but pure-HTML scrapers only see the sitewide schema. That's acceptable for this fix; full per-route static rendering would require SSR.
-
-### Out of scope
-
-- No backend / edge-function changes.
-- No design changes.
-- No OpenAI key / process-deck work (separate thread).
-
-## Technical notes
-
-- `react-helmet-async` chosen over alternatives because it's the convention already referenced in project knowledge and supports the existing Vite + React 18 stack.
-- `Organization.sameAs` could later include LinkedIn / X handles once provided — leave the array as-is for now.
-- `BreadcrumbList` items use absolute `https://www.onepointsix.ai/...` URLs to match `canonical`.
+## Security notes
+- Email gate is soft — token alone doesn't reveal the deck; email must match. Rate-limit the `get-conversion` endpoint per IP to slow guessing.
+- Signed URLs expire in 1 hour; refreshed each dashboard view.
+- Input validation with zod on both edge functions.
