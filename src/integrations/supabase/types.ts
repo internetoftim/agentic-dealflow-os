@@ -55,6 +55,63 @@ export type Database = {
           },
         ]
       }
+      conversion_jobs: {
+        Row: {
+          company_name: string | null
+          created_at: string
+          email: string
+          error_message: string | null
+          id: string
+          linkedin_url: string | null
+          notes: string | null
+          notified_at: string | null
+          page_count: number | null
+          pdf_storage_path: string | null
+          source_url: string
+          status: string
+          title: string | null
+          token: string
+          updated_at: string
+          website: string | null
+        }
+        Insert: {
+          company_name?: string | null
+          created_at?: string
+          email: string
+          error_message?: string | null
+          id?: string
+          linkedin_url?: string | null
+          notes?: string | null
+          notified_at?: string | null
+          page_count?: number | null
+          pdf_storage_path?: string | null
+          source_url: string
+          status?: string
+          title?: string | null
+          token: string
+          updated_at?: string
+          website?: string | null
+        }
+        Update: {
+          company_name?: string | null
+          created_at?: string
+          email?: string
+          error_message?: string | null
+          id?: string
+          linkedin_url?: string | null
+          notes?: string | null
+          notified_at?: string | null
+          page_count?: number | null
+          pdf_storage_path?: string | null
+          source_url?: string
+          status?: string
+          title?: string | null
+          token?: string
+          updated_at?: string
+          website?: string | null
+        }
+        Relationships: []
+      }
       deal_people: {
         Row: {
           created_at: string
@@ -602,6 +659,26 @@ export type Database = {
       can_access_deal: {
         Args: { _deal_id: string; _user_id: string }
         Returns: boolean
+      }
+      get_conversion_job: {
+        Args: { _email: string; _token: string }
+        Returns: {
+          company_name: string
+          created_at: string
+          email: string
+          error_message: string
+          id: string
+          linkedin_url: string
+          notes: string
+          page_count: number
+          pdf_storage_path: string
+          source_url: string
+          status: string
+          title: string
+          token: string
+          updated_at: string
+          website: string
+        }[]
       }
       has_role: {
         Args: {
