@@ -35,3 +35,15 @@ verify_jwt = false
 
 [functions.mcp-server]
 verify_jwt = false
+
+[functions.submit-conversion]
+verify_jwt = false
+
+[functions.run-conversion]
+verify_jwt = false
+
+[functions.send-conversion-email]
+verify_jwt = false
+
+[functions.get-conversion]
+verify_jwt = false
