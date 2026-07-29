@@ -1,7 +1,8 @@
 import { useAuth } from "@/contexts/AuthContext";
-import { Navigate } from "react-router-dom";
+import { Navigate, Link } from "react-router-dom";
 import { Helmet } from "react-helmet-async";
-import { Inbox, FileText, Sparkles, KanbanSquare, ShieldCheck, Workflow } from "lucide-react";
+import { Inbox, FileText, Sparkles, KanbanSquare, ShieldCheck, Workflow, FileDown, ArrowRight } from "lucide-react";
+
 
 const LOGIN_JSONLD = {
   "@context": "https://schema.org",
@@ -123,9 +124,31 @@ export default function LoginPage() {
               <div className="mt-6 space-y-2 text-xs text-muted-foreground">
                 <p>• Grants Drive access for deck sync</p>
                 <p>• Auto-processes emails with a dedicated Gmail label, or inbound submissions to a dedicated mailbox</p>
-                
               </div>
             </div>
+
+            <Link
+              to="/convert"
+              className="mt-6 block w-full max-w-md mx-auto rounded-xl border border-border bg-card p-5 hover:border-primary/40 hover:bg-accent/40 transition-colors group"
+            >
+              <div className="flex items-start gap-3">
+                <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary/10 text-primary shrink-0">
+                  <FileDown className="h-4 w-4" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="text-sm font-medium text-foreground">
+                      No account? Convert a DocSend or Papermark link
+                    </p>
+                    <ArrowRight className="h-4 w-4 text-muted-foreground group-hover:translate-x-0.5 transition-transform shrink-0" />
+                  </div>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    Paste a link, get a downloadable PDF emailed to you. Free, no sign-in.
+                  </p>
+                </div>
+              </div>
+            </Link>
+
           </div>
         </div>
       </div>

@@ -18,6 +18,8 @@ import AcceptShare from "@/pages/AcceptShare";
 import McpAuthorize from "@/pages/McpAuthorize";
 import ConvertLink from "@/pages/ConvertLink";
 import ConversionDashboard from "@/pages/ConversionDashboard";
+import MyConversions from "@/pages/MyConversions";
+
 
 const queryClient = new QueryClient();
 
@@ -46,6 +48,8 @@ const App = () => (
             <Route path="/intake/:userId" element={<PublicIntake />} />
             <Route path="/convert" element={<ConvertLink />} />
             <Route path="/converted/:token" element={<ConversionDashboard />} />
+            <Route path="/my-decks" element={<MyConversions />} />
+
             <Route path="/share/:token" element={<AcceptShare />} />
             <Route path="/mcp/authorize" element={<McpAuthorize />} />
             <Route path="/ingest-relay" element={<ProtectedRoute><IngestRelay /></ProtectedRoute>} />
