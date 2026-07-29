@@ -91,7 +91,14 @@ export default function ConvertLink() {
           <p className="text-gray-600 mt-3">
             We'll capture every slide and email you a PDF when it's ready. No account needed.
           </p>
+          <p className="text-sm text-gray-500 mt-4">
+            Already submitted before?{" "}
+            <Link to="/my-decks" className="text-gray-900 font-medium underline underline-offset-2 hover:no-underline">
+              Find your decks
+            </Link>
+          </p>
         </div>
+
 
         {state === "success" ? (
           <div className="bg-white border border-gray-200 rounded-xl p-8 shadow-sm">
