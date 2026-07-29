@@ -47,3 +47,7 @@ verify_jwt = false
 
 [functions.get-conversion]
 verify_jwt = false
+
+[functions.list-conversions]
+verify_jwt = false
+
