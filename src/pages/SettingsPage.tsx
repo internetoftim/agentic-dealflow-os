@@ -6,6 +6,7 @@ import { toast } from "sonner";
 // import { BookmarkletInstaller } from "@/components/BookmarkletInstaller";
 import { StorageCleanupSection } from "@/components/StorageCleanupSection";
 import { AIAgentsSection } from "@/components/AIAgentsSection";
+import { useAgentMode } from "@/hooks/useAgentMode";
 
 const DEFAULT_PATTERN = "<WEBSITE> deck <MonthYYYY> p<pages>.pdf";
 const DEFAULT_RECAP_PATTERN = "<WEBSITE> recap <MonthYYYY> p<pages>";
@@ -48,8 +49,39 @@ function Toggle({ checked, onChange }: { checked: boolean; onChange: (v: boolean
   );
 }
 
+type ToolCallRow = { id: string; tool: string; deal_id: string | null; via: string | null; created_at: string };
+
+function AgentActivity({ userId }: { userId?: string }) {
+  const [rows, setRows] = useState<ToolCallRow[]>([]);
+  useEffect(() => {
+    if (!userId) return;
+    (supabase.from("mcp_tool_calls" as any) as any)
+      .select("id, tool, deal_id, via, created_at")
+      .order("created_at", { ascending: false })
+      .limit(10)
+      .then(({ data }: { data: ToolCallRow[] | null }) => setRows(data ?? []));
+  }, [userId]);
+  if (rows.length === 0) {
+    return <p className="text-xs text-muted-foreground">No agent activity yet.</p>;
+  }
+  return (
+    <ul className="space-y-1 text-xs">
+      {rows.map((r) => (
+        <li key={r.id} className="flex items-center justify-between gap-2">
+          <span className="font-mono text-foreground">{r.tool}</span>
+          <span className="text-muted-foreground">
+            {r.via ? `${r.via} · ` : ""}
+            {new Date(r.created_at).toLocaleString()}
+          </span>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
 export default function SettingsPage() {
   const { user } = useAuth();
+  const { agentMode, setAgentMode } = useAgentMode();
   const [gmailLabel, setGmailLabel] = useState(true);
   const [driveSync, setDriveSync] = useState(true);
   const [spamFilter, setSpamFilter] = useState(true);
@@ -680,6 +712,43 @@ export default function SettingsPage() {
               <span className="text-2xl font-semibold text-foreground">—</span>
               <p className="text-xs text-muted-foreground">Spam Blocked</p>
             </div>
+          </div>
+        </div>
+      </section>
+
+      {/* Agent Mode */}
+      <section className="mb-8">
+        <div className="flex items-center gap-2 mb-4">
+          <Bot className="h-4 w-4 text-muted-foreground" />
+          <h2 className="text-sm font-semibold text-foreground">Agent Mode</h2>
+        </div>
+        <div className="rounded-md border border-border bg-card p-4">
+          <div className="flex items-start justify-between gap-4">
+            <div className="min-w-0">
+              <p className="text-sm font-medium text-foreground">Let AI agents make changes</p>
+              <p className="text-xs text-muted-foreground mt-0.5 max-w-xl">
+                When on, agents connected via MCP (or an authorized OAuth client) can create and update deals,
+                add founders, attach sources, and write memos on your behalf. Turning it off is an instant kill
+                switch — write access is revoked immediately. Read-only access is always available.
+              </p>
+            </div>
+            <div className="pt-0.5" data-testid="agent-mode-toggle">
+              <Toggle
+                checked={agentMode}
+                onChange={async (v) => {
+                  try {
+                    await setAgentMode(v);
+                    toast.success(v ? "Agent Mode enabled" : "Agent Mode disabled");
+                  } catch {
+                    toast.error("Failed to update Agent Mode");
+                  }
+                }}
+              />
+            </div>
+          </div>
+          <div className="mt-4 border-t border-border pt-3">
+            <p className="text-xs font-medium text-foreground mb-2">Recent agent activity</p>
+            <AgentActivity userId={user?.id} />
           </div>
         </div>
       </section>

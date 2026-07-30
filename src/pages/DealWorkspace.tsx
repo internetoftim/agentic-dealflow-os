@@ -1,7 +1,9 @@
 import { useState, useCallback, useRef, useEffect } from "react";
-import { useSearchParams } from "react-router-dom";
-import { Upload, Link, Cog, Check, Search, Send, FileText, Globe, Layers, Square, Linkedin, Loader2, FileUp, CircleDashed, CircleCheck, Circle, Pause, Clock, Download, Mail, ExternalLink, Users, Trash2, Share2 } from "lucide-react";
-import { useDeals, useSources, useLatestCaptureJob, useCreateDealWithUpload, useProcessDocsend, useRetryDocsendCapture, useCancelDeal, useDeleteDeal, WORKFLOW_STEPS, PROCESSING_STATUSES, DOC_VIEWER_SOURCES } from "@/hooks/useDeals";
+import { useSearchParams, useParams } from "react-router-dom";
+import { Upload, Link, Cog, Check, Search, Send, FileText, Globe, Layers, Square, Linkedin, Loader2, FileUp, CircleDashed, CircleCheck, Circle, Pause, Clock, Download, Mail, ExternalLink, Users, Trash2, Share2, Bot, X, UserPlus, Save } from "lucide-react";
+import { useDeals, useSources, useLatestCaptureJob, useCreateDealWithUpload, useProcessDocsend, useRetryDocsendCapture, useCancelDeal, useDeleteDeal, useUpdateDeal, useAddDealPerson, WORKFLOW_STEPS, PROCESSING_STATUSES, DOC_VIEWER_SOURCES } from "@/hooks/useDeals";
+import { useAgentMode } from "@/hooks/useAgentMode";
+import { decodePrefill, sanitizePrefill } from "@/lib/agentPrefill";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import { useDealChat } from "@/hooks/useDealChat";
@@ -71,6 +73,162 @@ export default function DealWorkspace() {
     },
     enabled: !!activeDeal?.id,
   });
+
+  // ---- Agent Mode: assisted-edit surface (gated; default DOM unchanged) ----
+  const { id: routeDealId } = useParams();
+  const { agentMode } = useAgentMode();
+  const updateDeal = useUpdateDeal();
+  const addPerson = useAddDealPerson();
+
+  const [agentPanelOpen, setAgentPanelOpen] = useState(false);
+  const [agentDeal, setAgentDeal] = useState({ name: "", linkedin_url: "", website: "" });
+  const [agentPerson, setAgentPerson] = useState({ name: "", title: "", linkedin_url: "" });
+
+  // Latest-value refs so the imperative window.easyvc bridge reads current
+  // state/mutations without being re-created on every render.
+  const activeDealRef = useRef(activeDeal);
+  const agentDealRef = useRef(agentDeal);
+  const agentPersonRef = useRef(agentPerson);
+  const updateDealRef = useRef(updateDeal);
+  const addPersonRef = useRef(addPerson);
+  const nonceRef = useRef<string | null>(null);
+  activeDealRef.current = activeDeal;
+  agentDealRef.current = agentDeal;
+  agentPersonRef.current = agentPerson;
+  updateDealRef.current = updateDeal;
+  addPersonRef.current = addPerson;
+  nonceRef.current = searchParams.get("nonce");
+
+  // Select the deal named in /agent/deal/:id
+  useEffect(() => {
+    if (routeDealId && deals?.some((d) => d.id === routeDealId)) {
+      setSelectedDealId(routeDealId);
+    }
+  }, [routeDealId, deals]);
+
+  // Seed the edit drafts from the active deal whenever it changes.
+  useEffect(() => {
+    setAgentDeal({
+      name: activeDeal?.name ?? "",
+      linkedin_url: (activeDeal as any)?.linkedin_url ?? "",
+      website: activeDeal?.website ?? "",
+    });
+  }, [activeDeal?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Open the panel automatically on the agent deep-link route.
+  useEffect(() => {
+    if (agentMode && routeDealId) setAgentPanelOpen(true);
+  }, [agentMode, routeDealId]);
+
+  // Consume ?prefill=<base64-json> once, merging on top of the seeded drafts.
+  const prefillAppliedRef = useRef(false);
+  useEffect(() => {
+    if (!agentMode || prefillAppliedRef.current) return;
+    const raw = searchParams.get("prefill");
+    if (!raw) return;
+    if (!deals) return; // wait until deals (and the seed effect) resolve
+    prefillAppliedRef.current = true;
+    const prefill = decodePrefill(raw);
+    searchParams.delete("prefill");
+    setSearchParams(searchParams, { replace: true });
+    if (!prefill) return;
+    if (prefill.deal) {
+      setAgentDeal((prev) => ({
+        name: prefill.deal!.name ?? prev.name,
+        linkedin_url: prefill.deal!.linkedin_url ?? prev.linkedin_url,
+        website: prefill.deal!.website ?? prev.website,
+      }));
+    }
+    if (prefill.person) {
+      setAgentPerson((prev) => ({
+        name: prefill.person!.name ?? prev.name,
+        title: prefill.person!.title ?? prev.title,
+        linkedin_url: prefill.person!.linkedin_url ?? prev.linkedin_url,
+      }));
+    }
+    setAgentPanelOpen(true);
+  }, [agentMode, deals, searchParams, setSearchParams]);
+
+  // Persist the deal-name / LinkedIn / website drafts.
+  const handleAgentSaveDeal = useCallback(async () => {
+    const dealId = activeDealRef.current?.id;
+    if (!dealId) throw new Error("No active deal to save");
+    const d = agentDealRef.current;
+    await updateDealRef.current.mutateAsync({
+      dealId,
+      patch: { name: d.name, linkedin_url: d.linkedin_url, website: d.website },
+    });
+  }, []);
+
+  // Add the drafted key person and clear the sub-form.
+  const handleAgentAddPerson = useCallback(async () => {
+    const dealId = activeDealRef.current?.id;
+    if (!dealId) throw new Error("No active deal");
+    const p = agentPersonRef.current;
+    if (!p.name.trim()) throw new Error("Person name is required");
+    await addPersonRef.current.mutateAsync({
+      dealId,
+      name: p.name.trim(),
+      title: p.title.trim() || null,
+      linkedin_url: p.linkedin_url.trim() || null,
+    });
+    setAgentPerson({ name: "", title: "", linkedin_url: "" });
+  }, []);
+
+  // Mount the window.easyvc bridge ONLY while Agent Mode is on.
+  useEffect(() => {
+    if (!agentMode) return;
+    const applyDealPatch = (patch: unknown) => {
+      const { deal } = sanitizePrefill({ deal: patch });
+      if (!deal) return;
+      setAgentDeal((prev) => ({
+        name: deal.name ?? prev.name,
+        linkedin_url: deal.linkedin_url ?? prev.linkedin_url,
+        website: deal.website ?? prev.website,
+      }));
+      setAgentPanelOpen(true);
+    };
+    const applyPerson = (person: unknown) => {
+      const { person: p } = sanitizePrefill({ person });
+      if (!p) return;
+      setAgentPerson((prev) => ({
+        name: p.name ?? prev.name,
+        title: p.title ?? prev.title,
+        linkedin_url: p.linkedin_url ?? prev.linkedin_url,
+      }));
+      setAgentPanelOpen(true);
+    };
+    const bridge = {
+      getCurrentDealId: () => activeDealRef.current?.id ?? null,
+      prefill: applyDealPatch,
+      fillPerson: applyPerson,
+      save: () => handleAgentSaveDeal(),
+      addPerson: () => handleAgentAddPerson(),
+      open: () => setAgentPanelOpen(true),
+    };
+    (window as any).easyvc = bridge;
+
+    // Cross-origin agents can postMessage the same verbs, but ONLY with the
+    // one-time nonce carried in the /agent/deal/:id?nonce= URL they opened.
+    // (Same-origin check alone is insufficient for cross-origin agents.)
+    const onMessage = (e: MessageEvent) => {
+      const data = e.data as any;
+      if (!data || data.type !== "EASYVC_AGENT") return;
+      const expected = nonceRef.current;
+      if (!expected || data.nonce !== expected) return;
+      switch (data.action) {
+        case "prefill": applyDealPatch(data.payload); break;
+        case "fillPerson": applyPerson(data.payload); break;
+        case "save": void handleAgentSaveDeal().catch((err) => toast.error(err?.message ?? "Save failed")); break;
+        case "addPerson": void handleAgentAddPerson().catch((err) => toast.error(err?.message ?? "Add failed")); break;
+      }
+    };
+    window.addEventListener("message", onMessage);
+    return () => {
+      window.removeEventListener("message", onMessage);
+      if ((window as any).easyvc === bridge) delete (window as any).easyvc;
+    };
+  }, [agentMode, handleAgentSaveDeal, handleAgentAddPerson]);
 
   // Auto-scroll chat
   useEffect(() => {
@@ -541,6 +699,118 @@ export default function DealWorkspace() {
             </button>
           )}
         </div>
+
+        {/* Agent-assisted edit panel — rendered ONLY in Agent Mode */}
+        {agentMode && agentPanelOpen && (
+          <div data-testid="agent-edit-panel" className="border-b border-primary/30 bg-primary/5 px-5 py-4 shrink-0">
+            <div className="flex items-center gap-2 mb-3">
+              <Bot className="h-4 w-4 text-primary" />
+              <span className="text-xs font-semibold text-foreground">Agent-assisted edit — review &amp; save</span>
+              <button
+                onClick={() => setAgentPanelOpen(false)}
+                aria-label="Close agent panel"
+                className="ml-auto p-1 rounded text-muted-foreground hover:text-foreground hover:bg-accent"
+              >
+                <X className="h-3.5 w-3.5" />
+              </button>
+            </div>
+
+            {activeDeal ? (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {/* Deal fields */}
+                <div className="flex flex-col gap-2">
+                  <label className="text-[11px] uppercase tracking-wider text-muted-foreground">Deal name</label>
+                  <input
+                    data-testid="deal-name-input"
+                    type="text"
+                    value={agentDeal.name}
+                    onChange={(e) => setAgentDeal((d) => ({ ...d, name: e.target.value }))}
+                    className="rounded-md border border-input bg-background px-3 py-1.5 text-sm outline-none focus:ring-1 focus:ring-primary"
+                  />
+                  <label className="text-[11px] uppercase tracking-wider text-muted-foreground mt-1">LinkedIn URL</label>
+                  <input
+                    data-testid="linkedin-url-input"
+                    type="text"
+                    value={agentDeal.linkedin_url}
+                    onChange={(e) => setAgentDeal((d) => ({ ...d, linkedin_url: e.target.value }))}
+                    placeholder="https://linkedin.com/company/…"
+                    className="rounded-md border border-input bg-background px-3 py-1.5 text-sm outline-none focus:ring-1 focus:ring-primary"
+                  />
+                  <label className="text-[11px] uppercase tracking-wider text-muted-foreground mt-1">Website</label>
+                  <input
+                    data-testid="website-input"
+                    type="text"
+                    value={agentDeal.website}
+                    onChange={(e) => setAgentDeal((d) => ({ ...d, website: e.target.value }))}
+                    placeholder="https://…"
+                    className="rounded-md border border-input bg-background px-3 py-1.5 text-sm outline-none focus:ring-1 focus:ring-primary"
+                  />
+                  <button
+                    data-testid="save-deal-btn"
+                    onClick={() => {
+                      toast.promise(handleAgentSaveDeal(), {
+                        loading: "Saving deal…",
+                        success: "Deal updated",
+                        error: (err) => `Save failed: ${err?.message ?? "unknown error"}`,
+                      });
+                    }}
+                    disabled={updateDeal.isPending}
+                    className="mt-2 inline-flex items-center justify-center gap-1.5 rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:opacity-90 disabled:opacity-50 w-fit"
+                  >
+                    {updateDeal.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />}
+                    Save deal
+                  </button>
+                </div>
+
+                {/* Add key person */}
+                <div className="flex flex-col gap-2">
+                  <label className="text-[11px] uppercase tracking-wider text-muted-foreground">Add key person</label>
+                  <input
+                    data-testid="person-name-input"
+                    type="text"
+                    value={agentPerson.name}
+                    onChange={(e) => setAgentPerson((p) => ({ ...p, name: e.target.value }))}
+                    placeholder="Full name"
+                    className="rounded-md border border-input bg-background px-3 py-1.5 text-sm outline-none focus:ring-1 focus:ring-primary"
+                  />
+                  <input
+                    data-testid="person-title-input"
+                    type="text"
+                    value={agentPerson.title}
+                    onChange={(e) => setAgentPerson((p) => ({ ...p, title: e.target.value }))}
+                    placeholder="Title (e.g. CEO)"
+                    className="rounded-md border border-input bg-background px-3 py-1.5 text-sm outline-none focus:ring-1 focus:ring-primary"
+                  />
+                  <input
+                    data-testid="person-linkedin-input"
+                    type="text"
+                    value={agentPerson.linkedin_url}
+                    onChange={(e) => setAgentPerson((p) => ({ ...p, linkedin_url: e.target.value }))}
+                    placeholder="LinkedIn URL"
+                    className="rounded-md border border-input bg-background px-3 py-1.5 text-sm outline-none focus:ring-1 focus:ring-primary"
+                  />
+                  <button
+                    data-testid="add-person-btn"
+                    onClick={() => {
+                      toast.promise(handleAgentAddPerson(), {
+                        loading: "Adding person…",
+                        success: "Person added",
+                        error: (err) => `Add failed: ${err?.message ?? "unknown error"}`,
+                      });
+                    }}
+                    disabled={addPerson.isPending || !agentPerson.name.trim()}
+                    className="mt-2 inline-flex items-center justify-center gap-1.5 rounded-md border border-primary/40 bg-background px-3 py-1.5 text-xs font-medium text-primary hover:bg-primary/10 disabled:opacity-50 w-fit"
+                  >
+                    {addPerson.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <UserPlus className="h-3.5 w-3.5" />}
+                    Add person
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <p className="text-xs text-muted-foreground">Select or create a deal to edit.</p>
+            )}
+          </div>
+        )}
 
         {activeDeal && isOwnerOfActive && (
           <ShareDealDialog

@@ -525,3 +525,80 @@ export function useRetryDocsendCapture() {
     },
   });
 }
+
+/** Editable deal fields exposed to the agent-assisted UI (never status/stage). */
+export const EDITABLE_DEAL_FIELDS = [
+  "name",
+  "sector",
+  "website",
+  "linkedin_url",
+  "ask_amount",
+  "valuation",
+  "revenue",
+  "growth",
+  "nrr",
+  "team_size",
+] as const;
+
+export type EditableDealPatch = Partial<Record<(typeof EDITABLE_DEAL_FIELDS)[number], string | null>>;
+
+/** Update whitelisted fields on a deal (used by the Agent Mode edit form). */
+export function useUpdateDeal() {
+  const queryClient = useQueryClient();
+  const { user } = useAuth();
+
+  return useMutation({
+    mutationFn: async ({ dealId, patch }: { dealId: string; patch: EditableDealPatch }) => {
+      if (!user) throw new Error("Not authenticated");
+      const clean: Record<string, string | null> = {};
+      for (const key of EDITABLE_DEAL_FIELDS) {
+        if (key in patch) clean[key] = patch[key] ?? null;
+      }
+      if (Object.keys(clean).length === 0) return { dealId };
+      const { error } = await supabase
+        .from("deals")
+        .update(clean)
+        .eq("id", dealId)
+        .eq("user_id", user.id);
+      if (error) throw error;
+      return { dealId };
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["deals"] });
+    },
+  });
+}
+
+/** Add a key person to a deal (the LinkedIn founder use case). */
+export function useAddDealPerson() {
+  const queryClient = useQueryClient();
+  const { user } = useAuth();
+
+  return useMutation({
+    mutationFn: async ({
+      dealId,
+      name,
+      title,
+      linkedin_url,
+    }: {
+      dealId: string;
+      name: string;
+      title?: string | null;
+      linkedin_url?: string | null;
+    }) => {
+      if (!user) throw new Error("Not authenticated");
+      const { error } = await supabase.from("deal_people").insert({
+        deal_id: dealId,
+        user_id: user.id,
+        name,
+        title: title ?? null,
+        linkedin_url: linkedin_url ?? null,
+      });
+      if (error) throw error;
+      return { dealId };
+    },
+    onSuccess: (_data, variables) => {
+      queryClient.invalidateQueries({ queryKey: ["deal-people", variables.dealId] });
+    },
+  });
+}

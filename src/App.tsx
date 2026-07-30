@@ -4,6 +4,7 @@ import { Toaster as Sonner } from "@/components/ui/sonner";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { AuthProvider, useAuth } from "@/contexts/AuthContext";
+import { AgentRoute } from "@/components/AgentRoute";
 import { AppLayout } from "@/components/AppLayout";
 import KanbanPipeline from "@/pages/KanbanPipeline";
 import DealWorkspace from "@/pages/DealWorkspace";
@@ -64,6 +65,10 @@ const App = () => (
                       <Route path="/data-room" element={<DataRoom />} />
                       <Route path="/intake" element={<IntakePage />} />
                       <Route path="/settings" element={<SettingsPage />} />
+                      <Route
+                        path="/agent/deal/:id"
+                        element={<AgentRoute><DealWorkspace /></AgentRoute>}
+                      />
                       <Route path="*" element={<NotFound />} />
                     </Routes>
                   </AppLayout>

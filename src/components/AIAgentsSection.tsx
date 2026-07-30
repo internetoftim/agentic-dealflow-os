@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Bot, Copy, Plus, Trash2, Loader2, Check } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
+import { useAgentMode } from "@/hooks/useAgentMode";
 
 type TokenRow = {
   id: string;
@@ -37,6 +38,7 @@ export function AIAgentsSection({ userId }: { userId?: string }) {
   const [newName, setNewName] = useState("");
   const [creating, setCreating] = useState(false);
   const [freshToken, setFreshToken] = useState<string | null>(null);
+  const { agentMode, setAgentMode } = useAgentMode();
 
   const refresh = async () => {
     if (!userId) return;
@@ -107,6 +109,30 @@ export function AIAgentsSection({ userId }: { userId?: string }) {
         Let AI agents like Claude Desktop, Cursor, or ChatGPT call your EasyVC workspace.
         Generate a personal access token below and paste it into your agent's MCP config.
       </p>
+
+      {/* Agent Mode status / CTA */}
+      <div className={`rounded-md border p-3 mb-4 ${agentMode ? "border-primary/30 bg-primary/5" : "border-border bg-muted/30"}`}>
+        <div className="flex items-center justify-between gap-3">
+          <p className="text-xs text-muted-foreground">
+            {agentMode ? (
+              <><span className="font-medium text-foreground">Agent Mode is on.</span> Tokens below (and OAuth clients with the write scope) can make changes on your behalf.</>
+            ) : (
+              <><span className="font-medium text-foreground">Agent Mode is off.</span> Tokens are read-only. Enable it to let agents create/update deals, add founders, and write memos.</>
+            )}
+          </p>
+          {!agentMode && (
+            <button
+              onClick={async () => {
+                try { await setAgentMode(true); toast.success("Agent Mode enabled"); }
+                catch { toast.error("Failed to enable Agent Mode"); }
+              }}
+              className="shrink-0 inline-flex items-center gap-1 rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:opacity-90"
+            >
+              Enable Agent Mode
+            </button>
+          )}
+        </div>
+      </div>
 
       {/* Server URL */}
       <div className="rounded-md border border-border bg-muted/30 p-3 mb-4">
@@ -206,6 +232,26 @@ export function AIAgentsSection({ userId }: { userId?: string }) {
           no token needed.
         </p>
       </div>
+
+      {agentMode && (
+        <div className="rounded-md border border-border bg-card p-4 mt-4">
+          <p className="text-xs font-medium text-foreground mb-2">What agents can do in Agent Mode</p>
+          <ul className="list-disc list-inside text-xs text-muted-foreground space-y-1">
+            <li><code>create_deal</code>, <code>update_deal</code>, <code>delete_deal</code></li>
+            <li><code>add_deal_person</code> — e.g. "add this founder's LinkedIn"</li>
+            <li><code>attach_source_url</code> / <code>attach_source_text</code>, <code>append_note</code>, <code>update_memo_draft</code></li>
+            <li><code>run_deep_research</code>, <code>run_process_deck</code>, <code>generate_memo</code> (async — poll <code>get_job_status</code>)</li>
+          </ul>
+          <p className="text-xs text-muted-foreground mt-2">
+            Try asking your agent:{" "}
+            <span className="italic">"In EasyVC, add Jane Doe (CEO, linkedin.com/in/jane) to the Acme deal."</span>
+          </p>
+          <p className="text-[11px] text-muted-foreground mt-2">
+            Note: a personal access token is all-or-nothing — while Agent Mode is on it can use every write tool.
+            OAuth clients additionally require the <code>mcp:write</code> scope you grant on the consent screen.
+          </p>
+        </div>
+      )}
     </section>
   );
 }

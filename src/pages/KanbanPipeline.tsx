@@ -162,6 +162,7 @@ function DealCard({
 
   return (
     <div
+      data-testid={`deal-card-${deal.id}`}
       className={`relative rounded-lg border bg-card p-3.5 shadow-surface hover:shadow-surface-md transition-all cursor-pointer group ${
         selected ? "border-primary ring-2 ring-primary/30" : "border-border"
       }`}
@@ -319,14 +320,14 @@ export default function KanbanPipeline() {
       ) : (
         <div className="grid grid-cols-3 gap-4">
           {grouped.map((col) => (
-            <div key={col.key} className="flex flex-col">
+            <div key={col.key} className="flex flex-col" data-testid={`kanban-column-${col.key}`}>
               <div className="flex items-center justify-between mb-3 px-1">
                 <h2 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">{col.title}</h2>
                 <span className="flex h-5 w-5 items-center justify-center rounded-full bg-muted text-[11px] font-medium text-muted-foreground">
                   {col.deals.length}
                 </span>
               </div>
-              <div className="flex flex-col gap-2.5 min-h-[200px] rounded-lg bg-muted/50 p-2">
+              <div className="flex flex-col gap-2.5 min-h-[200px] rounded-lg bg-muted/50 p-2" data-testid={`kanban-dropzone-${col.key}`}>
                 {col.deals.length === 0 && (
                   <p className="text-xs text-muted-foreground text-center mt-8">No deals</p>
                 )}
