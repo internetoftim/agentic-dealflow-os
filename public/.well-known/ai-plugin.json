@@ -3,7 +3,7 @@
   "name_for_human": "EasyVC",
   "name_for_model": "easyvc",
   "description_for_human": "Autonomous OS for VC analysts — ingest deal flow, run research, and draft investment memos.",
-  "description_for_model": "EasyVC exposes tools to list, search, and read venture capital deals from the authenticated user's workspace; ingest new deals from URLs, decks, or DocSend links; run deep research on companies and founders; and generate investment memos exported to Google Drive. Use the MCP server endpoint for tool access.",
+  "description_for_model": "EasyVC exposes an MCP server with two capability tiers scoped to the authenticated user's workspace. Default (always available): read-only tools — list_deals, get_deal, search_deals, get_deal_context. Agent Mode (opt-in, per user): the user must enable Agent Mode in Settings to unlock write tools — create/update/delete deals, add/update/remove key people, attach sources, append notes, edit memo drafts, and trigger deep research / deck processing / memo generation. If a write tool is unavailable or returns an isError 'Agent Mode is disabled' result, ask the user to enable Agent Mode in Settings. Personal access tokens grant every write tool once Agent Mode is on; OAuth clients additionally need the 'mcp:write' scope granted on the consent screen.",
   "auth": {
     "type": "user_http",
     "authorization_type": "bearer"

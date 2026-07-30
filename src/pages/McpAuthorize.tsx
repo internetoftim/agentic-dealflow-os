@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useSearchParams, Navigate } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
+import { useAgentMode } from "@/hooks/useAgentMode";
 import { supabase } from "@/integrations/supabase/client";
 import { Loader2, Bot, ShieldCheck } from "lucide-react";
 
@@ -18,6 +19,10 @@ export default function McpAuthorize() {
   const codeChallengeMethod = params.get("code_challenge_method") ?? "S256";
   const state = params.get("state") ?? "";
   const scope = params.get("scope") ?? "mcp";
+  const { agentMode } = useAgentMode();
+  const [allowWrite, setAllowWrite] = useState(() =>
+    scope.split(/\s+/).includes("mcp:write")
+  );
 
   useEffect(() => {
     if (!loading && !user) {
@@ -33,6 +38,14 @@ export default function McpAuthorize() {
   if (!clientId || !redirectUri || !codeChallenge) {
     return <div className="min-h-screen flex items-center justify-center p-6 text-sm text-destructive">Missing required OAuth parameters.</div>;
   }
+
+  // Only include mcp:write when the user has Agent Mode on and opted in.
+  // (The server strips it otherwise — this keeps the request honest.)
+  const buildScope = () => {
+    const base = scope.split(/\s+/).filter((s) => s && s !== "mcp:write");
+    const scopes = agentMode && allowWrite ? [...base, "mcp:write"] : base;
+    return scopes.join(" ") || "mcp";
+  };
 
   const approve = async () => {
     setSubmitting(true);
@@ -50,7 +63,8 @@ export default function McpAuthorize() {
           redirect_uri: redirectUri,
           code_challenge: codeChallenge,
           code_challenge_method: codeChallengeMethod,
-          scope, state,
+          scope: buildScope(),
+          state,
         }),
       });
       const json = await resp.json();
@@ -94,8 +108,27 @@ export default function McpAuthorize() {
           <ul className="list-disc list-inside text-muted-foreground space-y-0.5">
             <li>Read your deals, sources, and key people</li>
             <li>Search and retrieve extracted deck content</li>
+            {agentMode && allowWrite && (
+              <li className="text-foreground">Create, update &amp; delete deals, people, sources, notes &amp; memos</li>
+            )}
           </ul>
-          <p className="mt-2 text-muted-foreground">Read-only. No writes, deletes, or settings changes.</p>
+          {agentMode ? (
+            <label className="mt-2 flex items-start gap-2 cursor-pointer" data-testid="mcp-write-scope">
+              <input
+                type="checkbox"
+                checked={allowWrite}
+                onChange={(e) => setAllowWrite(e.target.checked)}
+                className="mt-0.5"
+              />
+              <span className="text-muted-foreground">
+                Allow this agent to <span className="font-medium text-foreground">make changes</span> on your behalf (write access). Leave unchecked for read-only.
+              </span>
+            </label>
+          ) : (
+            <p className="mt-2 text-muted-foreground">
+              Read-only. Enable <span className="font-medium">Agent Mode</span> in Settings to let an agent make changes.
+            </p>
+          )}
         </div>
         {error && <p className="text-xs text-destructive mb-2">{error}</p>}
         <div className="flex gap-2">

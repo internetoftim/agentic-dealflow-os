@@ -82,17 +82,6 @@ Deno.serve(async (req) => {
     const supabaseAnonKey = Deno.env.get("SUPABASE_ANON_KEY")!;
 
     const adminClient = createClient(supabaseUrl, supabaseServiceKey);
-    const userClient = createClient(supabaseUrl, supabaseAnonKey, {
-      global: { headers: { Authorization: authHeader } },
-    });
-
-    const { data: { user }, error: userError } = await userClient.auth.getUser();
-    if (userError || !user) {
-      return new Response(JSON.stringify({ error: "Unauthorized" }), {
-        status: 401,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
 
     const { dealId } = await req.json();
     if (!dealId) {
@@ -102,11 +91,39 @@ Deno.serve(async (req) => {
       });
     }
 
+    // Dual-mode auth: a service-role caller (e.g. the MCP server's generate_memo
+    // tool) resolves the owner from the deal; otherwise resolve from the JWT.
+    // The JWT path is unchanged for the in-app caller.
+    let userId: string;
+    if (authHeader === `Bearer ${supabaseServiceKey}`) {
+      const { data: dealRecord } = await adminClient
+        .from("deals").select("user_id").eq("id", dealId).single();
+      if (!dealRecord?.user_id) {
+        return new Response(JSON.stringify({ error: "Deal not found" }), {
+          status: 404,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+      userId = dealRecord.user_id;
+    } else {
+      const userClient = createClient(supabaseUrl, supabaseAnonKey, {
+        global: { headers: { Authorization: authHeader } },
+      });
+      const { data: { user }, error: userError } = await userClient.auth.getUser();
+      if (userError || !user) {
+        return new Response(JSON.stringify({ error: "Unauthorized" }), {
+          status: 401,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+      userId = user.id;
+    }
+
     // Fetch deal + sources + settings in parallel
     const [dealResult, sourcesResult, settingsResult] = await Promise.all([
-      adminClient.from("deals").select("*").eq("id", dealId).eq("user_id", user.id).single(),
-      adminClient.from("sources").select("file_name, extracted_text").eq("deal_id", dealId).eq("user_id", user.id),
-      adminClient.from("user_settings").select("ai_model, memo_prompt, google_provider_token, drive_sync_enabled, recap_naming_pattern, drive_folder").eq("user_id", user.id).single(),
+      adminClient.from("deals").select("*").eq("id", dealId).eq("user_id", userId).single(),
+      adminClient.from("sources").select("file_name, extracted_text").eq("deal_id", dealId).eq("user_id", userId),
+      adminClient.from("user_settings").select("ai_model, memo_prompt, google_provider_token, drive_sync_enabled, recap_naming_pattern, drive_folder").eq("user_id", userId).single(),
     ]);
 
     const deal = dealResult.data;

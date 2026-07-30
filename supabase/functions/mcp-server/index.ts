@@ -2,9 +2,18 @@
 // - MCP Streamable HTTP (JSON-RPC) at POST /
 // - OAuth 2.1 endpoints (PKCE, dynamic client registration)
 // - Bearer auth: Personal Access Token (pat_*) OR OAuth access token (oauth_*) OR Supabase JWT
-// Read-only tools v1: list_deals, get_deal, search_deals, get_deal_context
+//
+// Tool tiers:
+//   public       — read-only, available to every authenticated caller
+//                  (list_deals, get_deal, search_deals, get_deal_context)
+//   agent-read   — extra read helpers, require Agent Mode
+//   agent-write  — mutations, require Agent Mode AND (for OAuth callers) mcp:write
+//
+// "Agent Mode" = the per-user user_settings.agent_mode_enabled opt-in flag.
+// The whole write surface is gated on it: toggling it off is an instant kill
+// switch. Gating logic mirrors src/lib/agentGate.ts (kept in sync by hand).
 
-import { createClient, type SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY")!;
@@ -52,7 +61,23 @@ function randomToken(prefix: string, bytes = 32): string {
 }
 
 // ---------------- auth ----------------
-type AuthResult = { userId: string; via: "pat" | "oauth" | "jwt" } | null;
+type Auth = {
+  userId: string;
+  via: "pat" | "oauth" | "jwt";
+  agentMode: boolean;
+  scope: string | null;
+};
+type AuthResult = Auth | null;
+
+/** Whether the user has opted into Agent Mode. One lookup per request. */
+async function readAgentMode(userId: string): Promise<boolean> {
+  const { data } = await admin
+    .from("user_settings")
+    .select("agent_mode_enabled")
+    .eq("user_id", userId)
+    .maybeSingle();
+  return Boolean((data as { agent_mode_enabled?: boolean } | null)?.agent_mode_enabled);
+}
 
 async function authenticate(req: Request): Promise<AuthResult> {
   const header = req.headers.get("Authorization");
@@ -70,19 +95,20 @@ async function authenticate(req: Request): Promise<AuthResult> {
     if (!data || data.revoked_at) return null;
     admin.from("mcp_access_tokens").update({ last_used_at: new Date().toISOString() })
       .eq("token_hash", hash).then(() => {});
-    return { userId: data.user_id, via: "pat" };
+    // PATs have no scope column — they are gated by agent mode alone.
+    return { userId: data.user_id, via: "pat", agentMode: await readAgentMode(data.user_id), scope: null };
   }
 
   if (token.startsWith("oauth_")) {
     const hash = await sha256Hex(token);
     const { data } = await admin
       .from("mcp_oauth_tokens")
-      .select("user_id, revoked_at, expires_at")
+      .select("user_id, revoked_at, expires_at, scope")
       .eq("access_token_hash", hash)
       .maybeSingle();
     if (!data || data.revoked_at) return null;
     if (new Date(data.expires_at) < new Date()) return null;
-    return { userId: data.user_id, via: "oauth" };
+    return { userId: data.user_id, via: "oauth", agentMode: await readAgentMode(data.user_id), scope: (data as { scope?: string | null }).scope ?? null };
   }
 
   // Fallback: Supabase JWT
@@ -91,13 +117,45 @@ async function authenticate(req: Request): Promise<AuthResult> {
   });
   const { data, error } = await userClient.auth.getClaims(token);
   if (error || !data?.claims?.sub) return null;
-  return { userId: data.claims.sub as string, via: "jwt" };
+  const userId = data.claims.sub as string;
+  return { userId, via: "jwt", agentMode: await readAgentMode(userId), scope: null };
+}
+
+// ---------------- agent-mode gate (mirrors src/lib/agentGate.ts) ----------------
+type ToolAccess = "public" | "agent-read" | "agent-write";
+
+function parseScopes(scope: string | null | undefined): string[] {
+  return (scope ?? "").split(/\s+/).filter(Boolean);
+}
+
+function isAccessAllowed(auth: Auth, access: ToolAccess): boolean {
+  if (access === "public") return true;
+  if (!auth.agentMode) return false;
+  if (access === "agent-write" && auth.via === "oauth") {
+    return parseScopes(auth.scope).includes("mcp:write");
+  }
+  return true;
+}
+
+function accessOf(name: string): ToolAccess {
+  const t = TOOLS.find((x) => x.name === name);
+  return (t?.access as ToolAccess) ?? "agent-write";
+}
+
+function isToolAllowed(auth: Auth, name: string): boolean {
+  return isAccessAllowed(auth, accessOf(name));
+}
+
+function isWriteTool(name: string): boolean {
+  return accessOf(name) === "agent-write";
 }
 
 // ---------------- tool definitions ----------------
-const TOOLS = [
+const TOOLS: Array<{ name: string; access: ToolAccess; description: string; inputSchema: any }> = [
+  // ---- public (read-only) ----
   {
     name: "list_deals",
+    access: "public",
     description:
       "List venture capital deals in the authenticated user's EasyVC workspace. Filter optionally by stage, status, or sector.",
     inputSchema: {
@@ -112,6 +170,7 @@ const TOOLS = [
   },
   {
     name: "get_deal",
+    access: "public",
     description:
       "Get full details for a single deal by id, including metadata, uploaded sources, and key people.",
     inputSchema: {
@@ -122,6 +181,7 @@ const TOOLS = [
   },
   {
     name: "search_deals",
+    access: "public",
     description:
       "Search the user's deals by free-text query against company name, sector, and notes.",
     inputSchema: {
@@ -135,6 +195,7 @@ const TOOLS = [
   },
   {
     name: "get_deal_context",
+    access: "public",
     description:
       "Get the extracted text content of all sources (pitch deck pages, web pages) for a deal. Useful for grounded Q&A.",
     inputSchema: {
@@ -146,10 +207,261 @@ const TOOLS = [
       required: ["deal_id"],
     },
   },
+
+  // ---- agent-read (require Agent Mode) ----
+  {
+    name: "list_deal_people",
+    access: "agent-read",
+    description: "List the key people (founders/team) recorded on a deal.",
+    inputSchema: { type: "object", properties: { deal_id: { type: "string" } }, required: ["deal_id"] },
+  },
+  {
+    name: "list_sources",
+    access: "agent-read",
+    description: "List the sources (uploaded decks, attached URLs/text) on a deal.",
+    inputSchema: { type: "object", properties: { deal_id: { type: "string" } }, required: ["deal_id"] },
+  },
+  {
+    name: "get_job_status",
+    access: "agent-read",
+    description: "Poll a deal's pipeline state: status (ingestion) and deep_research_status.",
+    inputSchema: { type: "object", properties: { deal_id: { type: "string" } }, required: ["deal_id"] },
+  },
+
+  // ---- agent-write (require Agent Mode + mcp:write for OAuth) ----
+  {
+    name: "create_deal",
+    access: "agent-write",
+    description: "Create a new deal in the workspace. Returns the new deal id.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        name: { type: "string" },
+        sector: { type: "string" },
+        website: { type: "string" },
+        linkedin_url: { type: "string" },
+        stage: { type: "string", description: "funding round, e.g. seed, series-a" },
+        ask_amount: { type: "string" },
+        valuation: { type: "string" },
+        revenue: { type: "string" },
+        growth: { type: "string" },
+        nrr: { type: "string" },
+        team_size: { type: "string" },
+      },
+      required: ["name"],
+    },
+  },
+  {
+    name: "update_deal",
+    access: "agent-write",
+    description:
+      "Update whitelisted fields on a deal. Cannot change pipeline status or stage (use the app for movement).",
+    inputSchema: {
+      type: "object",
+      properties: {
+        deal_id: { type: "string" },
+        name: { type: "string" },
+        sector: { type: "string" },
+        website: { type: "string" },
+        linkedin_url: { type: "string" },
+        ask_amount: { type: "string" },
+        valuation: { type: "string" },
+        revenue: { type: "string" },
+        growth: { type: "string" },
+        nrr: { type: "string" },
+        team_size: { type: "string" },
+      },
+      required: ["deal_id"],
+    },
+  },
+  {
+    name: "delete_deal",
+    access: "agent-write",
+    description: "Delete a deal and its people, sources, notes, and capture jobs.",
+    inputSchema: { type: "object", properties: { deal_id: { type: "string" } }, required: ["deal_id"] },
+  },
+  {
+    name: "add_deal_person",
+    access: "agent-write",
+    description: "Add a key person (e.g. a founder) to a deal, with an optional title and LinkedIn URL.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        deal_id: { type: "string" },
+        name: { type: "string" },
+        title: { type: "string" },
+        linkedin_url: { type: "string" },
+      },
+      required: ["deal_id", "name"],
+    },
+  },
+  {
+    name: "update_deal_person",
+    access: "agent-write",
+    description: "Update a person's name, title, or LinkedIn URL.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        person_id: { type: "string" },
+        name: { type: "string" },
+        title: { type: "string" },
+        linkedin_url: { type: "string" },
+      },
+      required: ["person_id"],
+    },
+  },
+  {
+    name: "remove_deal_person",
+    access: "agent-write",
+    description: "Remove a person from a deal.",
+    inputSchema: { type: "object", properties: { person_id: { type: "string" } }, required: ["person_id"] },
+  },
+  {
+    name: "attach_source_url",
+    access: "agent-write",
+    description: "Attach a reference URL to a deal as a source.",
+    inputSchema: {
+      type: "object",
+      properties: { deal_id: { type: "string" }, url: { type: "string" }, label: { type: "string" } },
+      required: ["deal_id", "url"],
+    },
+  },
+  {
+    name: "attach_source_text",
+    access: "agent-write",
+    description: "Attach freeform text to a deal as a source (becomes part of deal context).",
+    inputSchema: {
+      type: "object",
+      properties: { deal_id: { type: "string" }, text: { type: "string" }, label: { type: "string" } },
+      required: ["deal_id", "text"],
+    },
+  },
+  {
+    name: "attach_deck_from_url",
+    access: "agent-write",
+    description:
+      "Record a deck/document URL on a deal as a pending source. Note: automated capture of gated viewers (DocSend/Papermark) is completed from the app; this records the reference.",
+    inputSchema: {
+      type: "object",
+      properties: { deal_id: { type: "string" }, url: { type: "string" } },
+      required: ["deal_id", "url"],
+    },
+  },
+  {
+    name: "delete_source",
+    access: "agent-write",
+    description: "Delete a source from a deal.",
+    inputSchema: { type: "object", properties: { source_id: { type: "string" } }, required: ["source_id"] },
+  },
+  {
+    name: "append_note",
+    access: "agent-write",
+    description: "Append a note to a deal's running notes log.",
+    inputSchema: {
+      type: "object",
+      properties: { deal_id: { type: "string" }, body: { type: "string" } },
+      required: ["deal_id", "body"],
+    },
+  },
+  {
+    name: "update_memo_draft",
+    access: "agent-write",
+    description: "Replace the deal's investment memo draft with agent-authored markdown.",
+    inputSchema: {
+      type: "object",
+      properties: { deal_id: { type: "string" }, memo_draft: { type: "string" } },
+      required: ["deal_id", "memo_draft"],
+    },
+  },
+  {
+    name: "run_deep_research",
+    access: "agent-write",
+    description: "Kick off EasyVC deep research on a deal (async). Poll get_job_status for progress.",
+    inputSchema: { type: "object", properties: { deal_id: { type: "string" } }, required: ["deal_id"] },
+  },
+  {
+    name: "run_process_deck",
+    access: "agent-write",
+    description: "Run the deck-processing pipeline for a deal with an uploaded deck at storage_path (async).",
+    inputSchema: {
+      type: "object",
+      properties: { deal_id: { type: "string" }, storage_path: { type: "string" } },
+      required: ["deal_id", "storage_path"],
+    },
+  },
+  {
+    name: "generate_memo",
+    access: "agent-write",
+    description: "Generate the investment memo for a deal from its sources (async). Poll deal.memo_draft.",
+    inputSchema: { type: "object", properties: { deal_id: { type: "string" } }, required: ["deal_id"] },
+  },
 ];
 
+// ---------------- write-tool helpers ----------------
+const WRITE_RATE_LIMIT = 120; // agent write actions per rolling hour per user
+const WRITE_RATE_WINDOW_MS = 60 * 60 * 1000;
+
+async function assertDealOwned(dealId: string, userId: string) {
+  if (!dealId) throw new Error("deal_id required");
+  const { data, error } = await admin
+    .from("deals").select("id").eq("id", dealId).eq("user_id", userId).maybeSingle();
+  if (error) throw new Error(error.message);
+  if (!data) throw new Error("Deal not found");
+}
+
+async function enforceWriteRateLimit(userId: string) {
+  const since = new Date(Date.now() - WRITE_RATE_WINDOW_MS).toISOString();
+  const { count } = await admin
+    .from("mcp_tool_calls")
+    .select("id", { count: "exact", head: true })
+    .eq("user_id", userId)
+    .gte("created_at", since);
+  if ((count ?? 0) >= WRITE_RATE_LIMIT) {
+    throw new Error(
+      `Rate limit exceeded: more than ${WRITE_RATE_LIMIT} agent write actions in the last hour. Try again later.`,
+    );
+  }
+}
+
+async function auditToolCall(auth: Auth, tool: string, args: any) {
+  const dealId = typeof args?.deal_id === "string" ? args.deal_id : null;
+  let argsHash: string | null = null;
+  try { argsHash = await sha256Hex(JSON.stringify(args ?? {})); } catch { /* best-effort */ }
+  await admin.from("mcp_tool_calls").insert({
+    user_id: auth.userId, tool, args_hash: argsHash, deal_id: dealId, via: auth.via,
+  });
+}
+
+/** Fire-and-forget invoke of another edge function with the service-role key. */
+function invokeEdgeFunction(fn: string, payload: unknown) {
+  const p = fetch(`${SUPABASE_URL}/functions/v1/${fn}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}` },
+    body: JSON.stringify(payload),
+  }).then(() => {}).catch((e) => console.error(`invoke ${fn} failed:`, e));
+  const edgeRuntime = (globalThis as any).EdgeRuntime;
+  if (edgeRuntime?.waitUntil) edgeRuntime.waitUntil(p);
+}
+
 // ---------------- tool handlers ----------------
-async function runTool(name: string, args: any, userId: string) {
+async function runTool(name: string, args: any, auth: Auth) {
+  // Single gate for every tool: public tools always pass; agent tools require
+  // Agent Mode (a thrown Error surfaces to the client as an MCP tool error and
+  // is the kill switch when the flag is toggled off).
+  if (!isToolAllowed(auth, name)) {
+    throw new Error(
+      "Agent Mode is required for this tool but is not enabled for this account. " +
+        "Enable it in EasyVC → Settings → Agent Mode." +
+        (auth.via === "oauth" ? " OAuth clients additionally need the mcp:write scope." : ""),
+    );
+  }
+  const userId = auth.userId;
+
+  if (isWriteTool(name)) {
+    await enforceWriteRateLimit(userId);
+    await auditToolCall(auth, name, args);
+  }
+
   switch (name) {
     case "list_deals": {
       let q = admin.from("deals").select("id, name, stage, sector, status, ask_amount, valuation, revenue, growth, website, created_at")
@@ -206,6 +518,197 @@ async function runTool(name: string, args: any, userId: string) {
         .slice(0, maxChars);
       return { deal_id: id, deal_name: deal.name, text: combined, truncated: combined.length >= maxChars };
     }
+
+    // ---------------- agent-read ----------------
+    case "list_deal_people": {
+      const id = String(args?.deal_id ?? "");
+      await assertDealOwned(id, userId);
+      const { data, error } = await admin
+        .from("deal_people").select("*").eq("deal_id", id).eq("user_id", userId)
+        .order("created_at", { ascending: true });
+      if (error) throw new Error(error.message);
+      return { people: data ?? [], count: data?.length ?? 0 };
+    }
+    case "list_sources": {
+      const id = String(args?.deal_id ?? "");
+      await assertDealOwned(id, userId);
+      const { data, error } = await admin
+        .from("sources").select("id, file_name, source_type, processing_status, created_at")
+        .eq("deal_id", id).eq("user_id", userId).order("created_at", { ascending: false });
+      if (error) throw new Error(error.message);
+      return { sources: data ?? [], count: data?.length ?? 0 };
+    }
+    case "get_job_status": {
+      const id = String(args?.deal_id ?? "");
+      await assertDealOwned(id, userId);
+      const { data, error } = await admin
+        .from("deals").select("status, deep_research_status").eq("id", id).eq("user_id", userId).maybeSingle();
+      if (error) throw new Error(error.message);
+      return { deal_id: id, status: data?.status ?? null, deep_research_status: data?.deep_research_status ?? null };
+    }
+
+    // ---------------- agent-write ----------------
+    case "create_deal": {
+      const dealName = String(args?.name ?? "").trim();
+      if (!dealName) throw new Error("name required");
+      const insert: Record<string, unknown> = { user_id: userId, name: dealName, source: "agent", status: "inbox" };
+      for (const f of ["sector", "website", "linkedin_url", "stage", "ask_amount", "valuation", "revenue", "growth", "nrr", "team_size"]) {
+        if (typeof args?.[f] === "string" && args[f].trim()) insert[f] = args[f];
+      }
+      const { data, error } = await admin.from("deals").insert(insert).select("id, name, status, stage, sector").maybeSingle();
+      if (error) throw new Error(error.message);
+      return { created: true, deal: data };
+    }
+    case "update_deal": {
+      const id = String(args?.deal_id ?? "");
+      await assertDealOwned(id, userId);
+      const patch: Record<string, unknown> = {};
+      for (const f of ["name", "sector", "website", "linkedin_url", "ask_amount", "valuation", "revenue", "growth", "nrr", "team_size"]) {
+        if (f in (args ?? {})) patch[f] = args[f] === "" ? null : args[f];
+      }
+      if (Object.keys(patch).length === 0) throw new Error("No updatable fields provided");
+      const { error } = await admin.from("deals").update(patch).eq("id", id).eq("user_id", userId);
+      if (error) throw new Error(error.message);
+      return { updated: true, deal_id: id, fields: Object.keys(patch) };
+    }
+    case "delete_deal": {
+      const id = String(args?.deal_id ?? "");
+      await assertDealOwned(id, userId);
+      await Promise.all([
+        admin.from("capture_jobs").delete().eq("deal_id", id).eq("user_id", userId),
+        admin.from("sources").delete().eq("deal_id", id).eq("user_id", userId),
+        admin.from("deal_people").delete().eq("deal_id", id).eq("user_id", userId),
+        admin.from("deal_notes").delete().eq("deal_id", id).eq("user_id", userId),
+      ]);
+      const { error } = await admin.from("deals").delete().eq("id", id).eq("user_id", userId);
+      if (error) throw new Error(error.message);
+      return { deleted: true, deal_id: id };
+    }
+    case "add_deal_person": {
+      const id = String(args?.deal_id ?? "");
+      await assertDealOwned(id, userId);
+      const personName = String(args?.name ?? "").trim();
+      if (!personName) throw new Error("name required");
+      const { data, error } = await admin.from("deal_people").insert({
+        deal_id: id, user_id: userId, name: personName,
+        title: args?.title ?? null, linkedin_url: args?.linkedin_url ?? null,
+      }).select("id, name, title, linkedin_url").maybeSingle();
+      if (error) throw new Error(error.message);
+      return { added: true, person: data };
+    }
+    case "update_deal_person": {
+      const personId = String(args?.person_id ?? "");
+      if (!personId) throw new Error("person_id required");
+      const { data: person } = await admin.from("deal_people").select("id").eq("id", personId).eq("user_id", userId).maybeSingle();
+      if (!person) throw new Error("Person not found");
+      const patch: Record<string, unknown> = {};
+      for (const f of ["name", "title", "linkedin_url"]) {
+        if (f in (args ?? {})) patch[f] = args[f] === "" ? null : args[f];
+      }
+      if (Object.keys(patch).length === 0) throw new Error("No updatable fields provided");
+      const { error } = await admin.from("deal_people").update(patch).eq("id", personId).eq("user_id", userId);
+      if (error) throw new Error(error.message);
+      return { updated: true, person_id: personId };
+    }
+    case "remove_deal_person": {
+      const personId = String(args?.person_id ?? "");
+      if (!personId) throw new Error("person_id required");
+      const { data: person } = await admin.from("deal_people").select("id").eq("id", personId).eq("user_id", userId).maybeSingle();
+      if (!person) throw new Error("Person not found");
+      const { error } = await admin.from("deal_people").delete().eq("id", personId).eq("user_id", userId);
+      if (error) throw new Error(error.message);
+      return { removed: true, person_id: personId };
+    }
+    case "attach_source_url": {
+      const id = String(args?.deal_id ?? "");
+      await assertDealOwned(id, userId);
+      const url = String(args?.url ?? "").trim();
+      if (!url) throw new Error("url required");
+      const { data, error } = await admin.from("sources").insert({
+        deal_id: id, user_id: userId, source_type: "url",
+        file_name: (args?.label ? String(args.label) : url).slice(0, 300),
+        extracted_text: url, processing_status: "pending",
+      }).select("id").maybeSingle();
+      if (error) throw new Error(error.message);
+      return { attached: true, source: data };
+    }
+    case "attach_source_text": {
+      const id = String(args?.deal_id ?? "");
+      await assertDealOwned(id, userId);
+      const text = String(args?.text ?? "");
+      if (!text.trim()) throw new Error("text required");
+      const { data, error } = await admin.from("sources").insert({
+        deal_id: id, user_id: userId, source_type: "text",
+        file_name: (args?.label ? String(args.label) : "Agent note").slice(0, 300),
+        extracted_text: text, processing_status: "extracted",
+      }).select("id").maybeSingle();
+      if (error) throw new Error(error.message);
+      return { attached: true, source: data };
+    }
+    case "attach_deck_from_url": {
+      const id = String(args?.deal_id ?? "");
+      await assertDealOwned(id, userId);
+      const url = String(args?.url ?? "").trim();
+      if (!url) throw new Error("url required");
+      const { data, error } = await admin.from("sources").insert({
+        deal_id: id, user_id: userId, source_type: "url",
+        file_name: url.slice(0, 300), extracted_text: url, processing_status: "pending",
+      }).select("id").maybeSingle();
+      if (error) throw new Error(error.message);
+      return {
+        attached: true, source: data,
+        note: "Deck URL recorded. Automated capture of gated viewers (DocSend/Papermark) is completed from the EasyVC app.",
+      };
+    }
+    case "delete_source": {
+      const sourceId = String(args?.source_id ?? "");
+      if (!sourceId) throw new Error("source_id required");
+      const { data: src } = await admin.from("sources").select("id").eq("id", sourceId).eq("user_id", userId).maybeSingle();
+      if (!src) throw new Error("Source not found");
+      const { error } = await admin.from("sources").delete().eq("id", sourceId).eq("user_id", userId);
+      if (error) throw new Error(error.message);
+      return { deleted: true, source_id: sourceId };
+    }
+    case "append_note": {
+      const id = String(args?.deal_id ?? "");
+      await assertDealOwned(id, userId);
+      const noteBody = String(args?.body ?? "");
+      if (!noteBody.trim()) throw new Error("body required");
+      const { data, error } = await admin.from("deal_notes").insert({
+        deal_id: id, user_id: userId, body: noteBody, source: "agent", via: auth.via,
+      }).select("id, created_at").maybeSingle();
+      if (error) throw new Error(error.message);
+      return { appended: true, note: data };
+    }
+    case "update_memo_draft": {
+      const id = String(args?.deal_id ?? "");
+      await assertDealOwned(id, userId);
+      const memo = String(args?.memo_draft ?? "");
+      const { error } = await admin.from("deals").update({ memo_draft: memo }).eq("id", id).eq("user_id", userId);
+      if (error) throw new Error(error.message);
+      return { updated: true, deal_id: id, memo_length: memo.length };
+    }
+    case "run_deep_research": {
+      const id = String(args?.deal_id ?? "");
+      await assertDealOwned(id, userId);
+      invokeEdgeFunction("deep-research", { dealId: id });
+      return { started: true, deal_id: id, poll: "get_job_status → deep_research_status" };
+    }
+    case "run_process_deck": {
+      const id = String(args?.deal_id ?? "");
+      await assertDealOwned(id, userId);
+      const storagePath = String(args?.storage_path ?? "").trim();
+      if (!storagePath) throw new Error("storage_path required");
+      invokeEdgeFunction("process-deck", { dealId: id, storagePath });
+      return { started: true, deal_id: id, poll: "get_job_status → status" };
+    }
+    case "generate_memo": {
+      const id = String(args?.deal_id ?? "");
+      await assertDealOwned(id, userId);
+      invokeEdgeFunction("generate-memo", { dealId: id });
+      return { started: true, deal_id: id, poll: "get_deal → deal.memo_draft" };
+    }
+
     default:
       throw new Error(`Unknown tool: ${name}`);
   }
@@ -247,10 +750,15 @@ async function handleMcp(req: Request): Promise<Response> {
         };
       }
       if (method === "tools/list") {
-        return { jsonrpc: "2.0", id, result: { tools: TOOLS } };
+        // Only advertise the tools this caller may actually use. Default
+        // (non-agent) callers see exactly the public read-only set.
+        const visible = TOOLS
+          .filter((t) => isToolAllowed(auth, t.name))
+          .map(({ access: _access, ...rest }) => rest);
+        return { jsonrpc: "2.0", id, result: { tools: visible } };
       }
       if (method === "tools/call") {
-        const out = await runTool(params?.name, params?.arguments ?? {}, auth.userId);
+        const out = await runTool(params?.name, params?.arguments ?? {}, auth);
         return {
           jsonrpc: "2.0", id,
           result: { content: [{ type: "text", text: JSON.stringify(out, null, 2) }] },
@@ -298,7 +806,7 @@ async function handleOAuthMetadata(): Promise<Response> {
     grant_types_supported: ["authorization_code", "refresh_token"],
     code_challenge_methods_supported: ["S256"],
     token_endpoint_auth_methods_supported: ["none"],
-    scopes_supported: ["mcp"],
+    scopes_supported: ["mcp", "mcp:write"],
   }, { headers: corsHeaders });
 }
 
@@ -306,7 +814,7 @@ async function handleProtectedResourceMetadata(): Promise<Response> {
   return Response.json({
     resource: FUNCTION_BASE,
     authorization_servers: [FUNCTION_BASE],
-    scopes_supported: ["mcp"],
+    scopes_supported: ["mcp", "mcp:write"],
     bearer_methods_supported: ["header"],
   }, { headers: corsHeaders });
 }
@@ -364,10 +872,17 @@ async function handleAuthorizeApprove(req: Request): Promise<Response> {
   if (!allowed.includes(redirect_uri)) {
     return Response.json({ error: "invalid_redirect_uri" }, { status: 400, headers: corsHeaders });
   }
+  // The mcp:write scope is only grantable when the approving user has Agent
+  // Mode enabled. Strip it otherwise (the consent UI hides the checkbox, this
+  // is the server-side backstop).
+  let grantedScope = (scope ?? "mcp").trim() || "mcp";
+  if (parseScopes(grantedScope).includes("mcp:write") && !auth.agentMode) {
+    grantedScope = parseScopes(grantedScope).filter((s) => s !== "mcp:write").join(" ") || "mcp";
+  }
   const code = randomToken("mcpac", 24);
   await admin.from("mcp_oauth_codes").insert({
     code, client_id, user_id: auth.userId, redirect_uri,
-    code_challenge, code_challenge_method: "S256", scope: scope ?? "mcp",
+    code_challenge, code_challenge_method: "S256", scope: grantedScope,
     expires_at: new Date(Date.now() + 5 * 60 * 1000).toISOString(),
   });
   const redirect = new URL(redirect_uri);
@@ -471,7 +986,11 @@ Deno.serve(async (req) => {
           oauth_metadata: `${FUNCTION_BASE}/.well-known/oauth-authorization-server`,
           resource_metadata: `${FUNCTION_BASE}/.well-known/oauth-protected-resource`,
         },
-        tools: TOOLS.map((t) => t.name),
+        // Unauthenticated discovery only lists the public read-only tools;
+        // write tools appear in tools/list once the caller has Agent Mode.
+        tools: TOOLS.filter((t) => t.access === "public").map((t) => t.name),
+        agent_mode_tools: TOOLS.filter((t) => t.access !== "public").map((t) => t.name),
+        agent_mode_note: "Write/agent tools require the user to enable Agent Mode in EasyVC Settings.",
       }, { headers: corsHeaders });
     }
 

@@ -8,12 +8,12 @@ Built by 1.6 (onepointsix.ai). Stack: React + Supabase + Google Workspace + mult
 
 ## Pages
 - [Home](https://onepointsix.ai/): Product overview and sign-in entry point.
-- [Public Intake](https://onepointsix.ai/intake): Founder-facing form to submit a deal directly to an EasyVC workspace.
+- [Public Intake](https://onepointsix.ai/intake/:userId): Founder-facing form to submit a deal directly to a specific analyst's EasyVC workspace. The `:userId` path segment identifies the receiving workspace; the bare `/intake` route is login-walled and internal.
 - [Login](https://onepointsix.ai/login): Google sign-in for analysts.
 
 ## API
 - [Public intake endpoint](https://fbiigltzcxkqjjadqzgl.supabase.co/functions/v1/public-intake): Programmatic deal submission for partners and inbound channels.
-- [MCP server](https://fbiigltzcxkqjjadqzgl.supabase.co/functions/v1/mcp-server): Model Context Protocol server exposing EasyVC tools (list/search/get deals, ingest URLs, run deep research, generate memos) to AI agents like Claude Desktop, Cursor, and the AI SDK. Requires a personal access token from Settings → AI Agents.
+- [MCP server](https://fbiigltzcxkqjjadqzgl.supabase.co/functions/v1/mcp-server): Model Context Protocol server exposing EasyVC tools to AI agents like Claude Desktop, Cursor, and the AI SDK. Two tiers: a default read-only surface (list/search/get deals and context) always available, and an opt-in Agent Mode that unlocks write tools (create/update/delete deals, add key people, attach sources, append notes, edit memos, trigger research/deck/memo jobs). Connect with a personal access token from Settings → AI Agents, or via OAuth. To use write tools the user must enable Agent Mode in Settings (Settings → Agent Mode); OAuth clients also need the `mcp:write` scope.
 
 ## Optional
 - [Custom domain](https://www.onepointsix.ai): Canonical marketing URL.
