@@ -148,8 +148,30 @@ export default function LoginPage() {
                 </div>
               </div>
             </Link>
+            <Link
+              to="/intake/easyvc"
+              className="mt-4 block w-full max-w-md mx-auto rounded-xl border border-border bg-card p-5 hover:border-primary/40 hover:bg-accent/40 transition-colors group"
+            >
+              <div className="flex items-start gap-3">
+                <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary/10 text-primary shrink-0">
+                  <Send className="h-4 w-4" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="text-sm font-medium text-foreground">
+                      Do you have a deal? Send it to our resident VC
+                    </p>
+                    <ArrowRight className="h-4 w-4 text-muted-foreground group-hover:translate-x-0.5 transition-transform shrink-0" />
+                  </div>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    Share your deck, DocSend link, or company details — reviewed by Tim Santos.
+                  </p>
+                </div>
+              </div>
+            </Link>
 
           </div>
+
         </div>
       </div>
     </div>
