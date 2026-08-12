@@ -164,7 +164,7 @@ export default function LoginPage() {
                     <ArrowRight className="h-4 w-4 text-muted-foreground group-hover:translate-x-0.5 transition-transform shrink-0" />
                   </div>
                   <p className="text-xs text-muted-foreground mt-1">
-                    Share your deck, DocSend link, or company details — reviewed by Tim Santos.
+                    Share your deck, DocSend link, or company details — reviewed by our resident VC.
                   </p>
                 </div>
               </div>
