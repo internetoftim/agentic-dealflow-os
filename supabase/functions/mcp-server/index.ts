@@ -523,7 +523,6 @@ async function handleMcp(req: Request): Promise<Response> {
         return { jsonrpc: "2.0", id, result: { tools } };
       }
 
-      }
       if (method === "tools/call") {
         const out = await runTool(params?.name, params?.arguments ?? {}, auth.userId);
         return {
