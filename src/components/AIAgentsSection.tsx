@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Bot, Copy, Plus, Trash2, Loader2, Check } from "lucide-react";
+import { Bot, Copy, Plus, Trash2, Loader2, Check, PenLine, History } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 
@@ -12,7 +12,25 @@ type TokenRow = {
   revoked_at: string | null;
 };
 
+type ToolCallRow = {
+  id: string;
+  tool_name: string;
+  deal_id: string | null;
+  success: boolean;
+  error_message: string | null;
+  created_at: string;
+};
+
 const MCP_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/mcp-server`;
+
+const WRITE_TOOLS = [
+  "create_deal",
+  "update_deal",
+  "upsert_deal_person",
+  "delete_deal_person",
+  "update_memo",
+];
+
 
 function CopyButton({ value }: { value: string }) {
   const [copied, setCopied] = useState(false);
@@ -37,20 +55,54 @@ export function AIAgentsSection({ userId }: { userId?: string }) {
   const [newName, setNewName] = useState("");
   const [creating, setCreating] = useState(false);
   const [freshToken, setFreshToken] = useState<string | null>(null);
+  const [agentMode, setAgentMode] = useState(false);
+  const [savingMode, setSavingMode] = useState(false);
+  const [calls, setCalls] = useState<ToolCallRow[]>([]);
 
   const refresh = async () => {
     if (!userId) return;
     setLoading(true);
-    const { data, error } = await supabase
-      .from("mcp_access_tokens")
-      .select("id, name, token_prefix, created_at, last_used_at, revoked_at")
-      .order("created_at", { ascending: false });
-    if (error) toast.error(error.message);
-    setTokens((data ?? []) as TokenRow[]);
+    const [tokenRes, settingsRes, callsRes] = await Promise.all([
+      supabase
+        .from("mcp_access_tokens")
+        .select("id, name, token_prefix, created_at, last_used_at, revoked_at")
+        .order("created_at", { ascending: false }),
+      supabase
+        .from("user_settings")
+        .select("agent_mode_enabled")
+        .eq("user_id", userId)
+        .maybeSingle(),
+      supabase
+        .from("mcp_tool_calls")
+        .select("id, tool_name, deal_id, success, error_message, created_at")
+        .order("created_at", { ascending: false })
+        .limit(20),
+    ]);
+    if (tokenRes.error) toast.error(tokenRes.error.message);
+    setTokens((tokenRes.data ?? []) as TokenRow[]);
+    setAgentMode(Boolean((settingsRes.data as any)?.agent_mode_enabled));
+    setCalls((callsRes.data ?? []) as ToolCallRow[]);
     setLoading(false);
   };
 
   useEffect(() => { refresh(); }, [userId]);
+
+  const toggleAgentMode = async (next: boolean) => {
+    if (!userId) return;
+    setSavingMode(true);
+    setAgentMode(next);
+    const { error } = await supabase
+      .from("user_settings")
+      .upsert({ user_id: userId, agent_mode_enabled: next } as any, { onConflict: "user_id" });
+    setSavingMode(false);
+    if (error) {
+      setAgentMode(!next);
+      toast.error(error.message);
+      return;
+    }
+    toast.success(next ? "Agent Mode enabled — agents can now write" : "Agent Mode disabled — read-only");
+  };
+
 
   const createToken = async () => {
     if (!newName.trim() || !userId) return;
@@ -107,6 +159,51 @@ export function AIAgentsSection({ userId }: { userId?: string }) {
         Let AI agents like Claude Desktop, Cursor, or ChatGPT call your EasyVC workspace.
         Generate a personal access token below and paste it into your agent's MCP config.
       </p>
+
+      {/* Agent Mode */}
+      <div className="rounded-md border border-border bg-card p-4 mb-4">
+        <div className="flex items-start justify-between gap-4">
+          <div className="min-w-0">
+            <p className="text-xs font-medium text-foreground mb-1 flex items-center gap-1">
+              <PenLine className="h-3.5 w-3.5" /> Agent Mode (write access)
+            </p>
+            <p className="text-xs text-muted-foreground max-w-xl">
+              Default mode is read-only. Turn this on to let your own agent write research back into
+              EasyVC — create and update deals, founder profiles, and memo drafts. Every write is
+              logged below.
+            </p>
+          </div>
+          <button
+            onClick={() => toggleAgentMode(!agentMode)}
+            disabled={savingMode || !userId}
+            className={`relative inline-flex h-5 w-9 shrink-0 rounded-full border-2 border-transparent transition-colors disabled:opacity-50 ${
+              agentMode ? "bg-primary" : "bg-muted"
+            }`}
+            aria-label="Toggle Agent Mode"
+          >
+            <span
+              className={`pointer-events-none inline-block h-4 w-4 rounded-full bg-card shadow-sm transition-transform ${
+                agentMode ? "translate-x-4" : "translate-x-0"
+              }`}
+            />
+          </button>
+        </div>
+        <div className="mt-3 flex flex-wrap gap-1.5">
+          {WRITE_TOOLS.map((t) => (
+            <code
+              key={t}
+              className={`rounded px-1.5 py-0.5 text-[11px] border ${
+                agentMode
+                  ? "border-primary/30 bg-primary/5 text-foreground"
+                  : "border-border bg-muted/40 text-muted-foreground line-through"
+              }`}
+            >
+              {t}
+            </code>
+          ))}
+        </div>
+      </div>
+
 
       {/* Server URL */}
       <div className="rounded-md border border-border bg-muted/30 p-3 mb-4">
@@ -206,6 +303,38 @@ export function AIAgentsSection({ userId }: { userId?: string }) {
           no token needed.
         </p>
       </div>
+
+      {/* Agent activity log */}
+      <div className="rounded-md border border-border bg-card p-4 mt-4">
+        <p className="text-xs font-medium text-foreground mb-3 flex items-center gap-1">
+          <History className="h-3.5 w-3.5" /> Recent agent writes
+        </p>
+        {loading ? (
+          <p className="text-xs text-muted-foreground">Loading…</p>
+        ) : calls.length === 0 ? (
+          <p className="text-xs text-muted-foreground">No agent writes yet.</p>
+        ) : (
+          <ul className="space-y-1.5">
+            {calls.map((c) => (
+              <li key={c.id} className="flex items-start justify-between gap-3 text-xs">
+                <div className="min-w-0">
+                  <code className="text-foreground">{c.tool_name}</code>
+                  {c.deal_id && (
+                    <span className="text-muted-foreground"> · deal {c.deal_id.slice(0, 8)}</span>
+                  )}
+                  {!c.success && c.error_message && (
+                    <p className="text-destructive truncate">{c.error_message}</p>
+                  )}
+                </div>
+                <span className="shrink-0 text-muted-foreground">
+                  {c.success ? "ok" : "failed"} · {new Date(c.created_at).toLocaleString()}
+                </span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+
     </section>
   );
 }

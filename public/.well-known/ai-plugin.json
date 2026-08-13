@@ -3,7 +3,7 @@
   "name_for_human": "EasyVC",
   "name_for_model": "easyvc",
   "description_for_human": "Autonomous OS for VC analysts — ingest deal flow, run research, and draft investment memos.",
-  "description_for_model": "EasyVC exposes tools to list, search, and read venture capital deals from the authenticated user's workspace; ingest new deals from URLs, decks, or DocSend links; run deep research on companies and founders; and generate investment memos exported to Google Drive. Use the MCP server endpoint for tool access.",
+  "description_for_model": "EasyVC exposes MCP tools to list, search, and read venture capital deals, founder profiles, and extracted deck content from the authenticated user's workspace (list_deals, get_deal, search_deals, get_deal_context). When the workspace owner enables Agent Mode, additional write tools become available so an external agent can record its own research: create_deal, update_deal, upsert_deal_person, delete_deal_person, and update_memo. Call get_agent_mode to check whether write access is enabled. Authenticate with a bearer personal access token or via OAuth 2.1.",
   "auth": {
     "type": "user_http",
     "authorization_type": "bearer"

@@ -148,8 +148,164 @@ const TOOLS = [
   },
 ];
 
+// Write tools — only exposed when the user has Agent Mode enabled.
+const WRITE_TOOLS = [
+  {
+    name: "create_deal",
+    description:
+      "Create a new deal in the user's EasyVC workspace. Requires Agent Mode. Use when your own research surfaced a company worth tracking.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        name: { type: "string", description: "Company name" },
+        stage: { type: "string" },
+        sector: { type: "string" },
+        status: { type: "string", description: "Pipeline status (default: inbox)" },
+        website: { type: "string" },
+        linkedin_url: { type: "string" },
+        crunchbase_url: { type: "string" },
+        ask_amount: { type: "string" },
+        valuation: { type: "string" },
+        revenue: { type: "string" },
+        growth: { type: "string" },
+        nrr: { type: "string" },
+        team_size: { type: "string" },
+        funding_total: { type: "string" },
+        last_funding_round: { type: "string" },
+        num_employees: { type: "string" },
+        investors: { type: "string" },
+        memo_draft: { type: "string", description: "Initial memo text or research notes" },
+      },
+      required: ["name"],
+    },
+  },
+  {
+    name: "update_deal",
+    description:
+      "Update fields on an existing deal (metrics, links, stage, status, funding data). Requires Agent Mode. Only provided fields change.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        deal_id: { type: "string" },
+        name: { type: "string" },
+        stage: { type: "string" },
+        sector: { type: "string" },
+        status: { type: "string" },
+        website: { type: "string" },
+        linkedin_url: { type: "string" },
+        crunchbase_url: { type: "string" },
+        ask_amount: { type: "string" },
+        valuation: { type: "string" },
+        revenue: { type: "string" },
+        growth: { type: "string" },
+        nrr: { type: "string" },
+        team_size: { type: "string" },
+        funding_total: { type: "string" },
+        last_funding_round: { type: "string" },
+        num_employees: { type: "string" },
+        investors: { type: "string" },
+      },
+      required: ["deal_id"],
+    },
+  },
+  {
+    name: "upsert_deal_person",
+    description:
+      "Add or update a founder / key person on a deal (name, title, LinkedIn URL). Requires Agent Mode. Matches an existing person by name on the same deal.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        deal_id: { type: "string" },
+        name: { type: "string" },
+        title: { type: "string" },
+        linkedin_url: { type: "string" },
+      },
+      required: ["deal_id", "name"],
+    },
+  },
+  {
+    name: "delete_deal_person",
+    description: "Remove a key person from a deal by person id. Requires Agent Mode.",
+    inputSchema: {
+      type: "object",
+      properties: { person_id: { type: "string" } },
+      required: ["person_id"],
+    },
+  },
+  {
+    name: "update_memo",
+    description:
+      "Write or amend the investment memo draft for a deal. Requires Agent Mode. Use mode=append to add to the existing memo instead of replacing it.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        deal_id: { type: "string" },
+        memo: { type: "string", description: "Memo markdown" },
+        mode: { type: "string", enum: ["replace", "append"], default: "replace" },
+      },
+      required: ["deal_id", "memo"],
+    },
+  },
+  {
+    name: "get_agent_mode",
+    description:
+      "Check whether Agent Mode (write access) is enabled for the authenticated user, and list which write tools are available.",
+    inputSchema: { type: "object", properties: {} },
+  },
+];
+
+const DEAL_WRITE_FIELDS = [
+  "name", "stage", "sector", "status", "website", "linkedin_url", "crunchbase_url",
+  "ask_amount", "valuation", "revenue", "growth", "nrr", "team_size",
+  "funding_total", "last_funding_round", "num_employees", "investors", "memo_draft",
+];
+
+function pickDealFields(args: any): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const key of DEAL_WRITE_FIELDS) {
+    if (args?.[key] !== undefined && args[key] !== null && args[key] !== "") out[key] = args[key];
+  }
+  return out;
+}
+
+async function isAgentModeEnabled(userId: string): Promise<boolean> {
+  const { data } = await admin
+    .from("user_settings")
+    .select("agent_mode_enabled")
+    .eq("user_id", userId)
+    .maybeSingle();
+  return Boolean((data as any)?.agent_mode_enabled);
+}
+
+async function logToolCall(
+  userId: string,
+  toolName: string,
+  args: any,
+  success: boolean,
+  errorMessage?: string,
+) {
+  try {
+    await admin.from("mcp_tool_calls").insert({
+      user_id: userId,
+      tool_name: toolName,
+      deal_id: typeof args?.deal_id === "string" ? args.deal_id : null,
+      arguments: args ?? {},
+      success,
+      error_message: errorMessage ?? null,
+    } as any);
+  } catch (_) { /* logging must never break a tool call */ }
+}
+
+async function assertOwnedDeal(dealId: string, userId: string) {
+  const { data } = await admin.from("deals")
+    .select("id, memo_draft").eq("id", dealId).eq("user_id", userId).maybeSingle();
+  if (!data) throw new Error("Deal not found");
+  return data as any;
+}
+
 // ---------------- tool handlers ----------------
 async function runTool(name: string, args: any, userId: string) {
+
   switch (name) {
     case "list_deals": {
       let q = admin.from("deals").select("id, name, stage, sector, status, ask_amount, valuation, revenue, growth, website, created_at")
@@ -206,10 +362,123 @@ async function runTool(name: string, args: any, userId: string) {
         .slice(0, maxChars);
       return { deal_id: id, deal_name: deal.name, text: combined, truncated: combined.length >= maxChars };
     }
+
+    // ---------- write tools (Agent Mode) ----------
+    case "get_agent_mode": {
+      const enabled = await isAgentModeEnabled(userId);
+      return {
+        agent_mode_enabled: enabled,
+        write_tools: enabled ? WRITE_TOOLS.map((t) => t.name).filter((n) => n !== "get_agent_mode") : [],
+        hint: enabled
+          ? "Write access is on."
+          : "Write access is off. The workspace owner can enable Agent Mode in EasyVC Settings → AI Agents.",
+      };
+    }
+    case "create_deal":
+    case "update_deal":
+    case "upsert_deal_person":
+    case "delete_deal_person":
+    case "update_memo": {
+      if (!(await isAgentModeEnabled(userId))) {
+        await logToolCall(userId, name, args, false, "Agent Mode disabled");
+        throw new Error(
+          "Agent Mode is disabled for this workspace. Enable it in EasyVC Settings → AI Agents to allow write access.",
+        );
+      }
+      try {
+        const out = await runWriteTool(name, args, userId);
+        await logToolCall(userId, name, args, true);
+        return out;
+      } catch (err: any) {
+        await logToolCall(userId, name, args, false, err?.message);
+        throw err;
+      }
+    }
+
     default:
       throw new Error(`Unknown tool: ${name}`);
   }
 }
+
+async function runWriteTool(name: string, args: any, userId: string) {
+  switch (name) {
+    case "create_deal": {
+      const dealName = String(args?.name ?? "").trim();
+      if (!dealName) throw new Error("name required");
+      const payload = {
+        ...pickDealFields(args),
+        name: dealName,
+        user_id: userId,
+        source: "agent",
+        status: args?.status ?? "inbox",
+        stage: args?.stage ?? "Unknown",
+        sector: args?.sector ?? "Unknown",
+        deep_research_status: "skipped",
+      };
+      const { data, error } = await admin.from("deals").insert(payload as any).select("*").single();
+      if (error) throw new Error(error.message);
+      return { created: true, deal: data };
+    }
+    case "update_deal": {
+      const id = String(args?.deal_id ?? "");
+      if (!id) throw new Error("deal_id required");
+      await assertOwnedDeal(id, userId);
+      const updates = pickDealFields(args);
+      if (Object.keys(updates).length === 0) throw new Error("No updatable fields provided");
+      const { data, error } = await admin.from("deals")
+        .update({ ...updates, updated_at: new Date().toISOString() } as any)
+        .eq("id", id).eq("user_id", userId).select("*").single();
+      if (error) throw new Error(error.message);
+      return { updated: Object.keys(updates), deal: data };
+    }
+    case "upsert_deal_person": {
+      const id = String(args?.deal_id ?? "");
+      const personName = String(args?.name ?? "").trim();
+      if (!id || !personName) throw new Error("deal_id and name required");
+      await assertOwnedDeal(id, userId);
+      const { data: existing } = await admin.from("deal_people")
+        .select("id").eq("deal_id", id).eq("user_id", userId).ilike("name", personName).maybeSingle();
+      const fields: Record<string, unknown> = { name: personName };
+      if (args?.title) fields.title = args.title;
+      if (args?.linkedin_url) fields.linkedin_url = args.linkedin_url;
+      if (existing) {
+        const { data, error } = await admin.from("deal_people")
+          .update(fields as any).eq("id", (existing as any).id).select("*").single();
+        if (error) throw new Error(error.message);
+        return { action: "updated", person: data };
+      }
+      const { data, error } = await admin.from("deal_people")
+        .insert({ ...fields, deal_id: id, user_id: userId } as any).select("*").single();
+      if (error) throw new Error(error.message);
+      return { action: "created", person: data };
+    }
+    case "delete_deal_person": {
+      const personId = String(args?.person_id ?? "");
+      if (!personId) throw new Error("person_id required");
+      const { error } = await admin.from("deal_people")
+        .delete().eq("id", personId).eq("user_id", userId);
+      if (error) throw new Error(error.message);
+      return { deleted: true, person_id: personId };
+    }
+    case "update_memo": {
+      const id = String(args?.deal_id ?? "");
+      const memo = String(args?.memo ?? "");
+      if (!id || !memo) throw new Error("deal_id and memo required");
+      const deal = await assertOwnedDeal(id, userId);
+      const next = args?.mode === "append" && deal.memo_draft
+        ? `${deal.memo_draft}\n\n${memo}`
+        : memo;
+      const { error } = await admin.from("deals")
+        .update({ memo_draft: next, updated_at: new Date().toISOString() } as any)
+        .eq("id", id).eq("user_id", userId);
+      if (error) throw new Error(error.message);
+      return { updated: true, deal_id: id, mode: args?.mode ?? "replace", length: next.length };
+    }
+    default:
+      throw new Error(`Unknown write tool: ${name}`);
+  }
+}
+
 
 // ---------------- MCP JSON-RPC ----------------
 async function handleMcp(req: Request): Promise<Response> {
@@ -247,8 +516,13 @@ async function handleMcp(req: Request): Promise<Response> {
         };
       }
       if (method === "tools/list") {
-        return { jsonrpc: "2.0", id, result: { tools: TOOLS } };
+        const agentMode = await isAgentModeEnabled(auth.userId);
+        const tools = agentMode
+          ? [...TOOLS, ...WRITE_TOOLS]
+          : [...TOOLS, WRITE_TOOLS.find((t) => t.name === "get_agent_mode")!];
+        return { jsonrpc: "2.0", id, result: { tools } };
       }
+
       if (method === "tools/call") {
         const out = await runTool(params?.name, params?.arguments ?? {}, auth.userId);
         return {
@@ -472,6 +746,9 @@ Deno.serve(async (req) => {
           resource_metadata: `${FUNCTION_BASE}/.well-known/oauth-protected-resource`,
         },
         tools: TOOLS.map((t) => t.name),
+        write_tools: WRITE_TOOLS.map((t) => t.name),
+        write_tools_note: "Write tools require the workspace owner to enable Agent Mode in EasyVC Settings → AI Agents.",
+
       }, { headers: corsHeaders });
     }
 
