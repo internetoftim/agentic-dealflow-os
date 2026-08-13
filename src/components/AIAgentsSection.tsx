@@ -160,6 +160,51 @@ export function AIAgentsSection({ userId }: { userId?: string }) {
         Generate a personal access token below and paste it into your agent's MCP config.
       </p>
 
+      {/* Agent Mode */}
+      <div className="rounded-md border border-border bg-card p-4 mb-4">
+        <div className="flex items-start justify-between gap-4">
+          <div className="min-w-0">
+            <p className="text-xs font-medium text-foreground mb-1 flex items-center gap-1">
+              <PenLine className="h-3.5 w-3.5" /> Agent Mode (write access)
+            </p>
+            <p className="text-xs text-muted-foreground max-w-xl">
+              Default mode is read-only. Turn this on to let your own agent write research back into
+              EasyVC — create and update deals, founder profiles, and memo drafts. Every write is
+              logged below.
+            </p>
+          </div>
+          <button
+            onClick={() => toggleAgentMode(!agentMode)}
+            disabled={savingMode || !userId}
+            className={`relative inline-flex h-5 w-9 shrink-0 rounded-full border-2 border-transparent transition-colors disabled:opacity-50 ${
+              agentMode ? "bg-primary" : "bg-muted"
+            }`}
+            aria-label="Toggle Agent Mode"
+          >
+            <span
+              className={`pointer-events-none inline-block h-4 w-4 rounded-full bg-card shadow-sm transition-transform ${
+                agentMode ? "translate-x-4" : "translate-x-0"
+              }`}
+            />
+          </button>
+        </div>
+        <div className="mt-3 flex flex-wrap gap-1.5">
+          {WRITE_TOOLS.map((t) => (
+            <code
+              key={t}
+              className={`rounded px-1.5 py-0.5 text-[11px] border ${
+                agentMode
+                  ? "border-primary/30 bg-primary/5 text-foreground"
+                  : "border-border bg-muted/40 text-muted-foreground line-through"
+              }`}
+            >
+              {t}
+            </code>
+          ))}
+        </div>
+      </div>
+
+
       {/* Server URL */}
       <div className="rounded-md border border-border bg-muted/30 p-3 mb-4">
         <div className="flex items-center justify-between gap-2">
