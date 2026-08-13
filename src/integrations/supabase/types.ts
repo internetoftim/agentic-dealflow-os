@@ -450,6 +450,39 @@ export type Database = {
         }
         Relationships: []
       }
+      mcp_tool_calls: {
+        Row: {
+          arguments: Json | null
+          created_at: string
+          deal_id: string | null
+          error_message: string | null
+          id: string
+          success: boolean
+          tool_name: string
+          user_id: string
+        }
+        Insert: {
+          arguments?: Json | null
+          created_at?: string
+          deal_id?: string | null
+          error_message?: string | null
+          id?: string
+          success?: boolean
+          tool_name: string
+          user_id: string
+        }
+        Update: {
+          arguments?: Json | null
+          created_at?: string
+          deal_id?: string | null
+          error_message?: string | null
+          id?: string
+          success?: boolean
+          tool_name?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       profiles: {
         Row: {
           admin_notes: string | null
@@ -586,6 +619,7 @@ export type Database = {
       }
       user_settings: {
         Row: {
+          agent_mode_enabled: boolean
           ai_model: string
           created_at: string
           deep_research_provider: string
@@ -607,6 +641,7 @@ export type Database = {
           user_id: string
         }
         Insert: {
+          agent_mode_enabled?: boolean
           ai_model?: string
           created_at?: string
           deep_research_provider?: string
@@ -628,6 +663,7 @@ export type Database = {
           user_id: string
         }
         Update: {
+          agent_mode_enabled?: boolean
           ai_model?: string
           created_at?: string
           deep_research_provider?: string
