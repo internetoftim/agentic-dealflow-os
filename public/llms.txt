@@ -45,9 +45,12 @@ Founders and agents acting for founders can submit a deal directly, with no acco
 - **MCP server:** https://fbiigltzcxkqjjadqzgl.supabase.co/functions/v1/mcp-server
   - Model Context Protocol endpoint usable from Claude Desktop/Code, Cursor, Codex, and AI SDK clients.
   - Auth: personal access token (bearer) generated in EasyVC → Settings → AI Agents, or OAuth 2.1 consent at https://www.onepointsix.ai/mcp/authorize
-  - Tools: list deals, search deals, get deal context, ingest a URL or deck, run deep research, generate an investment memo.
+  - Read tools (always available): `list_deals`, `get_deal`, `search_deals`, `get_deal_context`, `get_agent_mode`.
+  - Write tools (require Agent Mode, off by default): `create_deal`, `update_deal`, `upsert_deal_person`, `delete_deal_person`, `update_memo`.
+  - Call `get_agent_mode` first to check whether write access is enabled; the workspace owner turns it on in Settings → AI Agents. All writes are audit-logged.
 - **Plugin manifest:** https://www.onepointsix.ai/.well-known/ai-plugin.json
-- Agent-first design: EasyVC can act as the system of record while the user's own agent (and tokens) does the research and writes findings back — e.g. an agent finds a founder's LinkedIn and records it into the EasyVC deal workspace.
+- Agent-first design: EasyVC is the system of record while the user's own agent (and tokens) does the research and writes findings back — e.g. an agent finds a founder's LinkedIn, then records it on the EasyVC deal with `upsert_deal_person`.
+
 
 ## Stack
 React 18 + Vite + Tailwind frontend; Supabase (Postgres, Auth, Storage, Edge Functions) backend; Google Workspace (Gmail + Drive) integration; multi-model AI (OpenAI GPT, Gemini, Firecrawl, local WebGPU inference); Playwright capture service on Cloud Run for DocSend/Papermark.
