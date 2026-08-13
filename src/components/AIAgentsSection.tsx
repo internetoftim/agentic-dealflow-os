@@ -55,20 +55,54 @@ export function AIAgentsSection({ userId }: { userId?: string }) {
   const [newName, setNewName] = useState("");
   const [creating, setCreating] = useState(false);
   const [freshToken, setFreshToken] = useState<string | null>(null);
+  const [agentMode, setAgentMode] = useState(false);
+  const [savingMode, setSavingMode] = useState(false);
+  const [calls, setCalls] = useState<ToolCallRow[]>([]);
 
   const refresh = async () => {
     if (!userId) return;
     setLoading(true);
-    const { data, error } = await supabase
-      .from("mcp_access_tokens")
-      .select("id, name, token_prefix, created_at, last_used_at, revoked_at")
-      .order("created_at", { ascending: false });
-    if (error) toast.error(error.message);
-    setTokens((data ?? []) as TokenRow[]);
+    const [tokenRes, settingsRes, callsRes] = await Promise.all([
+      supabase
+        .from("mcp_access_tokens")
+        .select("id, name, token_prefix, created_at, last_used_at, revoked_at")
+        .order("created_at", { ascending: false }),
+      supabase
+        .from("user_settings")
+        .select("agent_mode_enabled")
+        .eq("user_id", userId)
+        .maybeSingle(),
+      supabase
+        .from("mcp_tool_calls")
+        .select("id, tool_name, deal_id, success, error_message, created_at")
+        .order("created_at", { ascending: false })
+        .limit(20),
+    ]);
+    if (tokenRes.error) toast.error(tokenRes.error.message);
+    setTokens((tokenRes.data ?? []) as TokenRow[]);
+    setAgentMode(Boolean((settingsRes.data as any)?.agent_mode_enabled));
+    setCalls((callsRes.data ?? []) as ToolCallRow[]);
     setLoading(false);
   };
 
   useEffect(() => { refresh(); }, [userId]);
+
+  const toggleAgentMode = async (next: boolean) => {
+    if (!userId) return;
+    setSavingMode(true);
+    setAgentMode(next);
+    const { error } = await supabase
+      .from("user_settings")
+      .upsert({ user_id: userId, agent_mode_enabled: next } as any, { onConflict: "user_id" });
+    setSavingMode(false);
+    if (error) {
+      setAgentMode(!next);
+      toast.error(error.message);
+      return;
+    }
+    toast.success(next ? "Agent Mode enabled — agents can now write" : "Agent Mode disabled — read-only");
+  };
+
 
   const createToken = async () => {
     if (!newName.trim() || !userId) return;
