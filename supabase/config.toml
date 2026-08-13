@@ -51,3 +51,6 @@ verify_jwt = false
 [functions.list-conversions]
 verify_jwt = false
 
+
+[functions.sync-inbox-attachments]
+verify_jwt = false

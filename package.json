@@ -10,7 +10,8 @@
     "lint": "eslint .",
     "preview": "vite preview",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "e2e:attachments": "bun scripts/attachment-pipeline-e2e.ts"
   },
   "dependencies": {
     "@hookform/resolvers": "^3.10.0",
