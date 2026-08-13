@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Bot, Copy, Plus, Trash2, Loader2, Check } from "lucide-react";
+import { Bot, Copy, Plus, Trash2, Loader2, Check, PenLine, History } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 
@@ -12,7 +12,25 @@ type TokenRow = {
   revoked_at: string | null;
 };
 
+type ToolCallRow = {
+  id: string;
+  tool_name: string;
+  deal_id: string | null;
+  success: boolean;
+  error_message: string | null;
+  created_at: string;
+};
+
 const MCP_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/mcp-server`;
+
+const WRITE_TOOLS = [
+  "create_deal",
+  "update_deal",
+  "upsert_deal_person",
+  "delete_deal_person",
+  "update_memo",
+];
+
 
 function CopyButton({ value }: { value: string }) {
   const [copied, setCopied] = useState(false);
