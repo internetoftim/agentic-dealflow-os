@@ -516,7 +516,13 @@ async function handleMcp(req: Request): Promise<Response> {
         };
       }
       if (method === "tools/list") {
-        return { jsonrpc: "2.0", id, result: { tools: TOOLS } };
+        const agentMode = await isAgentModeEnabled(auth.userId);
+        const tools = agentMode
+          ? [...TOOLS, ...WRITE_TOOLS]
+          : [...TOOLS, WRITE_TOOLS.find((t) => t.name === "get_agent_mode")!];
+        return { jsonrpc: "2.0", id, result: { tools } };
+      }
+
       }
       if (method === "tools/call") {
         const out = await runTool(params?.name, params?.arguments ?? {}, auth.userId);
