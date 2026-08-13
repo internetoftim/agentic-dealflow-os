@@ -747,6 +747,9 @@ Deno.serve(async (req) => {
           resource_metadata: `${FUNCTION_BASE}/.well-known/oauth-protected-resource`,
         },
         tools: TOOLS.map((t) => t.name),
+        write_tools: WRITE_TOOLS.map((t) => t.name),
+        write_tools_note: "Write tools require the workspace owner to enable Agent Mode in EasyVC Settings → AI Agents.",
+
       }, { headers: corsHeaders });
     }
 
