@@ -362,10 +362,123 @@ async function runTool(name: string, args: any, userId: string) {
         .slice(0, maxChars);
       return { deal_id: id, deal_name: deal.name, text: combined, truncated: combined.length >= maxChars };
     }
+
+    // ---------- write tools (Agent Mode) ----------
+    case "get_agent_mode": {
+      const enabled = await isAgentModeEnabled(userId);
+      return {
+        agent_mode_enabled: enabled,
+        write_tools: enabled ? WRITE_TOOLS.map((t) => t.name).filter((n) => n !== "get_agent_mode") : [],
+        hint: enabled
+          ? "Write access is on."
+          : "Write access is off. The workspace owner can enable Agent Mode in EasyVC Settings → AI Agents.",
+      };
+    }
+    case "create_deal":
+    case "update_deal":
+    case "upsert_deal_person":
+    case "delete_deal_person":
+    case "update_memo": {
+      if (!(await isAgentModeEnabled(userId))) {
+        await logToolCall(userId, name, args, false, "Agent Mode disabled");
+        throw new Error(
+          "Agent Mode is disabled for this workspace. Enable it in EasyVC Settings → AI Agents to allow write access.",
+        );
+      }
+      try {
+        const out = await runWriteTool(name, args, userId);
+        await logToolCall(userId, name, args, true);
+        return out;
+      } catch (err: any) {
+        await logToolCall(userId, name, args, false, err?.message);
+        throw err;
+      }
+    }
+
     default:
       throw new Error(`Unknown tool: ${name}`);
   }
 }
+
+async function runWriteTool(name: string, args: any, userId: string) {
+  switch (name) {
+    case "create_deal": {
+      const dealName = String(args?.name ?? "").trim();
+      if (!dealName) throw new Error("name required");
+      const payload = {
+        ...pickDealFields(args),
+        name: dealName,
+        user_id: userId,
+        source: "agent",
+        status: args?.status ?? "inbox",
+        stage: args?.stage ?? "Unknown",
+        sector: args?.sector ?? "Unknown",
+        deep_research_status: "skipped",
+      };
+      const { data, error } = await admin.from("deals").insert(payload as any).select("*").single();
+      if (error) throw new Error(error.message);
+      return { created: true, deal: data };
+    }
+    case "update_deal": {
+      const id = String(args?.deal_id ?? "");
+      if (!id) throw new Error("deal_id required");
+      await assertOwnedDeal(id, userId);
+      const updates = pickDealFields(args);
+      if (Object.keys(updates).length === 0) throw new Error("No updatable fields provided");
+      const { data, error } = await admin.from("deals")
+        .update({ ...updates, updated_at: new Date().toISOString() } as any)
+        .eq("id", id).eq("user_id", userId).select("*").single();
+      if (error) throw new Error(error.message);
+      return { updated: Object.keys(updates), deal: data };
+    }
+    case "upsert_deal_person": {
+      const id = String(args?.deal_id ?? "");
+      const personName = String(args?.name ?? "").trim();
+      if (!id || !personName) throw new Error("deal_id and name required");
+      await assertOwnedDeal(id, userId);
+      const { data: existing } = await admin.from("deal_people")
+        .select("id").eq("deal_id", id).eq("user_id", userId).ilike("name", personName).maybeSingle();
+      const fields: Record<string, unknown> = { name: personName };
+      if (args?.title) fields.title = args.title;
+      if (args?.linkedin_url) fields.linkedin_url = args.linkedin_url;
+      if (existing) {
+        const { data, error } = await admin.from("deal_people")
+          .update(fields as any).eq("id", (existing as any).id).select("*").single();
+        if (error) throw new Error(error.message);
+        return { action: "updated", person: data };
+      }
+      const { data, error } = await admin.from("deal_people")
+        .insert({ ...fields, deal_id: id, user_id: userId } as any).select("*").single();
+      if (error) throw new Error(error.message);
+      return { action: "created", person: data };
+    }
+    case "delete_deal_person": {
+      const personId = String(args?.person_id ?? "");
+      if (!personId) throw new Error("person_id required");
+      const { error } = await admin.from("deal_people")
+        .delete().eq("id", personId).eq("user_id", userId);
+      if (error) throw new Error(error.message);
+      return { deleted: true, person_id: personId };
+    }
+    case "update_memo": {
+      const id = String(args?.deal_id ?? "");
+      const memo = String(args?.memo ?? "");
+      if (!id || !memo) throw new Error("deal_id and memo required");
+      const deal = await assertOwnedDeal(id, userId);
+      const next = args?.mode === "append" && deal.memo_draft
+        ? `${deal.memo_draft}\n\n${memo}`
+        : memo;
+      const { error } = await admin.from("deals")
+        .update({ memo_draft: next, updated_at: new Date().toISOString() } as any)
+        .eq("id", id).eq("user_id", userId);
+      if (error) throw new Error(error.message);
+      return { updated: true, deal_id: id, mode: args?.mode ?? "replace", length: next.length };
+    }
+    default:
+      throw new Error(`Unknown write tool: ${name}`);
+  }
+}
+
 
 // ---------------- MCP JSON-RPC ----------------
 async function handleMcp(req: Request): Promise<Response> {
