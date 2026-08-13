@@ -303,6 +303,38 @@ export function AIAgentsSection({ userId }: { userId?: string }) {
           no token needed.
         </p>
       </div>
+
+      {/* Agent activity log */}
+      <div className="rounded-md border border-border bg-card p-4 mt-4">
+        <p className="text-xs font-medium text-foreground mb-3 flex items-center gap-1">
+          <History className="h-3.5 w-3.5" /> Recent agent writes
+        </p>
+        {loading ? (
+          <p className="text-xs text-muted-foreground">Loading…</p>
+        ) : calls.length === 0 ? (
+          <p className="text-xs text-muted-foreground">No agent writes yet.</p>
+        ) : (
+          <ul className="space-y-1.5">
+            {calls.map((c) => (
+              <li key={c.id} className="flex items-start justify-between gap-3 text-xs">
+                <div className="min-w-0">
+                  <code className="text-foreground">{c.tool_name}</code>
+                  {c.deal_id && (
+                    <span className="text-muted-foreground"> · deal {c.deal_id.slice(0, 8)}</span>
+                  )}
+                  {!c.success && c.error_message && (
+                    <p className="text-destructive truncate">{c.error_message}</p>
+                  )}
+                </div>
+                <span className="shrink-0 text-muted-foreground">
+                  {c.success ? "ok" : "failed"} · {new Date(c.created_at).toLocaleString()}
+                </span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+
     </section>
   );
 }
