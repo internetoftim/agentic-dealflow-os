@@ -419,7 +419,7 @@ Deno.serve(async (req) => {
         supabaseServiceKey,
       supabaseUrl,
       url,
-      userId: user.id,
+      userId: ownerId,
     }).catch(async (error) => {
       const message = error instanceof Error ? error.message : "Unknown capture error";
       console.error(`run-docsend-capture background error for job ${captureJob.id}:`, error);
