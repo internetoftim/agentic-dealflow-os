@@ -51,3 +51,13 @@ verify_jwt = false
 [functions.list-conversions]
 verify_jwt = false
 
+
+# Publicly invoked — founders submit without a session; the function does its
+# own validation + rate limiting. Without this entry a CLI deploy would re-enable
+# JWT verification and 401 every submission.
+[functions.public-intake]
+verify_jwt = false
+
+# Called by Google push notifications (no Supabase JWT).
+[functions.gmail-webhook]
+verify_jwt = false

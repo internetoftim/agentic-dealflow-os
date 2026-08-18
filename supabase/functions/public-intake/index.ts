@@ -159,13 +159,28 @@ Deno.serve(async (req) => {
     // No deck and no DocSend URL ⇒ this is a "lead-only" submission; skip all agents.
     const hasProcessableSource = Boolean(file) || Boolean(docsendUrl);
 
+    // Match the in-app uploader's per-user concurrency guard: if a deck job is
+    // already running, enqueue this one; process-deck drains the queue when the
+    // active job finishes (or fails).
+    const PROCESSING_STATUSES = ["uploading", "converting", "compressing", "scraping", "extracting", "searching-website", "syncing"];
+    let hasActiveJob = false;
+    if (file) {
+      const { data: activeDeals } = await adminClient
+        .from("deals")
+        .select("id")
+        .eq("user_id", userId)
+        .in("status", PROCESSING_STATUSES)
+        .limit(1);
+      hasActiveJob = (activeDeals?.length ?? 0) > 0;
+    }
+
     // Create deal record
     const dealInsert: Record<string, unknown> = {
       user_id: userId,
       name: companyName,
       source: "inbound",
       auto_ingested: true,
-      status: file ? "uploading" : "inbox",
+      status: file ? (hasActiveJob ? "queued" : "uploading") : "inbox",
       memo_draft: memoDraft,
       // If there is nothing to process, mark deep research as skipped so the
       // workspace UI does not show a perpetually "pending" agent step.
@@ -221,15 +236,21 @@ Deno.serve(async (req) => {
         original_size: `${(file.size / (1024 * 1024)).toFixed(1)} MB`,
       } as never);
 
-      // Fire process-deck (fire-and-forget)
-      fetch(`${supabaseUrl}/functions/v1/process-deck`, {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${supabaseServiceKey}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ dealId: deal.id, storagePath }),
-      }).catch((e) => console.warn("Failed to trigger process-deck:", e));
+      if (hasActiveJob) {
+        // Queued: file + source are stored; process-deck's processNextQueued
+        // will pick this deal up when the active job completes.
+        console.log(`Public intake: deal ${deal.id} queued behind an active job`);
+      } else {
+        // Fire process-deck (fire-and-forget)
+        fetch(`${supabaseUrl}/functions/v1/process-deck`, {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${supabaseServiceKey}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ dealId: deal.id, storagePath }),
+        }).catch((e) => console.warn("Failed to trigger process-deck:", e));
+      }
     } else if (docsendUrl) {
       // No file, but DocSend/Papermark link provided — kick off link capture
       fetch(`${supabaseUrl}/functions/v1/run-docsend-capture`, {

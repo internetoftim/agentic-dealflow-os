@@ -337,6 +337,17 @@ Deno.serve(async (req) => {
     return new Response(null, { headers: corsHeaders });
   }
 
+  // Populated once the job's identity is resolved, so the catch block can
+  // mark the deal as failed and release the per-user queue lock.
+  let failCtx: {
+    // deno-lint-ignore no-explicit-any -- matches helper signatures in this file
+    adminClient: any;
+    dealId: string;
+    userId: string;
+    supabaseUrl: string;
+    supabaseServiceKey: string;
+  } | null = null;
+
   try {
     const authHeader = req.headers.get("Authorization");
     if (!authHeader) {
@@ -397,6 +408,8 @@ Deno.serve(async (req) => {
       }
       userId = dealRecord.user_id;
     }
+
+    failCtx = { adminClient, dealId, userId, supabaseUrl, supabaseServiceKey };
 
     // When resuming, clear the paused_at_step
     if (resumeFrom) {
@@ -1006,6 +1019,32 @@ Deno.serve(async (req) => {
   } catch (error) {
     console.error("process-deck error:", error);
     const message = error instanceof Error ? error.message : "Unknown error";
+    // A crashed job must not leave the deal stuck mid-pipeline, and must not
+    // hold the per-user queue lock forever: mark it failed (unless the user
+    // cancelled it) and start the next queued deal.
+    if (failCtx) {
+      try {
+        const { data: current } = await failCtx.adminClient
+          .from("deals")
+          .select("status")
+          .eq("id", failCtx.dealId)
+          .single();
+        if (current && current.status !== "cancelled") {
+          await failCtx.adminClient
+            .from("deals")
+            .update({ status: "error", updated_at: new Date().toISOString() })
+            .eq("id", failCtx.dealId);
+        }
+        await processNextQueued(
+          failCtx.adminClient,
+          failCtx.userId,
+          failCtx.supabaseUrl,
+          failCtx.supabaseServiceKey
+        );
+      } catch (cleanupError) {
+        console.error("process-deck failure cleanup failed:", cleanupError);
+      }
+    }
     return new Response(JSON.stringify({ error: message }), {
       status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
