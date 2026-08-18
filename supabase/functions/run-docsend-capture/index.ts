@@ -367,12 +367,13 @@ Deno.serve(async (req) => {
       });
     }
 
-    const { data: deal, error: dealError } = await adminClient
+    let dealQuery = adminClient
       .from("deals")
-      .select("id, source")
-      .eq("id", dealId)
-      .eq("user_id", user.id)
-      .single();
+      .select("id, source, user_id")
+      .eq("id", dealId);
+    if (actorId) dealQuery = dealQuery.eq("user_id", actorId);
+
+    const { data: deal, error: dealError } = await dealQuery.single();
 
     if (dealError || !deal) {
       return new Response(JSON.stringify({ error: "Deal not found" }), {
@@ -381,10 +382,12 @@ Deno.serve(async (req) => {
       });
     }
 
+    const ownerId = actorId ?? (deal as { user_id: string }).user_id;
+
     const captureJob = await prepareCaptureJob(
       adminClient,
       dealId,
-      user.id,
+      ownerId,
       url,
       requestBody?.jobId?.trim(),
     );
