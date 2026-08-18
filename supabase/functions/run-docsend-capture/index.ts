@@ -328,20 +328,9 @@ Deno.serve(async (req) => {
     const captureServiceApiKey = Deno.env.get("DOCSEND_CAPTURE_SERVICE_API_KEY");
 
     const adminClient = createClient(supabaseUrl, supabaseServiceKey);
-    const userClient = createClient(supabaseUrl, supabaseAnonKey, {
-      global: { headers: { Authorization: authHeader } },
-    });
 
-    const {
-      data: { user },
-      error: userError,
-    } = await userClient.auth.getUser();
-    if (userError || !user) {
-      return new Response(JSON.stringify({ error: "Unauthorized" }), {
-        status: 401,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
+    const bearer = authHeader.replace(/^Bearer\s+/i, "").trim();
+    const isInternalCall = bearer === supabaseServiceKey;
 
     const requestBody = (await req.json()) as RunDocsendCaptureRequest;
     const dealId = requestBody?.dealId?.trim();
@@ -349,6 +338,27 @@ Deno.serve(async (req) => {
     const requestedMaxPages = typeof requestBody?.maxPages === "number" ? requestBody.maxPages : DEFAULT_MAX_PAGES;
     const maxPages = Math.max(1, Math.min(100, requestedMaxPages));
     const gateEmail = requestBody?.gateEmail ?? null;
+
+    let actorId: string | null = null;
+    if (isInternalCall) {
+      // Trusted server-to-server call (e.g. public-intake); owner comes from the deal row.
+      actorId = null;
+    } else {
+      const userClient = createClient(supabaseUrl, supabaseAnonKey, {
+        global: { headers: { Authorization: authHeader } },
+      });
+      const {
+        data: { user },
+        error: userError,
+      } = await userClient.auth.getUser();
+      if (userError || !user) {
+        return new Response(JSON.stringify({ error: "Unauthorized" }), {
+          status: 401,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+      actorId = user.id;
+    }
 
     if (!dealId || !url) {
       return new Response(JSON.stringify({ error: "Missing dealId or url" }), {
