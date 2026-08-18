@@ -328,20 +328,9 @@ Deno.serve(async (req) => {
     const captureServiceApiKey = Deno.env.get("DOCSEND_CAPTURE_SERVICE_API_KEY");
 
     const adminClient = createClient(supabaseUrl, supabaseServiceKey);
-    const userClient = createClient(supabaseUrl, supabaseAnonKey, {
-      global: { headers: { Authorization: authHeader } },
-    });
 
-    const {
-      data: { user },
-      error: userError,
-    } = await userClient.auth.getUser();
-    if (userError || !user) {
-      return new Response(JSON.stringify({ error: "Unauthorized" }), {
-        status: 401,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
+    const bearer = authHeader.replace(/^Bearer\s+/i, "").trim();
+    const isInternalCall = bearer === supabaseServiceKey;
 
     const requestBody = (await req.json()) as RunDocsendCaptureRequest;
     const dealId = requestBody?.dealId?.trim();
@@ -350,6 +339,27 @@ Deno.serve(async (req) => {
     const maxPages = Math.max(1, Math.min(100, requestedMaxPages));
     const gateEmail = requestBody?.gateEmail ?? null;
 
+    let actorId: string | null = null;
+    if (isInternalCall) {
+      // Trusted server-to-server call (e.g. public-intake); owner comes from the deal row.
+      actorId = null;
+    } else {
+      const userClient = createClient(supabaseUrl, supabaseAnonKey, {
+        global: { headers: { Authorization: authHeader } },
+      });
+      const {
+        data: { user },
+        error: userError,
+      } = await userClient.auth.getUser();
+      if (userError || !user) {
+        return new Response(JSON.stringify({ error: "Unauthorized" }), {
+          status: 401,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+      actorId = user.id;
+    }
+
     if (!dealId || !url) {
       return new Response(JSON.stringify({ error: "Missing dealId or url" }), {
         status: 400,
@@ -357,12 +367,13 @@ Deno.serve(async (req) => {
       });
     }
 
-    const { data: deal, error: dealError } = await adminClient
+    let dealQuery = adminClient
       .from("deals")
-      .select("id, source")
-      .eq("id", dealId)
-      .eq("user_id", user.id)
-      .single();
+      .select("id, source, user_id")
+      .eq("id", dealId);
+    if (actorId) dealQuery = dealQuery.eq("user_id", actorId);
+
+    const { data: deal, error: dealError } = await dealQuery.single();
 
     if (dealError || !deal) {
       return new Response(JSON.stringify({ error: "Deal not found" }), {
@@ -371,10 +382,12 @@ Deno.serve(async (req) => {
       });
     }
 
+    const ownerId = actorId ?? (deal as { user_id: string }).user_id;
+
     const captureJob = await prepareCaptureJob(
       adminClient,
       dealId,
-      user.id,
+      ownerId,
       url,
       requestBody?.jobId?.trim(),
     );
@@ -406,7 +419,7 @@ Deno.serve(async (req) => {
         supabaseServiceKey,
       supabaseUrl,
       url,
-      userId: user.id,
+      userId: ownerId,
     }).catch(async (error) => {
       const message = error instanceof Error ? error.message : "Unknown capture error";
       console.error(`run-docsend-capture background error for job ${captureJob.id}:`, error);

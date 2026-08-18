@@ -231,15 +231,21 @@ Deno.serve(async (req) => {
         body: JSON.stringify({ dealId: deal.id, storagePath }),
       }).catch((e) => console.warn("Failed to trigger process-deck:", e));
     } else if (docsendUrl) {
-      // No file, but DocSend link provided — kick off link capture
-      fetch(`${supabaseUrl}/functions/v1/ingest-relay`, {
+      // No file, but DocSend/Papermark link provided — kick off link capture
+      fetch(`${supabaseUrl}/functions/v1/run-docsend-capture`, {
         method: "POST",
         headers: {
           Authorization: `Bearer ${supabaseServiceKey}`,
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ dealId: deal.id, url: docsendUrl, userId }),
-      }).catch((e) => console.warn("Failed to trigger ingest-relay:", e));
+        body: JSON.stringify({ dealId: deal.id, url: docsendUrl }),
+      })
+        .then(async (res) => {
+          if (!res.ok) {
+            console.error("run-docsend-capture failed:", res.status, await res.text());
+          }
+        })
+        .catch((e) => console.warn("Failed to trigger run-docsend-capture:", e));
     }
 
     console.log(
