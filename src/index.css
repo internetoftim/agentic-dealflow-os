@@ -1,80 +1,177 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Source+Serif+4:opsz,wght@8..60,400;8..60,600;8..60,700&display=swap');
 
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
+/*
+ * EasyVC design tokens — "institutional" theme.
+ *
+ * Principles:
+ *  - Ink on paper. Primary is near-black navy, not a saturated UI blue.
+ *  - One accent (brass) used sparingly: active nav, the mark, key emphasis.
+ *  - Structure comes from hairlines and spacing, not shadows or fills.
+ *  - Semantic colours are deep and desaturated — status, never decoration.
+ */
+
 @layer base {
   :root {
-    --background: 210 20% 98%;
-    --foreground: 220 20% 10%;
+    /* Paper & ink */
+    --background: 40 12% 97%;
+    --foreground: 220 16% 11%;
 
     --card: 0 0% 100%;
-    --card-foreground: 220 20% 10%;
+    --card-foreground: 220 16% 11%;
 
     --popover: 0 0% 100%;
-    --popover-foreground: 220 20% 10%;
+    --popover-foreground: 220 16% 11%;
 
-    --primary: 220 70% 50%;
-    --primary-foreground: 0 0% 100%;
+    /* Primary is ink, not a UI blue */
+    --primary: 218 32% 16%;
+    --primary-foreground: 40 20% 97%;
 
-    --secondary: 220 14% 96%;
-    --secondary-foreground: 220 20% 10%;
+    --secondary: 40 10% 94%;
+    --secondary-foreground: 220 16% 11%;
 
-    --muted: 220 14% 96%;
-    --muted-foreground: 220 10% 46%;
+    --muted: 40 10% 94%;
+    --muted-foreground: 220 8% 42%;
 
-    --accent: 220 14% 93%;
-    --accent-foreground: 220 20% 10%;
+    --accent: 40 10% 91%;
+    --accent-foreground: 220 16% 11%;
 
-    --destructive: 0 84% 60%;
-    --destructive-foreground: 0 0% 100%;
+    --destructive: 4 52% 44%;
+    --destructive-foreground: 40 20% 97%;
 
-    --border: 220 13% 91%;
-    --input: 220 13% 91%;
-    --ring: 220 70% 50%;
+    --border: 36 10% 87%;
+    --input: 36 10% 87%;
+    --ring: 218 32% 16%;
 
-    --radius: 0.5rem;
+    --radius: 0.375rem;
 
-    /* EasyVC custom tokens */
+    /* Brand accent — brass. Used sparingly. */
+    --brand: 36 46% 42%;
+    --brand-foreground: 40 20% 97%;
+    --brand-muted: 38 40% 93%;
+    --brand-subtle: 36 30% 78%;
+
+    /* Surfaces */
     --surface: 0 0% 100%;
-    --surface-foreground: 220 20% 10%;
+    --surface-foreground: 220 16% 11%;
     --surface-raised: 0 0% 100%;
-    --surface-border: 220 13% 91%;
+    --surface-sunken: 40 10% 95%;
+    --surface-border: 36 10% 87%;
 
-    --success: 142 72% 42%;
-    --success-foreground: 0 0% 100%;
-    --success-muted: 142 60% 95%;
+    /* Status — deep, desaturated */
+    --success: 152 32% 30%;
+    --success-foreground: 40 20% 97%;
+    --success-muted: 152 24% 93%;
 
-    --warning: 38 92% 50%;
-    --warning-foreground: 0 0% 100%;
-    --warning-muted: 38 90% 95%;
+    --warning: 34 58% 40%;
+    --warning-foreground: 40 20% 97%;
+    --warning-muted: 36 45% 93%;
 
-    --info: 220 70% 50%;
-    --info-foreground: 0 0% 100%;
-    --info-muted: 220 70% 96%;
+    --info: 212 30% 36%;
+    --info-foreground: 40 20% 97%;
+    --info-muted: 212 24% 93%;
 
-    --badge-purple: 262 60% 55%;
-    --badge-purple-muted: 262 60% 95%;
-    --badge-blue: 210 80% 50%;
-    --badge-blue-muted: 210 80% 95%;
-    --badge-green: 142 72% 42%;
-    --badge-green-muted: 142 60% 95%;
-    --badge-amber: 38 92% 50%;
-    --badge-amber-muted: 38 90% 95%;
+    /* Source markers — dots, not pastel pills */
+    --badge-purple: 265 26% 42%;
+    --badge-purple-muted: 265 22% 94%;
+    --badge-blue: 212 34% 40%;
+    --badge-blue-muted: 212 26% 94%;
+    --badge-green: 152 32% 30%;
+    --badge-green-muted: 152 24% 93%;
+    --badge-amber: 34 50% 40%;
+    --badge-amber-muted: 36 42% 93%;
 
-    --shadow-sm: 0 1px 2px 0 hsl(220 20% 10% / 0.04);
-    --shadow-md: 0 4px 6px -1px hsl(220 20% 10% / 0.06), 0 2px 4px -2px hsl(220 20% 10% / 0.04);
-    --shadow-lg: 0 10px 15px -3px hsl(220 20% 10% / 0.06), 0 4px 6px -4px hsl(220 20% 10% / 0.04);
+    /* Hairlines do the work; shadows barely register */
+    --shadow-sm: 0 1px 1px 0 hsl(220 16% 11% / 0.03);
+    --shadow-md: 0 1px 2px 0 hsl(220 16% 11% / 0.04), 0 2px 6px -2px hsl(220 16% 11% / 0.05);
+    --shadow-lg: 0 2px 4px -1px hsl(220 16% 11% / 0.04), 0 8px 24px -6px hsl(220 16% 11% / 0.08);
 
-    --sidebar-background: 0 0% 100%;
-    --sidebar-foreground: 220 10% 46%;
-    --sidebar-primary: 220 70% 50%;
-    --sidebar-primary-foreground: 0 0% 100%;
-    --sidebar-accent: 220 14% 96%;
-    --sidebar-accent-foreground: 220 20% 10%;
-    --sidebar-border: 220 13% 91%;
-    --sidebar-ring: 220 70% 50%;
+    --sidebar-background: 42 14% 95%;
+    --sidebar-foreground: 220 10% 38%;
+    --sidebar-primary: 218 32% 16%;
+    --sidebar-primary-foreground: 40 20% 97%;
+    --sidebar-accent: 40 12% 90%;
+    --sidebar-accent-foreground: 220 16% 11%;
+    --sidebar-border: 36 10% 86%;
+    --sidebar-ring: 36 46% 42%;
+  }
+
+  .dark {
+    --background: 220 16% 8%;
+    --foreground: 40 14% 92%;
+
+    --card: 220 14% 11%;
+    --card-foreground: 40 14% 92%;
+
+    --popover: 220 14% 11%;
+    --popover-foreground: 40 14% 92%;
+
+    --primary: 40 14% 92%;
+    --primary-foreground: 220 16% 10%;
+
+    --secondary: 220 12% 15%;
+    --secondary-foreground: 40 14% 92%;
+
+    --muted: 220 12% 15%;
+    --muted-foreground: 220 8% 60%;
+
+    --accent: 220 12% 18%;
+    --accent-foreground: 40 14% 92%;
+
+    --destructive: 4 55% 52%;
+    --destructive-foreground: 40 14% 96%;
+
+    --border: 220 10% 19%;
+    --input: 220 10% 19%;
+    --ring: 36 48% 55%;
+
+    --brand: 36 52% 58%;
+    --brand-foreground: 220 16% 10%;
+    --brand-muted: 36 28% 17%;
+    --brand-subtle: 36 30% 32%;
+
+    --surface: 220 14% 11%;
+    --surface-foreground: 40 14% 92%;
+    --surface-raised: 220 13% 13%;
+    --surface-sunken: 220 16% 9%;
+    --surface-border: 220 10% 19%;
+
+    --success: 152 36% 52%;
+    --success-foreground: 220 16% 10%;
+    --success-muted: 152 24% 16%;
+
+    --warning: 36 60% 56%;
+    --warning-foreground: 220 16% 10%;
+    --warning-muted: 36 30% 17%;
+
+    --info: 212 40% 60%;
+    --info-foreground: 220 16% 10%;
+    --info-muted: 212 26% 18%;
+
+    --badge-purple: 265 38% 68%;
+    --badge-purple-muted: 265 22% 18%;
+    --badge-blue: 212 42% 62%;
+    --badge-blue-muted: 212 26% 18%;
+    --badge-green: 152 36% 52%;
+    --badge-green-muted: 152 24% 16%;
+    --badge-amber: 36 55% 58%;
+    --badge-amber-muted: 36 28% 17%;
+
+    --shadow-sm: 0 1px 1px 0 hsl(0 0% 0% / 0.3);
+    --shadow-md: 0 1px 2px 0 hsl(0 0% 0% / 0.35), 0 2px 6px -2px hsl(0 0% 0% / 0.4);
+    --shadow-lg: 0 2px 4px -1px hsl(0 0% 0% / 0.4), 0 8px 24px -6px hsl(0 0% 0% / 0.5);
+
+    --sidebar-background: 220 16% 10%;
+    --sidebar-foreground: 220 8% 58%;
+    --sidebar-primary: 40 14% 92%;
+    --sidebar-primary-foreground: 220 16% 10%;
+    --sidebar-accent: 220 12% 16%;
+    --sidebar-accent-foreground: 40 14% 92%;
+    --sidebar-border: 220 10% 17%;
+    --sidebar-ring: 36 48% 55%;
   }
 }
 
@@ -82,9 +179,113 @@
   * {
     @apply border-border;
   }
+  html {
+    -webkit-tap-highlight-color: transparent;
+  }
   body {
     @apply bg-background text-foreground font-sans antialiased;
-    font-family: 'Inter', system-ui, -apple-system, sans-serif;
+    font-feature-settings: "cv05" 1, "cv11" 1, "ss01" 1;
+    text-rendering: optimizeLegibility;
+  }
+
+  /* Headings read as set type, not as bold body text. */
+  h1, h2, h3, h4 {
+    @apply tracking-tight;
+    font-feature-settings: "cv05" 1, "cv11" 1, "ss01" 1;
+  }
+
+  /* Figures line up in columns. */
+  .tabular,
+  th, td {
+    font-variant-numeric: tabular-nums;
+    font-feature-settings: "tnum" 1;
+  }
+
+  ::selection {
+    background: hsl(var(--brand) / 0.22);
+  }
+
+  /* Restrained scrollbars — dense UI shouldn't be full of chrome. */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: hsl(var(--border)) transparent;
+  }
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background-color: hsl(var(--border));
+    border: 3px solid transparent;
+    background-clip: content-box;
+    border-radius: 9999px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background-color: hsl(var(--muted-foreground) / 0.4);
+  }
+}
+
+@layer components {
+  /* Small caps section label used above groups of content. */
+  .eyebrow {
+    @apply text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground;
+  }
+
+  /* Metric value — the number itself, in an investment context. */
+  .metric-value {
+    @apply text-[15px] font-semibold text-foreground;
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* Investment memo document styling. Serif, generous measure. */
+  .memo-prose {
+    @apply font-serif text-[15px] leading-[1.7] text-foreground;
+  }
+  .memo-prose > * + * {
+    @apply mt-4;
+  }
+  .memo-prose h1 {
+    @apply font-serif text-2xl font-semibold tracking-tight mt-8 mb-3 first:mt-0;
+  }
+  .memo-prose h2 {
+    @apply font-serif text-lg font-semibold tracking-tight mt-8 mb-2 first:mt-0
+           border-b border-border pb-1.5;
+  }
+  .memo-prose h3 {
+    @apply font-sans text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground mt-6 mb-2 first:mt-0;
+  }
+  .memo-prose p {
+    @apply leading-[1.75];
+  }
+  .memo-prose ul {
+    @apply list-disc pl-5 space-y-1.5 marker:text-brand;
+  }
+  .memo-prose ol {
+    @apply list-decimal pl-5 space-y-1.5 marker:text-muted-foreground;
+  }
+  .memo-prose strong {
+    @apply font-semibold;
+  }
+  .memo-prose a {
+    @apply text-foreground underline underline-offset-2 decoration-brand/50 hover:decoration-brand;
+  }
+  .memo-prose blockquote {
+    @apply border-l-2 border-brand/40 pl-4 italic text-muted-foreground;
+  }
+  .memo-prose table {
+    @apply w-full text-sm font-sans border-collapse;
+  }
+  .memo-prose th {
+    @apply text-left text-[11px] font-semibold uppercase tracking-wider text-muted-foreground border-b border-border pb-1.5;
+  }
+  .memo-prose td {
+    @apply border-b border-border/60 py-1.5;
+  }
+  .memo-prose code {
+    @apply font-mono text-[13px] bg-muted rounded px-1 py-0.5;
   }
 }
 
@@ -98,15 +299,18 @@
   .shadow-surface-lg {
     box-shadow: var(--shadow-lg);
   }
+  .tabular-figures {
+    font-variant-numeric: tabular-nums;
+  }
 }
 
 @keyframes pulse-dot {
   0%, 100% { opacity: 1; }
-  50% { opacity: 0.4; }
+  50% { opacity: 0.35; }
 }
 
 .animate-pulse-dot {
-  animation: pulse-dot 2s ease-in-out infinite;
+  animation: pulse-dot 2.4s ease-in-out infinite;
 }
 
 @keyframes spin-slow {
@@ -116,4 +320,11 @@
 
 .animate-spin-slow {
   animation: spin-slow 3s linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-pulse-dot,
+  .animate-spin-slow {
+    animation: none;
+  }
 }

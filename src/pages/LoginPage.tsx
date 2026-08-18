@@ -2,6 +2,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { Navigate, Link } from "react-router-dom";
 import { Helmet } from "react-helmet-async";
 import { Inbox, FileText, Sparkles, KanbanSquare, ShieldCheck, Workflow, FileDown, ArrowRight, Send } from "lucide-react";
+import { BrandMark } from "@/components/BrandMark";
 
 
 const LOGIN_JSONLD = {
@@ -67,111 +68,106 @@ export default function LoginPage() {
         <meta property="og:description" content="Sign in to EasyVC — the autonomous OS for VC analysts." />
         <script type="application/ld+json">{JSON.stringify(LOGIN_JSONLD)}</script>
       </Helmet>
-      <div className="mx-auto max-w-6xl px-6 py-12 lg:py-20">
-        <div className="grid gap-12 lg:grid-cols-2 lg:gap-16 items-center">
+      <div className="mx-auto max-w-6xl px-6 py-14 lg:py-24">
+        <div className="grid gap-14 lg:grid-cols-[1.1fr_0.9fr] lg:gap-20 items-start">
           {/* Left: Product pitch */}
-          <div className="space-y-8">
-            <div className="space-y-4">
-              <div className="inline-flex items-center gap-2 rounded-full border border-border bg-card px-3 py-1 text-xs text-muted-foreground">
+          <div>
+            <div className="flex items-center gap-2.5">
+              <BrandMark className="h-8 w-8" />
+              <span className="text-[15px] font-semibold tracking-tight text-foreground">EasyVC</span>
+              <span className="ml-1 inline-flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-brand">
                 <Sparkles className="h-3 w-3" />
-                The autonomous OS for investors
-              </div>
-              <h1 className="text-4xl lg:text-5xl font-semibold tracking-tight text-foreground">
-                EasyVC
-              </h1>
-              <p className="text-lg text-muted-foreground leading-relaxed">
-                Ingest deal flow, standardize it in a workspace built for investment teams,
-                and generate investment memos — all in one place.
-              </p>
+                Deal OS
+              </span>
             </div>
 
-            <div className="grid gap-5 sm:grid-cols-2">
+            <h1 className="mt-10 font-serif text-[40px] lg:text-[52px] leading-[1.05] font-semibold tracking-tight text-foreground">
+              The deal desk for
+              <br />
+              investment teams.
+            </h1>
+            <p className="mt-5 max-w-xl text-[17px] leading-relaxed text-muted-foreground">
+              Ingest deal flow, standardise it in a workspace built for investors, and
+              generate investment memos — all in one place.
+            </p>
+
+            <div className="mt-12 grid gap-x-10 gap-y-8 sm:grid-cols-2 border-t border-border pt-10">
               {features.map(({ icon: Icon, title, desc }) => (
-                <div key={title} className="space-y-1.5">
+                <div key={title}>
                   <div className="flex items-center gap-2 text-foreground">
-                    <Icon className="h-4 w-4 text-primary" />
-                    <h3 className="text-sm font-medium">{title}</h3>
+                    <Icon className="h-[15px] w-[15px] text-brand" />
+                    <h3 className="text-[13px] font-semibold tracking-tight">{title}</h3>
                   </div>
-                  <p className="text-sm text-muted-foreground leading-relaxed">{desc}</p>
+                  <p className="mt-1.5 text-[13px] text-muted-foreground leading-relaxed">{desc}</p>
                 </div>
               ))}
             </div>
 
-            <div className="flex items-center gap-2 text-xs text-muted-foreground pt-2">
+            <div className="mt-10 flex items-center gap-2 text-[12px] text-muted-foreground">
               <ShieldCheck className="h-3.5 w-3.5" />
               Invite-only. New sign-ups require admin approval.
             </div>
           </div>
 
-          {/* Right: Sign-in card */}
-          <div className="lg:pl-8">
-            <div className="w-full max-w-md mx-auto rounded-xl border border-border bg-card p-8">
-              <h2 className="text-xl font-semibold text-foreground mb-1">Sign in</h2>
-              <p className="text-sm text-muted-foreground mb-6">
+          {/* Right: Sign-in */}
+          <div className="w-full max-w-md lg:sticky lg:top-24">
+            <div className="rounded-md border border-border bg-card p-7">
+              <h2 className="text-[17px] font-semibold tracking-tight text-foreground">Sign in</h2>
+              <p className="mt-1 text-[13px] text-muted-foreground">
                 Continue with Google to access your deal pipeline.
               </p>
               <button
                 onClick={() => signInWithGoogle()}
-                className="flex items-center justify-center gap-3 w-full rounded-lg border border-border px-4 py-3 text-sm font-medium text-foreground hover:bg-accent transition-colors"
+                className="mt-6 flex items-center justify-center gap-3 w-full rounded-[5px] bg-primary px-4 py-2.5 text-[13px] font-medium text-primary-foreground hover:opacity-90 transition-opacity"
               >
                 <img
                   src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg"
-                  alt="Google"
-                  className="h-5 w-5"
+                  alt=""
+                  className="h-4 w-4"
                 />
                 Continue with Google
               </button>
-              <div className="mt-6 space-y-2 text-xs text-muted-foreground">
-                <p>• Grants Drive access for deck sync</p>
-                <p>• Auto-processes emails with a dedicated Gmail label, or inbound submissions to a dedicated mailbox</p>
-              </div>
+              <ul className="mt-6 space-y-2 text-[12px] text-muted-foreground border-t border-border pt-5">
+                <li className="flex gap-2">
+                  <span className="text-brand shrink-0">—</span>
+                  Grants Drive access for deck sync
+                </li>
+                <li className="flex gap-2">
+                  <span className="text-brand shrink-0">—</span>
+                  Auto-processes emails via a dedicated Gmail label, or inbound submissions to a
+                  dedicated mailbox
+                </li>
+              </ul>
             </div>
 
-            <Link
-              to="/convert"
-              className="mt-6 block w-full max-w-md mx-auto rounded-xl border border-border bg-card p-5 hover:border-primary/40 hover:bg-accent/40 transition-colors group"
-            >
-              <div className="flex items-start gap-3">
-                <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary/10 text-primary shrink-0">
-                  <FileDown className="h-4 w-4" />
-                </div>
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center justify-between gap-2">
-                    <p className="text-sm font-medium text-foreground">
-                      No account? Convert a DocSend or Papermark link
-                    </p>
-                    <ArrowRight className="h-4 w-4 text-muted-foreground group-hover:translate-x-0.5 transition-transform shrink-0" />
+            <div className="mt-3 rounded-md border border-border bg-card divide-y divide-border overflow-hidden">
+              {[
+                {
+                  to: "/convert",
+                  icon: FileDown,
+                  title: "No account? Convert a DocSend or Papermark link",
+                  desc: "Paste a link, get a downloadable PDF emailed to you. Free, no sign-in.",
+                },
+                {
+                  to: "/intake/easyvc",
+                  icon: Send,
+                  title: "Have a deal? Send it to our resident VC",
+                  desc: "Share your deck, DocSend link, or company details — reviewed by our resident VC.",
+                },
+              ].map(({ to, icon: Icon, title, desc }) => (
+                <Link key={to} to={to} className="flex items-start gap-3 p-5 hover:bg-accent/50 transition-colors group">
+                  <Icon className="h-4 w-4 text-brand shrink-0 mt-0.5" />
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center justify-between gap-2">
+                      <p className="text-[13px] font-medium text-foreground">{title}</p>
+                      <ArrowRight className="h-3.5 w-3.5 text-muted-foreground group-hover:translate-x-0.5 transition-transform shrink-0" />
+                    </div>
+                    <p className="text-[12px] text-muted-foreground mt-1 leading-relaxed">{desc}</p>
                   </div>
-                  <p className="text-xs text-muted-foreground mt-1">
-                    Paste a link, get a downloadable PDF emailed to you. Free, no sign-in.
-                  </p>
-                </div>
-              </div>
-            </Link>
-            <Link
-              to="/intake/easyvc"
-              className="mt-4 block w-full max-w-md mx-auto rounded-xl border border-border bg-card p-5 hover:border-primary/40 hover:bg-accent/40 transition-colors group"
-            >
-              <div className="flex items-start gap-3">
-                <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary/10 text-primary shrink-0">
-                  <Send className="h-4 w-4" />
-                </div>
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center justify-between gap-2">
-                    <p className="text-sm font-medium text-foreground">
-                      Do you have a deal? Send it to our resident VC
-                    </p>
-                    <ArrowRight className="h-4 w-4 text-muted-foreground group-hover:translate-x-0.5 transition-transform shrink-0" />
-                  </div>
-                  <p className="text-xs text-muted-foreground mt-1">
-                    Share your deck, DocSend link, or company details — reviewed by our resident VC.
-                  </p>
-                </div>
-              </div>
-            </Link>
-
+                </Link>
+              ))}
+            </div>
           </div>
-
         </div>
       </div>
     </div>

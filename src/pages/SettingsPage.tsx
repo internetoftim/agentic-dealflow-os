@@ -163,16 +163,19 @@ export default function SettingsPage() {
   };
 
   return (
-    <div className="p-6 max-w-3xl">
-      <h1 className="text-xl font-semibold text-foreground mb-6">Settings</h1>
+    <div className="px-6 py-6 lg:px-8 max-w-3xl">
+      <div className="mb-7 border-b border-border pb-4">
+        <h1 className="text-[22px] font-semibold tracking-tight text-foreground">Settings</h1>
+        <p className="text-[13px] text-muted-foreground mt-0.5">Model, intake, and workspace configuration</p>
+      </div>
 
       {/* AI Model Selection */}
       <section className="mb-8">
-        <h2 className="text-sm font-semibold text-foreground mb-4 flex items-center gap-2">
+        <h2 className="eyebrow mb-3 flex items-center gap-2">
           <Bot className="h-4 w-4 text-muted-foreground" />
           AI Model
         </h2>
-        <div className="rounded-lg border border-border bg-card p-5">
+        <div className="rounded-md border border-border bg-card p-5">
           <p className="text-xs text-muted-foreground mb-3">Select the OpenAI model used for deck analysis, chat, and memo generation.</p>
           <div className="grid grid-cols-2 gap-2">
             {AI_MODELS.map((model) => (
@@ -182,17 +185,17 @@ export default function SettingsPage() {
                 disabled={savingModel || model.disabled}
                 className={`text-left rounded-lg border p-3 transition-colors ${
                   aiModel === model.value
-                    ? "border-primary bg-primary/5"
+                    ? "border-brand bg-brand-muted/50"
                     : model.disabled
                       ? "border-border bg-muted/30 opacity-50 cursor-not-allowed"
-                      : "border-border hover:border-primary/40 hover:bg-accent"
+                      : "border-border hover:border-foreground/25 hover:bg-accent/60"
                 }`}
               >
                 <div className="flex items-center gap-2">
                   <span className={`text-sm font-medium ${model.disabled ? "text-muted-foreground" : "text-foreground"}`}>
                     {model.label}
                   </span>
-                  {aiModel === model.value && <Check className="h-3.5 w-3.5 text-primary ml-auto" />}
+                  {aiModel === model.value && <Check className="h-3.5 w-3.5 text-brand ml-auto" />}
                   {model.disabled && aiModel !== model.value && (
                     <span className="ml-auto text-[9px] font-medium uppercase tracking-wider text-muted-foreground bg-muted rounded px-1 py-0.5">
                       Soon
@@ -208,11 +211,11 @@ export default function SettingsPage() {
 
       {/* Public Intake Link */}
       <section className="mb-8">
-        <h2 className="text-sm font-semibold text-foreground mb-4 flex items-center gap-2">
+        <h2 className="eyebrow mb-3 flex items-center gap-2">
           <Link2 className="h-4 w-4 text-muted-foreground" />
           Public Intake Link
         </h2>
-        <div className="rounded-lg border border-border bg-card p-5 space-y-3">
+        <div className="rounded-md border border-border bg-card p-5 space-y-3">
           <p className="text-xs text-muted-foreground">
             Share this link with founders so they can submit their pitch decks directly into your pipeline.
           </p>
@@ -291,11 +294,11 @@ export default function SettingsPage() {
 
       {/* Naming Conventions */}
       <section className="mb-8">
-        <h2 className="text-sm font-semibold text-foreground mb-4 flex items-center gap-2">
+        <h2 className="eyebrow mb-3 flex items-center gap-2">
           <Sparkles className="h-4 w-4 text-muted-foreground" />
           Naming Conventions
         </h2>
-        <div className="rounded-lg border border-border bg-card p-5">
+        <div className="rounded-md border border-border bg-card p-5">
           <div className="flex gap-0 mb-4 border-b border-border">
             {(["auto", "manual"] as const).map((t) => (
               <button
@@ -412,11 +415,11 @@ export default function SettingsPage() {
 
       {/* Recap Naming Pattern */}
       <section className="mb-8">
-        <h2 className="text-sm font-semibold text-foreground mb-4 flex items-center gap-2">
+        <h2 className="eyebrow mb-3 flex items-center gap-2">
           <FileText className="h-4 w-4 text-muted-foreground" />
           Recap File Naming
         </h2>
-        <div className="rounded-lg border border-border bg-card p-5 space-y-3">
+        <div className="rounded-md border border-border bg-card p-5 space-y-3">
           <p className="text-xs text-muted-foreground">
             Pattern used when uploading generated memos to Google Drive. Same tokens as deck naming but defaults to "recap" instead of "deck".
           </p>
@@ -471,11 +474,11 @@ export default function SettingsPage() {
 
       {/* Google Drive Folder */}
       <section className="mb-8">
-        <h2 className="text-sm font-semibold text-foreground mb-4 flex items-center gap-2">
+        <h2 className="eyebrow mb-3 flex items-center gap-2">
           <FolderOpen className="h-4 w-4 text-muted-foreground" />
           Drive Folder
         </h2>
-        <div className="rounded-lg border border-border bg-card p-5 space-y-3">
+        <div className="rounded-md border border-border bg-card p-5 space-y-3">
           <p className="text-xs text-muted-foreground">
             Files synced to Google Drive will be saved inside this folder. It will be created automatically if it doesn't exist.
           </p>
@@ -520,11 +523,11 @@ export default function SettingsPage() {
 
       {/* Memo Summarisation Prompt */}
       <section className="mb-8">
-        <h2 className="text-sm font-semibold text-foreground mb-4 flex items-center gap-2">
+        <h2 className="eyebrow mb-3 flex items-center gap-2">
           <FileText className="h-4 w-4 text-muted-foreground" />
           Memo Summarisation Prompt
         </h2>
-        <div className="rounded-lg border border-border bg-card p-5 space-y-3">
+        <div className="rounded-md border border-border bg-card p-5 space-y-3">
           <p className="text-xs text-muted-foreground">
             This prompt is sent to the AI when generating investment memos from deck data. Customise it to match your firm's memo format.
           </p>
@@ -569,11 +572,11 @@ export default function SettingsPage() {
 
       {/* Deep Research Provider */}
       <section className="mb-8">
-        <h2 className="text-sm font-semibold text-foreground mb-4 flex items-center gap-2">
+        <h2 className="eyebrow mb-3 flex items-center gap-2">
           <Search className="h-4 w-4 text-muted-foreground" />
           Deep Research Agent
         </h2>
-        <div className="rounded-lg border border-border bg-card p-5">
+        <div className="rounded-md border border-border bg-card p-5">
           <p className="text-xs text-muted-foreground mb-3">Choose which engine powers company deep research after deck extraction.</p>
           <div className="grid grid-cols-2 gap-2">
             {([
@@ -596,14 +599,14 @@ export default function SettingsPage() {
                   opt.disabled
                     ? "opacity-50 cursor-not-allowed border-border bg-muted/30"
                     : deepResearchProvider === opt.value
-                    ? "border-primary bg-primary/5"
-                    : "border-border hover:border-primary/40 hover:bg-accent"
+                    ? "border-brand bg-brand-muted/50"
+                    : "border-border hover:border-foreground/25 hover:bg-accent/60"
                 }`}
               >
                 <div className="flex items-center gap-2">
                   <span className="text-sm font-medium text-foreground">{opt.label}</span>
                   {opt.disabled && <span className="ml-auto text-[9px] rounded bg-muted px-1.5 py-0.5 font-medium text-muted-foreground">Soon</span>}
-                  {!opt.disabled && deepResearchProvider === opt.value && <Check className="h-3.5 w-3.5 text-primary ml-auto" />}
+                  {!opt.disabled && deepResearchProvider === opt.value && <Check className="h-3.5 w-3.5 text-brand ml-auto" />}
                 </div>
                 <p className="text-xs text-muted-foreground mt-0.5">{opt.description}</p>
               </button>
@@ -614,7 +617,7 @@ export default function SettingsPage() {
 
       {/* Google Email & Drive Sync */}
       <section className="mb-8">
-        <h2 className="text-sm font-semibold text-foreground mb-4 flex items-center gap-2">
+        <h2 className="eyebrow mb-3 flex items-center gap-2">
           <Mail className="h-4 w-4 text-muted-foreground" />
           Google Email & Drive Sync
         </h2>
@@ -654,7 +657,7 @@ export default function SettingsPage() {
 
       {/* Firm Deal Desk */}
       <section className="mb-8 opacity-40 pointer-events-none select-none">
-        <h2 className="text-sm font-semibold text-foreground mb-4 flex items-center gap-2">
+        <h2 className="eyebrow mb-3 flex items-center gap-2">
           <Shield className="h-4 w-4 text-muted-foreground" />
           Firm Deal Desk
           <span className="ml-auto text-[10px] font-medium uppercase tracking-wider text-muted-foreground bg-muted rounded px-1.5 py-0.5">Coming Soon</span>

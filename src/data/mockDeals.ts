@@ -26,12 +26,28 @@ export const mockDeals: Deal[] = [
   { id: "8", name: "Orbital Labs", stage: "Seed", sector: "SpaceTech", source: "manual", autoIngested: false, status: "extracting", deckSize: "67MB" },
 ];
 
-export const sourceConfig: Record<string, { label: string; colorClass: string; bgClass: string }> = {
-  "deal-desk": { label: "Deal Desk", colorClass: "text-badge-purple", bgClass: "bg-badge-purple-muted" },
-  "personal-gmail": { label: "Personal Gmail", colorClass: "text-badge-blue", bgClass: "bg-badge-blue-muted" },
-  "manual": { label: "Manual Upload", colorClass: "text-badge-amber", bgClass: "bg-badge-amber-muted" },
-  "docusend": { label: "DocSend", colorClass: "text-badge-green", bgClass: "bg-badge-green-muted" },
-  "docsend": { label: "DocSend", colorClass: "text-badge-green", bgClass: "bg-badge-green-muted" },
-  "email": { label: "Email", colorClass: "text-badge-blue", bgClass: "bg-badge-blue-muted" },
-  "inbound": { label: "Inbound", colorClass: "text-badge-green", bgClass: "bg-badge-green-muted" },
+/**
+ * Provenance markers. Deliberately monochrome — the pill is neutral and only
+ * the dot carries colour, so a board of twenty deals reads as one surface
+ * rather than a bag of sweets.
+ */
+export interface SourceConfig {
+  label: string;
+  /** Colour of the leading dot. */
+  dotClass: string;
+  /** Retained for callers that still tint text/background. */
+  colorClass: string;
+  bgClass: string;
+}
+
+export const sourceConfig: Record<string, SourceConfig> = {
+  "deal-desk": { label: "Deal Desk", dotClass: "bg-badge-purple", colorClass: "text-foreground", bgClass: "bg-muted" },
+  "personal-gmail": { label: "Personal Gmail", dotClass: "bg-badge-blue", colorClass: "text-foreground", bgClass: "bg-muted" },
+  "manual": { label: "Manual Upload", dotClass: "bg-badge-amber", colorClass: "text-foreground", bgClass: "bg-muted" },
+  "docusend": { label: "DocSend", dotClass: "bg-badge-green", colorClass: "text-foreground", bgClass: "bg-muted" },
+  "docsend": { label: "DocSend", dotClass: "bg-badge-green", colorClass: "text-foreground", bgClass: "bg-muted" },
+  "papermark": { label: "Papermark", dotClass: "bg-badge-green", colorClass: "text-foreground", bgClass: "bg-muted" },
+  "pandadoc": { label: "PandaDoc", dotClass: "bg-badge-green", colorClass: "text-foreground", bgClass: "bg-muted" },
+  "email": { label: "Email", dotClass: "bg-badge-blue", colorClass: "text-foreground", bgClass: "bg-muted" },
+  "inbound": { label: "Inbound", dotClass: "bg-brand", colorClass: "text-foreground", bgClass: "bg-muted" },
 };

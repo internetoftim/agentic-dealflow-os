@@ -25,9 +25,7 @@ const columns = [
   { key: "memo-ready", title: "Memo Ready" },
 ];
 
-const sourceConfig: Record<string, { label: string; colorClass: string; bgClass: string }> = {
-  ...mockSourceConfig,
-};
+const sourceConfig = { ...mockSourceConfig };
 
 const stepIcons: Record<string, React.ElementType> = {
   uploading: Upload,
@@ -54,80 +52,57 @@ function WorkflowProgress({ deal, onCancel, isCancelling }: {
 
   if (isQueued) {
     return (
-      <div className="mt-3">
-        <div className="flex items-center gap-2 text-muted-foreground">
-          <Clock className="h-3.5 w-3.5" />
-          <span className="text-[11px] font-medium">Queued — waiting for active job</span>
-        </div>
+      <div className="mt-3 flex items-center gap-1.5 text-muted-foreground">
+        <Clock className="h-3 w-3" />
+        <span className="text-[11px]">Queued — waiting for active job</span>
       </div>
     );
   }
 
   if (isCancelled) {
     return (
-      <div className="mt-3">
-        <div className="flex items-center gap-2 text-destructive">
-          <Pause className="h-3.5 w-3.5" />
-          <span className="text-[11px] font-medium">Cancelled</span>
-        </div>
+      <div className="mt-3 flex items-center gap-1.5 text-destructive">
+        <Pause className="h-3 w-3" />
+        <span className="text-[11px] font-medium">Cancelled</span>
       </div>
     );
   }
 
   if (currentIdx === -1) return null;
 
+  const currentStep = activeSteps[currentIdx];
+  const pct = Math.round(((currentIdx + 0.5) / activeSteps.length) * 100);
+
+  // A card in a column shows *where* a deal is, not every step it has passed.
+  // The full checklist lives in the workspace.
   return (
-    <div className="mt-3">
-      <div className="space-y-1.5">
-        {activeSteps.map((step, idx) => {
-          const Icon = stepIcons[step.key] || Loader2;
-          const isActive = idx === currentIdx;
-          const isDone = idx < currentIdx;
-
-          return (
-            <div key={step.key} className="flex items-center gap-2">
-              <div className="flex items-center justify-center w-4 h-4">
-                {isDone ? (
-                  <Check className="h-3.5 w-3.5 text-success shrink-0" />
-                ) : isActive ? (
-                  <Loader2 className="h-3.5 w-3.5 text-primary animate-spin shrink-0" />
-                ) : (
-                  <Icon className="h-3.5 w-3.5 text-muted-foreground/30 shrink-0" />
-                )}
-              </div>
-              <span
-                className={`text-[11px] leading-none ${
-                  isActive
-                    ? "text-primary font-semibold"
-                    : isDone
-                    ? "text-success font-medium"
-                    : "text-muted-foreground/30"
-                }`}
-              >
-                {step.label}
-              </span>
-              {isActive && (
-                <div className="flex-1 h-1 rounded-full bg-muted overflow-hidden ml-1">
-                  <div className="h-full bg-primary/60 rounded-full animate-pulse w-2/3" />
-                </div>
-              )}
-            </div>
-          );
-        })}
+    <div className="mt-3 pt-3 border-t border-border">
+      <div className="flex items-baseline justify-between gap-2 mb-1.5">
+        <span className="flex items-center gap-1.5 text-[11px] font-medium text-foreground min-w-0">
+          <Loader2 className="h-3 w-3 animate-spin shrink-0 text-brand" />
+          <span className="truncate">{currentStep?.label}</span>
+        </span>
+        <span className="text-[10px] tabular-figures text-muted-foreground shrink-0">
+          {currentIdx + 1}/{activeSteps.length}
+        </span>
+      </div>
+      <div className="h-[3px] rounded-full bg-muted overflow-hidden">
+        <div
+          className="h-full bg-brand rounded-full transition-[width] duration-500"
+          style={{ width: `${pct}%` }}
+        />
       </div>
 
-      <div className="mt-2.5 flex gap-1.5">
-        <Button
-          variant="outline"
-          size="sm"
-          className="h-7 text-[11px] gap-1 px-2"
-          onClick={(e) => { e.stopPropagation(); onCancel(); }}
-          disabled={isCancelling}
-        >
-          {isCancelling ? <Loader2 className="h-3 w-3 animate-spin" /> : <Pause className="h-3 w-3" />}
-          Stop
-        </Button>
-      </div>
+      <Button
+        variant="ghost"
+        size="sm"
+        className="mt-2 h-6 text-[11px] gap-1 px-1.5 -ml-1.5 text-muted-foreground hover:text-destructive"
+        onClick={(e) => { e.stopPropagation(); onCancel(); }}
+        disabled={isCancelling}
+      >
+        {isCancelling ? <Loader2 className="h-3 w-3 animate-spin" /> : <Pause className="h-3 w-3" />}
+        Stop
+      </Button>
     </div>
   );
 }
@@ -162,59 +137,71 @@ function DealCard({
 
   return (
     <div
-      className={`relative rounded-lg border bg-card p-3.5 shadow-surface hover:shadow-surface-md transition-all cursor-pointer group ${
-        selected ? "border-primary ring-2 ring-primary/30" : "border-border"
+      className={`relative rounded-md border bg-card px-3.5 py-3 transition-colors cursor-pointer group ${
+        selected
+          ? "border-brand ring-1 ring-brand/25"
+          : "border-border hover:border-foreground/20"
       }`}
       onClick={handleCardClick}
     >
       {!isShared && (
         <div
-          className={`absolute top-2.5 left-2.5 transition-opacity ${
+          className={`absolute top-3 left-3 transition-opacity ${
             selected || selectionActive ? "opacity-100" : "opacity-0 group-hover:opacity-100"
           }`}
           onClick={(e) => { e.stopPropagation(); onToggleSelect(deal.id); }}
         >
-          <Checkbox checked={selected} onCheckedChange={() => onToggleSelect(deal.id)} />
+          <Checkbox checked={selected} onCheckedChange={() => onToggleSelect(deal.id)} className="h-3.5 w-3.5" />
         </div>
       )}
 
-      <div className="flex items-start justify-between mb-2 pl-6">
-        <h3 className="text-sm font-semibold text-card-foreground group-hover:text-primary transition-colors flex items-center gap-1.5">
-          <span className="truncate">{deal.name}</span>
-          {isShared && (
-            <Share2 className="h-3 w-3 text-info shrink-0" aria-label="Shared with you" />
+      <div
+        className={`transition-[padding] ${
+          !isShared && (selected || selectionActive) ? "pl-6" : "pl-0 group-hover:pl-6"
+        }`}
+      >
+        <div className="flex items-start justify-between gap-2">
+          <h3 className="text-[13px] font-semibold leading-5 text-card-foreground flex items-center gap-1.5 min-w-0">
+            <span className="truncate">{deal.name}</span>
+            {isShared && (
+              <Share2 className="h-3 w-3 text-muted-foreground shrink-0" aria-label="Shared with you" />
+            )}
+          </h3>
+          {(deal.auto_ingested || isProcessing) && !isShared && (
+            <span className="relative flex h-1.5 w-1.5 shrink-0 mt-1.5" title="Auto-ingested">
+              <span className="animate-pulse-dot absolute inline-flex h-full w-full rounded-full bg-success opacity-70" />
+              <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-success" />
+            </span>
           )}
-        </h3>
-        {(deal.auto_ingested || isProcessing) && !isShared && (
-          <span className="relative flex h-2.5 w-2.5 shrink-0 mt-1">
-            <span className="animate-pulse-dot absolute inline-flex h-full w-full rounded-full bg-success opacity-75" />
-            <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-success" />
+          {isQueued && !isShared && (
+            <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-warning" title="Queued" />
+          )}
+        </div>
+
+        <p className="mt-1 text-[11px] text-muted-foreground">
+          {deal.stage} <span className="text-muted-foreground/40">·</span> {deal.sector}
+        </p>
+
+        <div className="mt-2.5 flex items-center gap-2 flex-wrap">
+          <span className="inline-flex items-center gap-1.5 text-[11px] text-muted-foreground">
+            <span className={`h-1.5 w-1.5 rounded-full shrink-0 ${source.dotClass}`} />
+            {source.label}
           </span>
-        )}
-        {isQueued && !isShared && (
-          <span className="relative flex h-2.5 w-2.5 shrink-0 mt-1">
-            <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-warning" />
-          </span>
+          {isShared && (
+            <span className="inline-flex items-center gap-1 text-[11px] text-muted-foreground">
+              <span className="text-muted-foreground/40">·</span> Shared
+            </span>
+          )}
+        </div>
+
+        {showWorkflow && (
+          <WorkflowProgress
+            deal={deal}
+            onCancel={() => cancelMutation.mutate(deal.id)}
+            isCancelling={cancelMutation.isPending}
+          />
         )}
       </div>
-      <p className="text-xs text-muted-foreground mb-2.5 pl-6">{deal.stage} · {deal.sector}</p>
-      <div className="flex items-center gap-1.5 ml-6 flex-wrap">
-        <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium ${source.bgClass} ${source.colorClass}`}>
-          {source.label}
-        </span>
-        {isShared && (
-          <span className="inline-flex items-center gap-1 rounded-full bg-info-muted px-2 py-0.5 text-[11px] font-medium text-info">
-            <Share2 className="h-2.5 w-2.5" /> Shared
-          </span>
-        )}
-      </div>
-      {showWorkflow && (
-        <WorkflowProgress
-          deal={deal}
-          onCancel={() => cancelMutation.mutate(deal.id)}
-          isCancelling={cancelMutation.isPending}
-        />
-      )}
     </div>
   );
 }
@@ -268,11 +255,15 @@ export default function KanbanPipeline() {
 
   const selectionActive = selected.size > 0;
 
+  const totalDeals = visibleDeals.length;
+
   const filterButton = (key: DealFilter, label: string, count?: number) => (
     <button
       onClick={() => setFilter(key)}
-      className={`px-2.5 py-1 rounded-md text-xs font-medium transition-colors ${
-        filter === key ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-accent"
+      className={`px-2.5 py-1 rounded-[4px] text-[12px] transition-colors ${
+        filter === key
+          ? "bg-card text-foreground font-medium shadow-surface"
+          : "text-muted-foreground hover:text-foreground"
       }`}
     >
       {label}{typeof count === "number" && count > 0 ? ` (${count})` : ""}
@@ -280,14 +271,16 @@ export default function KanbanPipeline() {
   );
 
   return (
-    <div className="p-6">
-      <div className="mb-6 flex items-start justify-between gap-4">
+    <div className="px-6 py-6 lg:px-8">
+      <div className="mb-6 flex items-end justify-between gap-4 border-b border-border pb-4">
         <div>
-          <h1 className="text-xl font-semibold text-foreground">Deal Pipeline</h1>
-          <p className="text-sm text-muted-foreground mt-1">Track deals across your ingestion pipeline</p>
+          <h1 className="text-[22px] font-semibold tracking-tight text-foreground">Deal Pipeline</h1>
+          <p className="text-[13px] text-muted-foreground mt-0.5">
+            {totalDeals} {totalDeals === 1 ? "deal" : "deals"} across ingestion, research, and memo
+          </p>
         </div>
         <div className="flex items-center gap-2">
-          <div className="flex items-center gap-1 rounded-md border border-border p-0.5 bg-card">
+          <div className="flex items-center gap-0.5 rounded-[5px] border border-border p-0.5 bg-muted">
             {filterButton("all", "All")}
             {filterButton("mine", "Mine")}
             {filterButton("shared", "Shared", sharedCount)}
@@ -317,18 +310,20 @@ export default function KanbanPipeline() {
           <div className="animate-spin-slow h-6 w-6 border-2 border-primary border-t-transparent rounded-full" />
         </div>
       ) : (
-        <div className="grid grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
           {grouped.map((col) => (
             <div key={col.key} className="flex flex-col">
-              <div className="flex items-center justify-between mb-3 px-1">
-                <h2 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">{col.title}</h2>
-                <span className="flex h-5 w-5 items-center justify-center rounded-full bg-muted text-[11px] font-medium text-muted-foreground">
+              <div className="flex items-center gap-2 mb-3 pb-2 border-b border-border">
+                <h2 className="eyebrow">{col.title}</h2>
+                <span className="text-[11px] tabular-figures text-muted-foreground">
                   {col.deals.length}
                 </span>
               </div>
-              <div className="flex flex-col gap-2.5 min-h-[200px] rounded-lg bg-muted/50 p-2">
+              <div className="flex flex-col gap-2 min-h-[200px]">
                 {col.deals.length === 0 && (
-                  <p className="text-xs text-muted-foreground text-center mt-8">No deals</p>
+                  <div className="rounded-md border border-dashed border-border py-10 text-center">
+                    <p className="text-[11px] text-muted-foreground">No deals</p>
+                  </div>
                 )}
                 {col.deals.map((deal) => (
                   <DealCard
