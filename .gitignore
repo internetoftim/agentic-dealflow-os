@@ -29,3 +29,4 @@ dist-ssr
 
 deploy-mcp.log
 .deploy-mcp.pid
+ts-tav
