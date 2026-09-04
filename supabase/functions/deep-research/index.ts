@@ -1,4 +1,5 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { createWebResearch, type SearchResult } from "../_shared/web-research.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -9,8 +10,7 @@ const corsHeaders = {
 const SAPINSAPIN_BASE = "https://apollo-inference-bridge.am1-aks.apolloglobal.net";
 const SAPINSAPIN_MODEL = "/models/gpt-oss-20b-balitanlp-cpt";
 const OPENAI_BASE = "https://api.openai.com";
-const FIRECRAWL_BASE = "https://api.firecrawl.dev/v1";
-const FIRECRAWL_TIMEOUT_MS = 20_000;
+const DEFAULT_TIMEOUT_MS = 20_000;
 
 type SlideMatch = {
   section: "traction" | "ask" | "team";
@@ -115,7 +115,7 @@ function resolveDeepResearchProvider(rawProvider: unknown): "firecrawl" | "custo
   return "custom";
 }
 
-async function fetchWithTimeout(url: string, init: RequestInit, timeoutMs = FIRECRAWL_TIMEOUT_MS): Promise<Response> {
+async function fetchWithTimeout(url: string, init: RequestInit, timeoutMs = DEFAULT_TIMEOUT_MS): Promise<Response> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort("timeout"), timeoutMs);
   try {
@@ -146,6 +146,7 @@ Deno.serve(async (req) => {
     const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const supabaseAnonKey = Deno.env.get("SUPABASE_ANON_KEY")!;
     const firecrawlApiKey = Deno.env.get("FIRECRAWL_API_KEY");
+    const tavilyApiKey = Deno.env.get("TAVILY_API_KEY");
 
     adminClient = createClient(supabaseUrl, supabaseServiceKey);
 
@@ -166,8 +167,8 @@ Deno.serve(async (req) => {
 
     // Validate required keys AFTER dealIdForFailure is set so the catch block can
     // mark deep_research_status="failed" for this deal.
-    if (!firecrawlApiKey) {
-      throw new Error("FIRECRAWL_API_KEY is not configured");
+    if (!tavilyApiKey && !firecrawlApiKey) {
+      throw new Error("Neither TAVILY_API_KEY nor FIRECRAWL_API_KEY is configured");
     }
 
     let userId: string;
@@ -237,19 +238,8 @@ Deno.serve(async (req) => {
     const provider = resolveDeepResearchProvider(settings?.deep_research_provider);
     const aiModel = settings?.ai_model ?? "gpt-5.4";
     const deckTextContext = (latestSource?.extracted_text || "").slice(0, 12_000);
-    const firecrawlFetch = (path: "/search" | "/scrape", body: Record<string, unknown>) =>
-      fetchWithTimeout(
-        `${FIRECRAWL_BASE}${path}`,
-        {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${firecrawlApiKey}`,
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify(body),
-        },
-        FIRECRAWL_TIMEOUT_MS,
-      );
+    // Tavily is primary when configured; Firecrawl is the fallback provider.
+    const web = createWebResearch({ tavilyApiKey, firecrawlApiKey });
 
     // Mark as researching
     await adminClient
@@ -259,21 +249,12 @@ Deno.serve(async (req) => {
 
     console.log(`Deep research for "${deal.name}" — provider: ${provider}, model: ${aiModel}`);
 
-    // Step 1: Firecrawl search
+    // Step 1: web search (Tavily primary, Firecrawl fallback)
     const searchQuery = `${deal.name} company ${deal.sector ? deal.sector : ""} official website LinkedIn`;
-    console.log("Firecrawl search query:", searchQuery);
+    console.log(`Search query (${web.provider}):`, searchQuery);
 
-    const searchResponse = await firecrawlFetch("/search", { query: searchQuery, limit: 10 });
-
-    if (!searchResponse.ok) {
-      const errText = await searchResponse.text();
-      console.error("Firecrawl search error:", searchResponse.status, errText);
-      throw new Error(`Firecrawl search failed [${searchResponse.status}]`);
-    }
-
-    const searchData = await searchResponse.json();
-    const searchResults = searchData.data || searchData.results || [];
-    console.log(`Firecrawl returned ${searchResults.length} results`);
+    const searchResults = await web.search(searchQuery, 10);
+    console.log(`Search returned ${searchResults.length} results`);
 
     // Step 2: Scrape candidate website
     let websiteContent = "";
@@ -284,13 +265,8 @@ Deno.serve(async (req) => {
     if (candidateWebsite) {
       try {
         console.log("Scraping website:", candidateWebsite);
-        const scrapeResponse = await firecrawlFetch("/scrape", { url: candidateWebsite, formats: ["markdown"], onlyMainContent: true });
-
-        if (scrapeResponse.ok) {
-          const scrapeData = await scrapeResponse.json();
-          websiteContent = (scrapeData.data?.markdown || scrapeData.markdown || "").slice(0, 10_000);
-          console.log(`Scraped ${websiteContent.length} chars from website`);
-        }
+        websiteContent = (await web.scrape(candidateWebsite)).slice(0, 10_000);
+        console.log(`Scraped ${websiteContent.length} chars from website`);
       } catch (e) {
         console.error("Website scrape failed (non-fatal):", e);
       }
@@ -316,17 +292,12 @@ Deno.serve(async (req) => {
       try {
         const cbSearchQuery = `site:crunchbase.com/organization ${deal.name}`;
         console.log("Crunchbase search query:", cbSearchQuery);
-        const cbSearchResponse = await firecrawlFetch("/search", { query: cbSearchQuery, limit: 3 });
-
-        if (cbSearchResponse.ok) {
-          const cbSearchData = await cbSearchResponse.json();
-          const cbResults = cbSearchData.data || cbSearchData.results || [];
-          const cbResult = cbResults.find((r: any) =>
-            r.url?.includes("crunchbase.com/organization")
-          );
-          if (cbResult) {
-            crunchbaseUrl = cbResult.url;
-          }
+        const cbResults = await web.search(cbSearchQuery, 3);
+        const cbResult = cbResults.find((r) =>
+          r.url?.includes("crunchbase.com/organization")
+        );
+        if (cbResult) {
+          crunchbaseUrl = cbResult.url;
         }
       } catch (e) {
         console.error("Crunchbase search failed (non-fatal):", e);
@@ -337,11 +308,8 @@ Deno.serve(async (req) => {
     if (crunchbaseUrl) {
       try {
         console.log("Scraping Crunchbase:", crunchbaseUrl);
-        const cbScrapeResponse = await firecrawlFetch("/scrape", { url: crunchbaseUrl, formats: ["markdown"], onlyMainContent: true });
-
-        if (cbScrapeResponse.ok) {
-          const cbScrapeData = await cbScrapeResponse.json();
-          const cbMarkdown = (cbScrapeData.data?.markdown || cbScrapeData.markdown || "");
+        {
+          const cbMarkdown = await web.scrape(crunchbaseUrl);
           console.log(`Scraped ${cbMarkdown.length} chars from Crunchbase`);
 
           // Extract data from Crunchbase markdown using regex patterns
@@ -600,19 +568,16 @@ Extract the company's official website URL and LinkedIn company page URL using t
     // Parallelize investor enrichment — sequential loop blew the wall-clock budget.
     const investorResults = await Promise.allSettled(
       investorCandidates.map(async (investorName) => {
-        const [linkedinRes, crunchbaseRes, tracxnRes] = await Promise.all([
-          firecrawlFetch("/search", { query: `"${investorName}" investor LinkedIn`, limit: 2 }),
-          firecrawlFetch("/search", { query: `site:crunchbase.com/organization "${investorName}"`, limit: 2 }),
-          firecrawlFetch("/search", { query: `site:tracxn.com "${investorName}"`, limit: 2 }),
+        const settle = (p: Promise<SearchResult[]>) => p.catch(() => [] as SearchResult[]);
+        const [linkedInResults, crunchbaseResults, tracxnResults] = await Promise.all([
+          settle(web.search(`"${investorName}" investor LinkedIn`, 2)),
+          settle(web.search(`site:crunchbase.com/organization "${investorName}"`, 2)),
+          settle(web.search(`site:tracxn.com "${investorName}"`, 2)),
         ]);
 
-        const linkedInData = linkedinRes.ok ? await linkedinRes.json() : {};
-        const crunchbaseData = crunchbaseRes.ok ? await crunchbaseRes.json() : {};
-        const tracxnData = tracxnRes.ok ? await tracxnRes.json() : {};
-
-        const linkedinUrl = (linkedInData.data || linkedInData.results || []).find((r: any) => r.url?.includes("linkedin.com"))?.url ?? null;
-        const crunchbaseInvestorUrl = (crunchbaseData.data || crunchbaseData.results || []).find((r: any) => r.url?.includes("crunchbase.com/organization"))?.url ?? null;
-        const tracxnUrl = (tracxnData.data || tracxnData.results || []).find((r: any) => r.url?.includes("tracxn.com"))?.url ?? null;
+        const linkedinUrl = linkedInResults.find((r) => r.url?.includes("linkedin.com"))?.url ?? null;
+        const crunchbaseInvestorUrl = crunchbaseResults.find((r) => r.url?.includes("crunchbase.com/organization"))?.url ?? null;
+        const tracxnUrl = tracxnResults.find((r) => r.url?.includes("tracxn.com"))?.url ?? null;
 
         return {
           name: investorName,
@@ -632,11 +597,10 @@ Extract the company's official website URL and LinkedIn company page URL using t
 
     // Step 3c: Last 3 articles with previews
     try {
-      const newsSearchResponse = await firecrawlFetch("/search", { query: `"${deal.name}" company latest news article`, limit: 10 });
+      const newsResults = await web.search(`"${deal.name}" company latest news article`, 10);
 
-      if (newsSearchResponse.ok) {
-        const newsSearchData = await newsSearchResponse.json();
-        const newsCandidates = (newsSearchData.data || newsSearchData.results || [])
+      {
+        const newsCandidates = newsResults
           .filter((item: any) =>
             item.url &&
             !item.url.includes("linkedin.com") &&
@@ -654,12 +618,8 @@ Extract the company's official website URL and LinkedIn company page URL using t
           uniqueCandidates.map(async (item: any) => {
             let preview: string | null = item.description || null;
             try {
-              const articleScrapeResponse = await firecrawlFetch("/scrape", { url: item.url, formats: ["markdown"], onlyMainContent: true });
-              if (articleScrapeResponse.ok) {
-                const articleData = await articleScrapeResponse.json();
-                const markdown = (articleData.data?.markdown || articleData.markdown || "").replace(/\s+/g, " ").trim();
-                if (markdown.length > 0) preview = markdown.slice(0, 280);
-              }
+              const markdown = (await web.scrape(item.url)).replace(/\s+/g, " ").trim();
+              if (markdown.length > 0) preview = markdown.slice(0, 280);
             } catch (e) {
               console.error("Article scrape failed (non-fatal):", e);
             }
@@ -799,14 +759,12 @@ Use web_search to find their names, titles, and LinkedIn profile URLs. Then call
     // Firecrawl fallback if GPT returned no people
     if (people.length === 0) {
       try {
-        console.log("Falling back to Firecrawl for key people search…");
+        console.log(`Falling back to ${web.provider} for key people search…`);
         const peopleSearchQuery = `"${deal.name}" founders CEO CTO site:linkedin.com/in`;
-        const peopleSearchResponse = await firecrawlFetch("/search", { query: peopleSearchQuery, limit: 10 });
+        const peopleResults = await web.search(peopleSearchQuery, 10);
 
-        if (peopleSearchResponse.ok) {
-          const peopleSearchData = await peopleSearchResponse.json();
-          const peopleResults = peopleSearchData.data || peopleSearchData.results || [];
-          console.log(`Firecrawl people search returned ${peopleResults.length} results`);
+        {
+          console.log(`People search returned ${peopleResults.length} results`);
 
           for (const r of peopleResults) {
             if (r.url?.includes("linkedin.com/in/")) {

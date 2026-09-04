@@ -1,4 +1,5 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { createWebResearch } from "../_shared/web-research.ts";
 import { BlobReader, ZipReader, TextWriter } from "https://esm.sh/@zip.js/zip.js@2.7.34";
 import { PDFDocument } from "https://esm.sh/pdf-lib@1.17.1?bundle-deps";
 
@@ -362,6 +363,7 @@ Deno.serve(async (req) => {
     const openaiApiKey = Deno.env.get("OPENAI_API_KEY");
     const sapinsapinApiKey = Deno.env.get("APOLLO_API_KEY");
     const firecrawlApiKey = Deno.env.get("FIRECRAWL_API_KEY");
+    const tavilyApiKey = Deno.env.get("TAVILY_API_KEY");
 
     const SAPINSAPIN_BASE = "https://apollo-inference-bridge.am1-aks.apolloglobal.net";
     const OPENAI_BASE = "https://api.openai.com";
@@ -833,8 +835,9 @@ Deno.serve(async (req) => {
         }
 
         // --- FALLBACK: Firecrawl multi-query search if GPT-5 didn't find a website ---
-        if (!verifiedWebsite && firecrawlApiKey) {
+        if (!verifiedWebsite && (tavilyApiKey || firecrawlApiKey)) {
           try {
+            const web = createWebResearch({ tavilyApiKey, firecrawlApiKey });
             const searchQueries = [
               `"${companyName}" official website`,
               `${companyName} startup ${sectorHint}`.trim(),
@@ -853,19 +856,16 @@ Deno.serve(async (req) => {
 
             for (const searchQuery of searchQueries) {
               if (verifiedWebsite) break;
-              console.log("Firecrawl fallback query:", searchQuery);
+              console.log(`Website fallback query (${web.provider}):`, searchQuery);
 
-              const searchResponse = await fetch("https://api.firecrawl.dev/v1/search", {
-                method: "POST",
-                headers: { Authorization: `Bearer ${firecrawlApiKey}`, "Content-Type": "application/json" },
-                body: JSON.stringify({ query: searchQuery, limit: 8 }),
-              });
-
-              if (!searchResponse.ok) { console.warn(`Firecrawl query failed (${searchResponse.status})`); continue; }
-
-              const searchData = await searchResponse.json();
-              const results = searchData.data || searchData.results || [];
-              console.log(`Firecrawl returned ${results.length} results`);
+              let results: Awaited<ReturnType<typeof web.search>> = [];
+              try {
+                results = await web.search(searchQuery, 8);
+              } catch (e) {
+                console.warn("Website fallback search failed:", e);
+                continue;
+              }
+              console.log(`Search returned ${results.length} results`);
 
               if (!linkedinUrl) {
                 linkedinUrl = results.find((r: any) => r.url?.includes("linkedin.com/company"))?.url ?? null;
@@ -881,27 +881,18 @@ Deno.serve(async (req) => {
                     companyNameLower.split(/\s+/).filter((w: string) => w.length > 2).every((w: string) => titleDesc.includes(w));
                   if (!mentions) continue;
 
-                  const scrapeRes = await fetch("https://api.firecrawl.dev/v1/scrape", {
-                    method: "POST",
-                    headers: { Authorization: `Bearer ${firecrawlApiKey}`, "Content-Type": "application/json" },
-                    body: JSON.stringify({ url: candidate.url, formats: ["markdown"], onlyMainContent: true }),
-                  });
-
-                  if (scrapeRes.ok) {
-                    const scrapeData = await scrapeRes.json();
-                    const content = (scrapeData.data?.markdown || scrapeData.markdown || "").toLowerCase().slice(0, 5000);
-                    const contentMatch = content.includes(companyNameLower) ||
-                      companyNameLower.split(/\s+/).filter((w: string) => w.length > 2).every((w: string) => content.includes(w));
-                    if (contentMatch) {
-                      try {
-                        const u = new URL(candidate.url.startsWith("http") ? candidate.url : `https://${candidate.url}`);
-                        verifiedWebsite = `${u.protocol}//${u.hostname}`;
-                      } catch { verifiedWebsite = candidate.url; }
-                      console.log(`✓ Firecrawl verified: ${verifiedWebsite}`);
-                      break;
-                    }
+                  const content = (await web.scrape(candidate.url)).toLowerCase().slice(0, 5000);
+                  const contentMatch = content.includes(companyNameLower) ||
+                    companyNameLower.split(/\s+/).filter((w: string) => w.length > 2).every((w: string) => content.includes(w));
+                  if (contentMatch) {
+                    try {
+                      const u = new URL(candidate.url.startsWith("http") ? candidate.url : `https://${candidate.url}`);
+                      verifiedWebsite = `${u.protocol}//${u.hostname}`;
+                    } catch { verifiedWebsite = candidate.url; }
+                    console.log(`✓ Website verified via ${web.provider}: ${verifiedWebsite}`);
+                    break;
                   }
-                } catch (e) { console.warn(`Firecrawl verify failed for ${candidate.url}:`, e); }
+                } catch (e) { console.warn(`Website verify failed for ${candidate.url}:`, e); }
               }
             }
           } catch (e) {
