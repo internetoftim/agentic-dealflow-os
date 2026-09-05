@@ -29,6 +29,14 @@ const WRITE_TOOLS = [
   "upsert_deal_person",
   "delete_deal_person",
   "update_memo",
+  "ingest_deck_link",
+  "run_deep_research",
+  "generate_memo",
+  "cancel_deal_processing",
+  "delete_deal",
+  "share_deal",
+  "revoke_deal_share",
+  "update_workspace_settings",
 ];
 
 

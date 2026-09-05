@@ -2,7 +2,9 @@
 // - MCP Streamable HTTP (JSON-RPC) at POST /
 // - OAuth 2.1 endpoints (PKCE, dynamic client registration)
 // - Bearer auth: Personal Access Token (pat_*) OR OAuth access token (oauth_*) OR Supabase JWT
-// Read-only tools v1: list_deals, get_deal, search_deals, get_deal_context
+// Read tools: deals, pipeline, deck context/downloads, settings, agent activity
+// Write tools (Agent Mode): deal CRUD, people, memo, link ingestion, deep research,
+// memo generation, processing control, sharing, workspace settings
 
 import { createClient, type SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2";
 
@@ -146,6 +148,40 @@ const TOOLS = [
       required: ["deal_id"],
     },
   },
+  {
+    name: "get_pipeline_summary",
+    description:
+      "Snapshot of the deal pipeline as shown on the Kanban board: deals grouped into inbox, processing (with current step), memo-ready, and error columns.",
+    inputSchema: { type: "object", properties: {} },
+  },
+  {
+    name: "get_deck_download_url",
+    description:
+      "Get a time-limited signed URL to download a deal's uploaded deck file (PDF/PPTX). Defaults to the most recent source; pass source_id for a specific one.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        deal_id: { type: "string" },
+        source_id: { type: "string", description: "Optional specific source id (from get_deal)" },
+      },
+      required: ["deal_id"],
+    },
+  },
+  {
+    name: "get_workspace_settings",
+    description:
+      "Read workspace configuration: AI model, deep-research provider, Drive sync state, public intake link, and whether Agent Mode is enabled.",
+    inputSchema: { type: "object", properties: {} },
+  },
+  {
+    name: "list_agent_activity",
+    description:
+      "List recent MCP tool calls made against this workspace (the audit log shown in Settings → AI Agents).",
+    inputSchema: {
+      type: "object",
+      properties: { limit: { type: "integer", minimum: 1, maximum: 100, default: 20 } },
+    },
+  },
 ];
 
 // Write tools — only exposed when the user has Agent Mode enabled.
@@ -244,6 +280,96 @@ const WRITE_TOOLS = [
         mode: { type: "string", enum: ["replace", "append"], default: "replace" },
       },
       required: ["deal_id", "memo"],
+    },
+  },
+  {
+    name: "ingest_deck_link",
+    description:
+      "Ingest a pitch deck from a DocSend, Papermark, or PandaDoc link: creates a deal and starts the cloud capture + analysis pipeline. Requires Agent Mode.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        url: { type: "string", description: "DocSend / Papermark / PandaDoc link" },
+        name: { type: "string", description: "Company name (defaults to the link slug)" },
+        stage: { type: "string" },
+        sector: { type: "string" },
+      },
+      required: ["url"],
+    },
+  },
+  {
+    name: "run_deep_research",
+    description:
+      "Trigger the deep-research agent for a deal (website discovery, Crunchbase, investors, news, key people). Runs in the background; poll get_deal for deep_research_status. Requires Agent Mode.",
+    inputSchema: {
+      type: "object",
+      properties: { deal_id: { type: "string" } },
+      required: ["deal_id"],
+    },
+  },
+  {
+    name: "generate_memo",
+    description:
+      "Trigger full investment-memo generation for a deal (deck + research + AI, synced to Drive when enabled). Runs in the background; poll get_deal for memo_draft. Requires Agent Mode.",
+    inputSchema: {
+      type: "object",
+      properties: { deal_id: { type: "string" } },
+      required: ["deal_id"],
+    },
+  },
+  {
+    name: "cancel_deal_processing",
+    description:
+      "Stop a deal's in-flight ingestion pipeline (equivalent to the Stop button on the board). Only affects deals currently processing or queued. Requires Agent Mode.",
+    inputSchema: {
+      type: "object",
+      properties: { deal_id: { type: "string" } },
+      required: ["deal_id"],
+    },
+  },
+  {
+    name: "delete_deal",
+    description:
+      "Permanently delete a deal with its sources, capture jobs, key people, and stored deck files. Irreversible — pass confirm=true. Requires Agent Mode.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        deal_id: { type: "string" },
+        confirm: { type: "boolean", description: "Must be true to actually delete" },
+      },
+      required: ["deal_id", "confirm"],
+    },
+  },
+  {
+    name: "share_deal",
+    description:
+      "Create (or return the existing) share link for a deal so someone outside the workspace can view it and chat with its context. Requires Agent Mode.",
+    inputSchema: {
+      type: "object",
+      properties: { deal_id: { type: "string" } },
+      required: ["deal_id"],
+    },
+  },
+  {
+    name: "revoke_deal_share",
+    description: "Revoke all active share links for a deal. Requires Agent Mode.",
+    inputSchema: {
+      type: "object",
+      properties: { deal_id: { type: "string" } },
+      required: ["deal_id"],
+    },
+  },
+  {
+    name: "update_workspace_settings",
+    description:
+      "Update safe workspace settings: ai_model, naming_pattern, or intake_slug. Other settings (tokens, Drive) are not writable via MCP. Requires Agent Mode.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        ai_model: { type: "string" },
+        naming_pattern: { type: "string" },
+        intake_slug: { type: "string", description: "Letters, numbers, dashes" },
+      },
     },
   },
   {
@@ -363,6 +489,70 @@ async function runTool(name: string, args: any, userId: string) {
       return { deal_id: id, deal_name: deal.name, text: combined, truncated: combined.length >= maxChars };
     }
 
+    case "get_pipeline_summary": {
+      const PROCESSING = ["uploading", "converting", "compressing", "scraping", "extracting", "searching-website", "syncing"];
+      const { data, error } = await admin.from("deals")
+        .select("id, name, status, stage, sector, deep_research_status, updated_at")
+        .eq("user_id", userId)
+        .order("created_at", { ascending: false });
+      if (error) throw new Error(error.message);
+      const rows = data ?? [];
+      const bucket = (s: string) =>
+        s === "inbox" ? "inbox"
+        : s === "memo-ready" ? "memo_ready"
+        : s === "error" ? "error"
+        : PROCESSING.includes(s) || s === "queued" || s === "cancelled" ? "processing"
+        : "other";
+      const columns: Record<string, any[]> = { inbox: [], processing: [], memo_ready: [], error: [], other: [] };
+      for (const d of rows) {
+        columns[bucket(d.status)].push({ id: d.id, name: d.name, status: d.status, stage: d.stage, sector: d.sector, deep_research_status: d.deep_research_status });
+      }
+      return { total: rows.length, columns };
+    }
+    case "get_deck_download_url": {
+      const id = String(args?.deal_id ?? "");
+      if (!id) throw new Error("deal_id required");
+      await assertOwnedDeal(id, userId);
+      let q = admin.from("sources")
+        .select("id, file_name, storage_path")
+        .eq("deal_id", id).eq("user_id", userId)
+        .not("storage_path", "is", null)
+        .order("created_at", { ascending: false });
+      if (args?.source_id) q = q.eq("id", String(args.source_id));
+      const { data: sources, error } = await q.limit(1);
+      if (error) throw new Error(error.message);
+      const src = sources?.[0];
+      if (!src?.storage_path) throw new Error("No downloadable file for this deal");
+      const { data: signed, error: e2 } = await admin.storage
+        .from("decks").createSignedUrl(src.storage_path, 3600);
+      if (e2 || !signed?.signedUrl) throw new Error(e2?.message ?? "Failed to sign URL");
+      return { file_name: src.file_name, url: signed.signedUrl, expires_in_seconds: 3600 };
+    }
+    case "get_workspace_settings": {
+      const { data } = await admin.from("user_settings")
+        .select("ai_model, deep_research_provider, drive_sync_enabled, intake_slug, agent_mode_enabled, naming_pattern")
+        .eq("user_id", userId).maybeSingle();
+      const slug = (data as any)?.intake_slug || userId;
+      return {
+        ai_model: (data as any)?.ai_model ?? "gpt-5.4",
+        deep_research_provider: (data as any)?.deep_research_provider ?? "custom",
+        drive_sync_enabled: Boolean((data as any)?.drive_sync_enabled),
+        naming_pattern: (data as any)?.naming_pattern ?? null,
+        agent_mode_enabled: Boolean((data as any)?.agent_mode_enabled),
+        intake_url: `${APP_ORIGIN}/intake/${slug}`,
+      };
+    }
+    case "list_agent_activity": {
+      const limit = Math.min(args?.limit ?? 20, 100);
+      const { data, error } = await admin.from("mcp_tool_calls")
+        .select("tool_name, deal_id, success, error_message, created_at")
+        .eq("user_id", userId)
+        .order("created_at", { ascending: false })
+        .limit(limit);
+      if (error) throw new Error(error.message);
+      return { calls: data ?? [], count: data?.length ?? 0 };
+    }
+
     // ---------- write tools (Agent Mode) ----------
     case "get_agent_mode": {
       const enabled = await isAgentModeEnabled(userId);
@@ -378,7 +568,15 @@ async function runTool(name: string, args: any, userId: string) {
     case "update_deal":
     case "upsert_deal_person":
     case "delete_deal_person":
-    case "update_memo": {
+    case "update_memo":
+    case "ingest_deck_link":
+    case "run_deep_research":
+    case "generate_memo":
+    case "cancel_deal_processing":
+    case "delete_deal":
+    case "share_deal":
+    case "revoke_deal_share":
+    case "update_workspace_settings": {
       if (!(await isAgentModeEnabled(userId))) {
         await logToolCall(userId, name, args, false, "Agent Mode disabled");
         throw new Error(
@@ -474,6 +672,143 @@ async function runWriteTool(name: string, args: any, userId: string) {
       if (error) throw new Error(error.message);
       return { updated: true, deal_id: id, mode: args?.mode ?? "replace", length: next.length };
     }
+    case "ingest_deck_link": {
+      const url = String(args?.url ?? "").trim();
+      if (!/^https?:\/\/([\w.-]+\.)?(docsend\.com|papermark\.(com|io)|pandadoc\.com)\//i.test(url)) {
+        throw new Error("url must be a DocSend, Papermark, or PandaDoc link");
+      }
+      const source = /docsend\.com/i.test(url) ? "docsend" : /pandadoc\.com/i.test(url) ? "pandadoc" : "papermark";
+      let slugName = "";
+      try { slugName = decodeURIComponent(new URL(url).pathname.split("/").filter(Boolean).pop() ?? ""); } catch { /* keep empty */ }
+      const dealName = String(args?.name ?? "").trim() || slugName || "Untitled deal";
+      const { data: deal, error } = await admin.from("deals").insert({
+        user_id: userId,
+        name: dealName,
+        stage: args?.stage ?? "Unknown",
+        sector: args?.sector ?? "Unknown",
+        source,
+        auto_ingested: true,
+        status: "inbox",
+        deep_research_status: "pending",
+      } as any).select("id, name").single();
+      if (error) throw new Error(error.message);
+      const capture = fetch(`${SUPABASE_URL}/functions/v1/run-docsend-capture`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ dealId: deal.id, url }),
+      }).then(async (res) => {
+        if (!res.ok) console.error("run-docsend-capture failed:", res.status, await res.text());
+      }).catch((e) => console.error("run-docsend-capture dispatch failed:", e));
+      (globalThis as any).EdgeRuntime?.waitUntil?.(capture);
+      return { created: true, deal_id: deal.id, name: deal.name, capture: "started", hint: "Poll get_deal until status=memo-ready (capture + analysis takes a few minutes)." };
+    }
+    case "run_deep_research": {
+      const id = String(args?.deal_id ?? "");
+      if (!id) throw new Error("deal_id required");
+      await assertOwnedDeal(id, userId);
+      const run = fetch(`${SUPABASE_URL}/functions/v1/deep-research`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ dealId: id }),
+      }).then(async (res) => {
+        if (!res.ok) console.error("deep-research trigger failed:", res.status, await res.text());
+      }).catch((e) => console.error("deep-research dispatch failed:", e));
+      (globalThis as any).EdgeRuntime?.waitUntil?.(run);
+      return { started: true, deal_id: id, hint: "Poll get_deal for deep_research_status (researching → completed/failed)." };
+    }
+    case "generate_memo": {
+      const id = String(args?.deal_id ?? "");
+      if (!id) throw new Error("deal_id required");
+      await assertOwnedDeal(id, userId);
+      const run = fetch(`${SUPABASE_URL}/functions/v1/generate-memo`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ dealId: id }),
+      }).then(async (res) => {
+        if (!res.ok) console.error("generate-memo trigger failed:", res.status, await res.text());
+      }).catch((e) => console.error("generate-memo dispatch failed:", e));
+      (globalThis as any).EdgeRuntime?.waitUntil?.(run);
+      return { started: true, deal_id: id, hint: "Memo generation takes about a minute; poll get_deal for memo_draft." };
+    }
+    case "cancel_deal_processing": {
+      const id = String(args?.deal_id ?? "");
+      if (!id) throw new Error("deal_id required");
+      const PROCESSING = ["uploading", "converting", "compressing", "scraping", "extracting", "searching-website", "syncing", "queued"];
+      const { data: deal } = await admin.from("deals")
+        .select("id, status").eq("id", id).eq("user_id", userId).maybeSingle();
+      if (!deal) throw new Error("Deal not found");
+      if (!PROCESSING.includes((deal as any).status)) {
+        return { cancelled: false, deal_id: id, status: (deal as any).status, reason: "Deal is not processing or queued" };
+      }
+      const { error } = await admin.from("deals")
+        .update({ status: "cancelled", updated_at: new Date().toISOString() } as any)
+        .eq("id", id).eq("user_id", userId);
+      if (error) throw new Error(error.message);
+      return { cancelled: true, deal_id: id };
+    }
+    case "delete_deal": {
+      const id = String(args?.deal_id ?? "");
+      if (!id) throw new Error("deal_id required");
+      if (args?.confirm !== true) throw new Error("Pass confirm=true to permanently delete this deal");
+      await assertOwnedDeal(id, userId);
+      // Mirror the app's delete sequence: storage best-effort, then dependents, then the deal.
+      const { data: sourceRows } = await admin.from("sources")
+        .select("storage_path").eq("deal_id", id).eq("user_id", userId);
+      const paths = (sourceRows ?? []).map((r: any) => r.storage_path).filter(Boolean);
+      if (paths.length > 0) {
+        const { error: rmErr } = await admin.storage.from("decks").remove(paths);
+        if (rmErr) console.warn("Storage cleanup incomplete:", rmErr.message);
+      }
+      for (const table of ["capture_jobs", "sources", "deal_people", "deal_shares"]) {
+        const { error: depErr } = await admin.from(table).delete().eq("deal_id", id);
+        if (depErr && table !== "deal_shares") throw new Error(`${table}: ${depErr.message}`);
+      }
+      const { error } = await admin.from("deals").delete().eq("id", id).eq("user_id", userId);
+      if (error) throw new Error(error.message);
+      return { deleted: true, deal_id: id, files_removed: paths.length };
+    }
+    case "share_deal": {
+      const id = String(args?.deal_id ?? "");
+      if (!id) throw new Error("deal_id required");
+      await assertOwnedDeal(id, userId);
+      const { data: existing } = await admin.from("deal_shares")
+        .select("id, token").eq("deal_id", id).eq("owner_id", userId)
+        .is("revoked_at", null).order("created_at", { ascending: false }).limit(1).maybeSingle();
+      if (existing) {
+        return { share_url: `${APP_ORIGIN}/share/${(existing as any).token}`, existing: true };
+      }
+      const token = randomToken("share", 24).slice(6); // drop the "share_" prefix for URL cleanliness
+      const { data, error } = await admin.from("deal_shares")
+        .insert({ deal_id: id, owner_id: userId, token, permission: "view_chat" } as any)
+        .select("token").single();
+      if (error) throw new Error(error.message);
+      return { share_url: `${APP_ORIGIN}/share/${(data as any).token}`, existing: false };
+    }
+    case "revoke_deal_share": {
+      const id = String(args?.deal_id ?? "");
+      if (!id) throw new Error("deal_id required");
+      await assertOwnedDeal(id, userId);
+      const { data, error } = await admin.from("deal_shares")
+        .update({ revoked_at: new Date().toISOString() } as any)
+        .eq("deal_id", id).eq("owner_id", userId).is("revoked_at", null).select("id");
+      if (error) throw new Error(error.message);
+      return { revoked: data?.length ?? 0, deal_id: id };
+    }
+    case "update_workspace_settings": {
+      const updates: Record<string, unknown> = {};
+      if (typeof args?.ai_model === "string" && args.ai_model.trim()) updates.ai_model = args.ai_model.trim();
+      if (typeof args?.naming_pattern === "string" && args.naming_pattern.trim()) updates.naming_pattern = args.naming_pattern.trim();
+      if (typeof args?.intake_slug === "string" && args.intake_slug.trim()) {
+        const slug = args.intake_slug.trim().toLowerCase();
+        if (!/^[a-z0-9-]{3,60}$/.test(slug)) throw new Error("intake_slug must be 3-60 chars: letters, numbers, dashes");
+        updates.intake_slug = slug;
+      }
+      if (Object.keys(updates).length === 0) throw new Error("Provide at least one of: ai_model, naming_pattern, intake_slug");
+      const { error } = await admin.from("user_settings")
+        .upsert({ user_id: userId, ...updates } as any, { onConflict: "user_id" });
+      if (error) throw new Error(error.message);
+      return { updated: Object.keys(updates) };
+    }
     default:
       throw new Error(`Unknown write tool: ${name}`);
   }
@@ -511,7 +846,7 @@ async function handleMcp(req: Request): Promise<Response> {
           result: {
             protocolVersion: "2024-11-05",
             capabilities: { tools: {} },
-            serverInfo: { name: "easyvc", version: "1.0.0" },
+            serverInfo: { name: "easyvc", version: "1.1.0" },
           },
         };
       }

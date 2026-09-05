@@ -86,13 +86,10 @@ Deno.serve(async (req) => {
       global: { headers: { Authorization: authHeader } },
     });
 
-    const { data: { user }, error: userError } = await userClient.auth.getUser();
-    if (userError || !user) {
-      return new Response(JSON.stringify({ error: "Unauthorized" }), {
-        status: 401,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
+    // Two auth modes (same pattern as deep-research):
+    // 1. User JWT — resolve the user from the token
+    // 2. Service-role key (mcp-server, internal triggers) — resolve the user from the deal
+    const isServiceRole = authHeader === `Bearer ${supabaseServiceKey}`;
 
     const { dealId } = await req.json();
     if (!dealId) {
@@ -102,11 +99,33 @@ Deno.serve(async (req) => {
       });
     }
 
+    let userId: string;
+    if (isServiceRole) {
+      const { data: dealRecord } = await adminClient
+        .from("deals").select("user_id").eq("id", dealId).single();
+      if (!dealRecord?.user_id) {
+        return new Response(JSON.stringify({ error: "Deal not found" }), {
+          status: 404,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+      userId = dealRecord.user_id;
+    } else {
+      const { data: { user }, error: userError } = await userClient.auth.getUser();
+      if (userError || !user) {
+        return new Response(JSON.stringify({ error: "Unauthorized" }), {
+          status: 401,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+      userId = user.id;
+    }
+
     // Fetch deal + sources + settings in parallel
     const [dealResult, sourcesResult, settingsResult] = await Promise.all([
-      adminClient.from("deals").select("*").eq("id", dealId).eq("user_id", user.id).single(),
-      adminClient.from("sources").select("file_name, extracted_text").eq("deal_id", dealId).eq("user_id", user.id),
-      adminClient.from("user_settings").select("ai_model, memo_prompt, google_provider_token, drive_sync_enabled, recap_naming_pattern, drive_folder").eq("user_id", user.id).single(),
+      adminClient.from("deals").select("*").eq("id", dealId).eq("user_id", userId).single(),
+      adminClient.from("sources").select("file_name, extracted_text").eq("deal_id", dealId).eq("user_id", userId),
+      adminClient.from("user_settings").select("ai_model, memo_prompt, google_provider_token, drive_sync_enabled, recap_naming_pattern, drive_folder").eq("user_id", userId).single(),
     ]);
 
     const deal = dealResult.data;
