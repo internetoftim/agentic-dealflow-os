@@ -2,6 +2,8 @@ import { useState, useCallback, useRef } from "react";
 import { useParams } from "react-router-dom";
 import { Helmet } from "react-helmet-async";
 import { Upload, Check, AlertCircle, Loader2, FileUp } from "lucide-react";
+import { getFileExtension } from "@/lib/fileType";
+import { isEmailValid } from "@/lib/validation";
 
 const INTAKE_JSONLD = {
   "@context": "https://schema.org",
@@ -46,10 +48,6 @@ const REFERRAL_OPTIONS = [
 ];
 
 type UploadState = "idle" | "uploading" | "success" | "error";
-
-function getFileExtension(name: string): string {
-  return name.toLowerCase().slice(name.lastIndexOf("."));
-}
 
 export default function PublicIntake() {
   const { userId } = useParams<{ userId: string }>();
@@ -102,8 +100,6 @@ export default function PublicIntake() {
     },
     [handleFileSelect]
   );
-
-  const isEmailValid = (email: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
 
   const resolvedReferral =
     referralSource === "Other" ? referralOther.trim() : referralSource;
