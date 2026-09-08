@@ -41,7 +41,7 @@ Deno.serve(async (req) => {
       });
     }
 
-    const { messages, dealId } = await req.json();
+    const { messages, dealId, sourceIds } = await req.json();
     if (!messages || !Array.isArray(messages)) {
       return new Response(JSON.stringify({ error: "Missing messages array" }), {
         status: 400,
@@ -60,22 +60,34 @@ Deno.serve(async (req) => {
     // If local model selected, fall back to Sapinsapin for chat (chat requires a cloud model)
     const model = (settings?.ai_model === "local-florence2") ? "gpt-5.4" : (settings?.ai_model ?? "gpt-5.4");
 
-    // Fetch deal context if dealId provided
+    // Fetch deal context if dealId provided.
+    // Access = owner, explicit share, or same team (can_access_deal covers all three).
     let dealContext = "";
     let deckContent = "";
     if (dealId) {
+      const { data: canAccess } = await adminClient
+        .rpc("can_access_deal", { _deal_id: dealId, _user_id: user.id });
+      if (!canAccess) {
+        return new Response(JSON.stringify({ error: "Deal not found" }), {
+          status: 404,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+      let sourcesQuery = adminClient
+        .from("sources")
+        .select("file_name, extracted_text")
+        .eq("deal_id", dealId);
+      // NotebookLM-style scoping: restrict grounding to the selected sources.
+      if (Array.isArray(sourceIds) && sourceIds.length > 0) {
+        sourcesQuery = sourcesQuery.in("id", sourceIds.map(String).slice(0, 50));
+      }
       const [dealResult, sourcesResult] = await Promise.all([
         adminClient
           .from("deals")
           .select("*")
           .eq("id", dealId)
-          .eq("user_id", user.id)
           .single(),
-        adminClient
-          .from("sources")
-          .select("file_name, extracted_text")
-          .eq("deal_id", dealId)
-          .eq("user_id", user.id),
+        sourcesQuery,
       ]);
 
       const deal = dealResult.data;

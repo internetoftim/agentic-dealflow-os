@@ -3,7 +3,7 @@ import { supabase } from "@/integrations/supabase/client";
 
 export type ChatMessage = { role: "user" | "assistant"; content: string };
 
-export function useDealChat(dealId?: string) {
+export function useDealChat(dealId?: string, sourceIds?: string[]) {
   const [messages, setMessages] = useState<ChatMessage[]>([
     { role: "assistant", content: "Upload a deck to get started. I'll analyze it and extract key data points automatically." },
   ]);
@@ -38,6 +38,8 @@ export function useDealChat(dealId?: string) {
           body: JSON.stringify({
             messages: updatedMessages.map(({ role, content }) => ({ role, content })),
             dealId,
+            // NotebookLM-style scoping: when set, only these sources ground the answer.
+            sourceIds: sourceIds && sourceIds.length > 0 ? sourceIds : undefined,
           }),
           signal: abortRef.current.signal,
         }
@@ -100,7 +102,7 @@ export function useDealChat(dealId?: string) {
       setIsStreaming(false);
       abortRef.current = null;
     }
-  }, [messages, isStreaming, dealId]);
+  }, [messages, isStreaming, dealId, sourceIds]);
 
   const stop = useCallback(() => {
     abortRef.current?.abort();

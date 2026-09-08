@@ -13,6 +13,11 @@ import { sourceConfig } from "@/data/mockDeals";
 import { useQuery } from "@tanstack/react-query";
 import { useAuth } from "@/contexts/AuthContext";
 import { ShareDealDialog } from "@/components/ShareDealDialog";
+import { SourcesRail } from "@/components/SourcesRail";
+import { DealNotesPanel } from "@/components/DealNotesPanel";
+import { useDealNotes } from "@/hooks/useDealNotes";
+import { useTeam } from "@/hooks/useTeam";
+import { useQueryClient } from "@tanstack/react-query";
 const quickActions = ["Extract Cap Table", "Calculate Burn Rate", "Team Background", "Market Size"];
 
 export default function DealWorkspace() {
@@ -25,6 +30,9 @@ export default function DealWorkspace() {
   const chatEndRef = useRef<HTMLDivElement>(null);
   const { user } = useAuth();
   const [searchParams, setSearchParams] = useSearchParams();
+  const [selectedSourceIds, setSelectedSourceIds] = useState<Set<string>>(new Set());
+  const { memberLabel } = useTeam();
+  const queryClient = useQueryClient();
 
   const { data: deals } = useDeals();
   const activeDeal = deals?.find((d) => d.id === selectedDealId) ?? deals?.[0];
@@ -37,7 +45,8 @@ export default function DealWorkspace() {
   const generateMemo = useGenerateMemo();
 
   const { data: latestCaptureJob } = useLatestCaptureJob(activeDeal?.id, activeDeal?.source);
-  const { messages, isStreaming, send, stop } = useDealChat(activeDeal?.id);
+  const { addNote } = useDealNotes(activeDeal?.id);
+  const { messages, isStreaming, send, stop } = useDealChat(activeDeal?.id, Array.from(selectedSourceIds));
   const isDocViewerDeal = DOC_VIEWER_SOURCES.includes((activeDeal?.source ?? "") as (typeof DOC_VIEWER_SOURCES)[number]);
   const docsendUrl = latestCaptureJob?.url ?? null;
   const isCloudCaptureActive = activeDeal?.status === "scraping" && ["pending", "processing"].includes(latestCaptureJob?.status ?? "");
@@ -151,12 +160,36 @@ export default function DealWorkspace() {
   }, [activeDeal?.id, latestCaptureJob?.url, retryDocsendCapture]);
 
   const tabs = [
-    { key: "chat" as const, label: "Chat", icon: Send },
-    { key: "data" as const, label: "Structured Data", icon: Layers },
+    { key: "chat" as const, label: "Data Room", icon: Layers },
+    { key: "data" as const, label: "Structured Data", icon: Search },
     { key: "memo" as const, label: "Memo", icon: FileText },
   ];
 
   const loadedSources = sources ?? [];
+
+  const toggleSource = (id: string) =>
+    setSelectedSourceIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+
+  const toggleAllSources = () =>
+    setSelectedSourceIds((prev) =>
+      prev.size === loadedSources.length ? new Set<string>() : new Set(loadedSources.map((x: any) => x.id)),
+    );
+
+  const appendToMemo = async (content: string) => {
+    if (!activeDeal) throw new Error("No deal selected");
+    const next = activeDeal.memo_draft ? `${activeDeal.memo_draft}\n\n${content}` : content;
+    const { error } = await supabase
+      .from("deals")
+      .update({ memo_draft: next, updated_at: new Date().toISOString() })
+      .eq("id", activeDeal.id);
+    if (error) throw new Error(error.message);
+    queryClient.invalidateQueries({ queryKey: ["deals"] });
+  };
 
   return (
     <div className="flex h-[calc(100vh-3.5rem)]">
@@ -194,7 +227,13 @@ export default function DealWorkspace() {
                       {d.name}
                     </span>
                     {user && d.user_id !== user.id && (
-                      <Share2 className="h-3 w-3 text-muted-foreground shrink-0" aria-label="Shared with you" />
+                      memberLabel(d.user_id) ? (
+                        <span className="text-[10px] text-muted-foreground shrink-0">
+                          {memberLabel(d.user_id)}
+                        </span>
+                      ) : (
+                        <Share2 className="h-3 w-3 text-muted-foreground shrink-0" aria-label="Shared with you" />
+                      )
                     )}
                   </button>
                   {user && d.user_id === user.id && (
@@ -639,10 +678,17 @@ export default function DealWorkspace() {
         {/* Tab content */}
         <div className="flex-1 flex flex-col overflow-auto">
           {activeTab === "chat" && (
-            <div className="flex-1 flex flex-col">
+            <div className="flex-1 flex min-h-0">
+              <SourcesRail
+                sources={loadedSources as any}
+                selected={selectedSourceIds}
+                onToggle={toggleSource}
+                onToggleAll={toggleAllSources}
+              />
+              <div className="flex-1 flex flex-col min-w-0">
               <div className="flex-1 p-5 space-y-4 overflow-auto">
                 {messages.map((msg, i) => (
-                  <div key={i} className={`max-w-[80%] ${msg.role === "assistant" ? "" : "ml-auto"}`}>
+                  <div key={i} className={`group max-w-[80%] ${msg.role === "assistant" ? "" : "ml-auto"}`}>
                     <div className={`rounded-lg p-3.5 text-sm leading-relaxed ${
                       msg.role === "assistant"
                         ? "bg-muted text-foreground"
@@ -656,6 +702,20 @@ export default function DealWorkspace() {
                         msg.content
                       )}
                     </div>
+                    {msg.role === "assistant" && i > 0 && activeDeal && (
+                      <button
+                        onClick={() =>
+                          toast.promise(addNote.mutateAsync(msg.content), {
+                            loading: "Saving note…",
+                            success: "Saved to notes",
+                            error: (e) => e.message,
+                          })
+                        }
+                        className="mt-1 inline-flex items-center gap-1 text-[10.5px] text-muted-foreground opacity-0 group-hover:opacity-100 hover:text-brand transition-all"
+                      >
+                        <FileText className="h-3 w-3" /> Save to notes
+                      </button>
+                    )}
                   </div>
                 ))}
                 {isStreaming && messages[messages.length - 1]?.role !== "assistant" && (
@@ -712,6 +772,12 @@ export default function DealWorkspace() {
                   )}
                 </div>
               </div>
+              </div>
+              <DealNotesPanel
+                dealId={activeDeal?.id}
+                memberLabel={memberLabel}
+                onAppendToMemo={activeDeal ? appendToMemo : undefined}
+              />
             </div>
           )}
           {activeTab === "data" && (

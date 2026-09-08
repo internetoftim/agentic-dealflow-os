@@ -28,6 +28,7 @@ export interface Deal {
   nrr: string | null;
   team_size: string | null;
   memo_draft: string | null;
+  team_id: string | null;
   gdrive_file_id: string | null;
   paused_at_step: string | null;
   crunchbase_url: string | null;
@@ -88,7 +89,9 @@ export function useDeals() {
       .channel("deals-realtime")
       .on(
         "postgres_changes",
-        { event: "*", schema: "public", table: "deals", filter: `user_id=eq.${user.id}` },
+        // No user filter: team deals change under other user_ids; RLS still
+        // gates what this client can actually read.
+        { event: "*", schema: "public", table: "deals" },
         (_payload) => {
           queryClient.invalidateQueries({ queryKey: ["deals", user.id] });
         }
@@ -105,7 +108,7 @@ export function useDeals() {
         .select("*")
         .order("created_at", { ascending: false });
       if (error) throw error;
-      return data as Deal[];
+      return data as unknown as Deal[];
     },
     enabled: !!user,
   });

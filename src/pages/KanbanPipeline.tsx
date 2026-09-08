@@ -16,6 +16,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { toast } from "@/hooks/use-toast";
 import { useAuth } from "@/contexts/AuthContext";
+import { useTeam } from "@/hooks/useTeam";
 
 type DealFilter = "all" | "mine" | "shared";
 
@@ -113,12 +114,14 @@ function DealCard({
   onToggleSelect,
   selectionActive,
   isShared,
+  authorLabel,
 }: {
   deal: Deal;
   selected: boolean;
   onToggleSelect: (id: string) => void;
   selectionActive: boolean;
   isShared: boolean;
+  authorLabel?: string | null;
 }) {
   const source = sourceConfig[deal.source] ?? sourceConfig.manual;
   const isProcessing = PROCESSING_STATUSES.includes(deal.status);
@@ -189,7 +192,7 @@ function DealCard({
           </span>
           {isShared && (
             <span className="inline-flex items-center gap-1 text-[11px] text-muted-foreground">
-              <span className="text-muted-foreground/40">·</span> Shared
+              <span className="text-muted-foreground/40">·</span> {authorLabel ?? "Shared"}
             </span>
           )}
         </div>
@@ -208,6 +211,7 @@ function DealCard({
 
 export default function KanbanPipeline() {
   const { user } = useAuth();
+  const { team, memberLabel } = useTeam();
   const { data: deals, isLoading } = useDeals();
   const deleteDeals = useDeleteDeals();
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -283,7 +287,7 @@ export default function KanbanPipeline() {
           <div className="flex items-center gap-0.5 rounded-[5px] border border-border p-0.5 bg-muted">
             {filterButton("all", "All")}
             {filterButton("mine", "Mine")}
-            {filterButton("shared", "Shared", sharedCount)}
+            {filterButton("shared", team ? "Teammates" : "Shared", sharedCount)}
           </div>
           {selectionActive && (
             <>
@@ -333,6 +337,7 @@ export default function KanbanPipeline() {
                     onToggleSelect={toggleSelect}
                     selectionActive={selectionActive}
                     isShared={!isOwn(deal)}
+                    authorLabel={isOwn(deal) ? null : memberLabel(deal.user_id)}
                   />
                 ))}
               </div>

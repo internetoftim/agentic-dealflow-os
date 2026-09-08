@@ -1,4 +1,4 @@
-import { LayoutDashboard, FileSearch, FolderOpen, Settings, LogOut, Link2 } from "lucide-react";
+import { LayoutDashboard, FileSearch, Settings, LogOut, Link2 } from "lucide-react";
 import { NavLink } from "@/components/NavLink";
 import { BrandWordmark } from "@/components/BrandMark";
 import { useNavigate } from "react-router-dom";
@@ -23,7 +23,6 @@ const navGroups = [
     items: [
       { title: "Deal Workspace", url: "/", icon: FileSearch, disabled: false },
       { title: "Pipeline", url: "/pipeline", icon: LayoutDashboard, disabled: false },
-      { title: "Data Room", url: "/data-room", icon: FolderOpen, disabled: true },
     ],
   },
   {

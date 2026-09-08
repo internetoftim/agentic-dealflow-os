@@ -112,6 +112,39 @@ export type Database = {
         }
         Relationships: []
       }
+      deal_notes: {
+        Row: {
+          author_email: string | null
+          content: string
+          created_at: string
+          deal_id: string
+          id: string
+          pinned: boolean
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          author_email?: string | null
+          content: string
+          created_at?: string
+          deal_id: string
+          id?: string
+          pinned?: boolean
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          author_email?: string | null
+          content?: string
+          created_at?: string
+          deal_id?: string
+          id?: string
+          pinned?: boolean
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       deal_people: {
         Row: {
           created_at: string
@@ -240,6 +273,7 @@ export type Database = {
           source: string
           stage: string
           status: string
+          team_id: string | null
           team_size: string | null
           updated_at: string
           user_id: string
@@ -273,6 +307,7 @@ export type Database = {
           source?: string
           stage?: string
           status?: string
+          team_id?: string | null
           team_size?: string | null
           updated_at?: string
           user_id: string
@@ -306,6 +341,7 @@ export type Database = {
           source?: string
           stage?: string
           status?: string
+          team_id?: string | null
           team_size?: string | null
           updated_at?: string
           user_id?: string
@@ -596,6 +632,54 @@ export type Database = {
           },
         ]
       }
+      team_members: {
+        Row: {
+          created_at: string
+          id: string
+          role: string
+          team_id: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          role?: string
+          team_id: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          role?: string
+          team_id?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      teams: {
+        Row: {
+          created_at: string
+          id: string
+          invite_code: string
+          name: string
+          owner_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          invite_code?: string
+          name: string
+          owner_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          invite_code?: string
+          name?: string
+          owner_id?: string
+        }
+        Relationships: []
+      }
       user_roles: {
         Row: {
           created_at: string
@@ -695,6 +779,33 @@ export type Database = {
       can_access_deal: {
         Args: { _deal_id: string; _user_id: string }
         Returns: boolean
+      }
+      create_team: {
+        Args: { _name: string }
+        Returns: Database["public"]["Tables"]["teams"]["Row"]
+      }
+      is_team_member: {
+        Args: { _team_id: string; _user_id: string }
+        Returns: boolean
+      }
+      join_team: {
+        Args: { _invite_code: string }
+        Returns: Database["public"]["Tables"]["teams"]["Row"]
+      }
+      leave_team: { Args: Record<PropertyKey, never>; Returns: undefined }
+      remove_team_member: {
+        Args: { _member_user_id: string }
+        Returns: undefined
+      }
+      get_team_roster: {
+        Args: Record<PropertyKey, never>
+        Returns: {
+          display_name: string | null
+          email: string | null
+          joined_at: string
+          role: string
+          user_id: string
+        }[]
       }
       get_conversion_job: {
         Args: { _email: string; _token: string }

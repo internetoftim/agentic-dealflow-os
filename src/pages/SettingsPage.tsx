@@ -6,6 +6,7 @@ import { toast } from "sonner";
 // import { BookmarkletInstaller } from "@/components/BookmarkletInstaller";
 import { StorageCleanupSection } from "@/components/StorageCleanupSection";
 import { AIAgentsSection } from "@/components/AIAgentsSection";
+import { TeamSection } from "@/components/TeamSection";
 
 const DEFAULT_PATTERN = "<WEBSITE> deck <MonthYYYY> p<pages>.pdf";
 const DEFAULT_RECAP_PATTERN = "<WEBSITE> recap <MonthYYYY> p<pages>";
@@ -168,6 +169,8 @@ export default function SettingsPage() {
         <h1 className="text-[22px] font-semibold tracking-tight text-foreground">Settings</h1>
         <p className="text-[13px] text-muted-foreground mt-0.5">Model, intake, and workspace configuration</p>
       </div>
+
+      <TeamSection />
 
       {/* AI Model Selection */}
       <section className="mb-8">
