@@ -971,12 +971,12 @@ Deno.serve(async (req) => {
             if (!res.ok) {
               const errText = await res.text().catch(() => "");
               console.error("Deep-research auto-trigger HTTP error:", res.status, errText);
-              await adminClient
-                .from("deals")
-                .update({ deep_research_status: "failed", updated_at: new Date().toISOString() })
-                .eq("id", dealId)
-                .then(() => {})
-                .catch(() => {});
+              await Promise.resolve(
+                adminClient
+                  .from("deals")
+                  .update({ deep_research_status: "failed", updated_at: new Date().toISOString() })
+                  .eq("id", dealId)
+              ).catch(() => {});
             }
           })
           .catch(async (e) => {
