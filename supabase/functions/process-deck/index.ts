@@ -975,6 +975,7 @@ Deno.serve(async (req) => {
                 .from("deals")
                 .update({ deep_research_status: "failed", updated_at: new Date().toISOString() })
                 .eq("id", dealId)
+                .then(() => {})
                 .catch(() => {});
             }
           })
