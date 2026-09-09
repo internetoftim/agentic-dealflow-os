@@ -981,12 +981,12 @@ Deno.serve(async (req) => {
           })
           .catch(async (e) => {
             console.error("Deep-research auto-trigger failed:", e);
-            await adminClient
-              .from("deals")
-              .update({ deep_research_status: "failed", updated_at: new Date().toISOString() })
-              .eq("id", dealId)
-              .then(() => {})
-              .catch(() => {});
+            await Promise.resolve(
+              adminClient
+                .from("deals")
+                .update({ deep_research_status: "failed", updated_at: new Date().toISOString() })
+                .eq("id", dealId)
+            ).catch(() => {});
           });
 
         // Keep the edge runtime alive until the request actually flushes — bare
