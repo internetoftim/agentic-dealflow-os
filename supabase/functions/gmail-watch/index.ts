@@ -1,4 +1,5 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { getReceiverToken, registerReceiverWatch, type ReceiverAccount } from "../_shared/gmail-receiver.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -95,18 +96,11 @@ Deno.serve(async (req) => {
       .eq("gmail_label_enabled", true);
 
     if (usersError) throw usersError;
-    if (!users || users.length === 0) {
-      return new Response(
-        JSON.stringify({ message: "No users with Gmail listening enabled" }),
-        { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
-    }
-
-    console.log(`Registering Gmail watch for ${users.length} user(s)`);
+    console.log(`Registering Gmail watch for ${users?.length ?? 0} user(s)`);
 
     const results: any[] = [];
 
-    for (const userSettings of users) {
+    for (const userSettings of users ?? []) {
       const { user_id } = userSettings;
 
       try {
@@ -165,6 +159,22 @@ Deno.serve(async (req) => {
       } catch (userError) {
         console.error(`Error for user ${user_id}:`, userError);
         results.push({ user_id, status: "error", reason: String(userError) });
+      }
+    }
+
+    // Receiver (deal-inbox) accounts
+    const { data: receivers } = await adminClient
+      .from("receiver_accounts")
+      .select("id, user_id, email, google_access_token, google_refresh_token, gmail_history_id, enabled")
+      .eq("enabled", true);
+    for (const account of (receivers ?? []) as ReceiverAccount[]) {
+      try {
+        const token = await getReceiverToken(adminClient, account);
+        if (!token) { results.push({ receiver: account.email, status: "error", reason: "no valid token" }); continue; }
+        const w = await registerReceiverWatch(adminClient, token, account, topicName);
+        results.push({ receiver: account.email, status: "ok", historyId: w.historyId, expiration: w.expiration });
+      } catch (e) {
+        results.push({ receiver: account.email, status: "error", reason: String(e) });
       }
     }
 

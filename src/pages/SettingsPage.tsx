@@ -7,6 +7,7 @@ import { toast } from "sonner";
 import { StorageCleanupSection } from "@/components/StorageCleanupSection";
 import { AIAgentsSection } from "@/components/AIAgentsSection";
 import { TeamSection } from "@/components/TeamSection";
+import { ReceiverInboxSection } from "@/components/ReceiverInboxSection";
 
 const DEFAULT_PATTERN = "<WEBSITE> deck <MonthYYYY> p<pages>.pdf";
 const DEFAULT_RECAP_PATTERN = "<WEBSITE> recap <MonthYYYY> p<pages>";
@@ -657,6 +658,8 @@ export default function SettingsPage() {
           </div>
         </div>
       </section>
+
+      <ReceiverInboxSection />
 
       {/* Firm Deal Desk */}
       <section className="mb-8 opacity-40 pointer-events-none select-none">

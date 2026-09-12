@@ -1,4 +1,5 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { pollReceiverAccount, type ReceiverAccount } from "../_shared/gmail-receiver.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -283,18 +284,11 @@ Deno.serve(async (req) => {
       .eq("gmail_label_enabled", true);
 
     if (usersError) throw usersError;
-    if (!eligibleUsers || eligibleUsers.length === 0) {
-      return new Response(
-        JSON.stringify({ message: "No users with Gmail listening enabled" }),
-        { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
-    }
-
-    console.log(`Processing ${eligibleUsers.length} user(s) with Gmail listening enabled`);
+    console.log(`Processing ${eligibleUsers?.length ?? 0} user(s) with Gmail listening enabled`);
 
     let totalProcessed = 0;
 
-    for (const userSettings of eligibleUsers) {
+    for (const userSettings of eligibleUsers ?? []) {
       const { user_id } = userSettings;
 
       try {
@@ -474,8 +468,19 @@ Deno.serve(async (req) => {
       }
     }
 
+    // ---- Receiver (deal-inbox) accounts: every inbound mail is scanned, no label.
+    let receiverProcessed = 0;
+    const { data: receivers } = await adminClient
+      .from("receiver_accounts")
+      .select("id, user_id, email, google_access_token, google_refresh_token, gmail_history_id, enabled")
+      .eq("enabled", true);
+    for (const account of (receivers ?? []) as ReceiverAccount[]) {
+      receiverProcessed += await pollReceiverAccount({ adminClient, account, supabaseUrl, serviceKey: supabaseServiceKey });
+    }
+    if (receivers?.length) console.log(`Receiver inboxes: ${receivers.length} polled, ${receiverProcessed} deal(s) created`);
+
     return new Response(
-      JSON.stringify({ success: true, processed: totalProcessed }),
+      JSON.stringify({ success: true, processed: totalProcessed, receiverProcessed }),
       { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
   } catch (error) {

@@ -50,4 +50,5 @@ export const sourceConfig: Record<string, SourceConfig> = {
   "pandadoc": { label: "PandaDoc", dotClass: "bg-badge-green", colorClass: "text-foreground", bgClass: "bg-muted" },
   "email": { label: "Email", dotClass: "bg-badge-blue", colorClass: "text-foreground", bgClass: "bg-muted" },
   "inbound": { label: "Inbound", dotClass: "bg-brand", colorClass: "text-foreground", bgClass: "bg-muted" },
+  "receiver": { label: "Deal Inbox", dotClass: "bg-brand", colorClass: "text-foreground", bgClass: "bg-muted" },
 };

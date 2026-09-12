@@ -61,3 +61,8 @@ verify_jwt = false
 # Called by Google push notifications (no Supabase JWT).
 [functions.gmail-webhook]
 verify_jwt = false
+
+# OAuth callback target for receiver (deal-inbox) Gmail accounts — Google
+# redirects here without a Supabase JWT. /start verifies the user JWT itself.
+[functions.receiver-oauth]
+verify_jwt = false

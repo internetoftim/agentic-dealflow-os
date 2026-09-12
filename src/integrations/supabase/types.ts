@@ -576,6 +576,48 @@ export type Database = {
         }
         Relationships: []
       }
+      receiver_accounts: {
+        Row: {
+          created_at: string
+          email: string
+          enabled: boolean
+          gmail_history_id: string | null
+          google_access_token: string | null
+          google_refresh_token: string | null
+          id: string
+          last_error: string | null
+          last_polled_at: string | null
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          email: string
+          enabled?: boolean
+          gmail_history_id?: string | null
+          google_access_token?: string | null
+          google_refresh_token?: string | null
+          id?: string
+          last_error?: string | null
+          last_polled_at?: string | null
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          email?: string
+          enabled?: boolean
+          gmail_history_id?: string | null
+          google_access_token?: string | null
+          google_refresh_token?: string | null
+          id?: string
+          last_error?: string | null
+          last_polled_at?: string | null
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       sources: {
         Row: {
           compressed_size: string | null

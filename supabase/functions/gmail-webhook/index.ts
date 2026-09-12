@@ -1,4 +1,5 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { getReceiverToken, ingestReceiverMessage, listReceiverCandidates, recordReceiverPoll, type ReceiverAccount } from "../_shared/gmail-receiver.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -152,6 +153,41 @@ async function markAsRead(token: string, messageId: string): Promise<void> {
  * 3. Uses history.list to get new messages since last historyId
  * 4. Processes deck attachments from messages with the "deck" label
  */
+/** Receiver mailbox push: pull new inbox messages since the last historyId. */
+async function handleReceiverNotification(
+  adminClient: any, account: ReceiverAccount, newHistoryId: string, supabaseUrl: string, serviceKey: string,
+): Promise<number> {
+  const token = await getReceiverToken(adminClient, account);
+  if (!token) {
+    await recordReceiverPoll(adminClient, account.id, "Google token expired — reconnect this inbox");
+    return 0;
+  }
+  let ids: string[] = [];
+  const start = account.gmail_history_id || newHistoryId;
+  const res = await fetch(
+    `https://gmail.googleapis.com/gmail/v1/users/me/history?startHistoryId=${start}&labelId=INBOX&historyTypes=messageAdded`,
+    { headers: { Authorization: `Bearer ${token}` } },
+  );
+  if (res.ok) {
+    const data = await res.json();
+    for (const h of data.history ?? []) for (const a of h.messagesAdded ?? []) if (a.message?.id) ids.push(a.message.id);
+  } else {
+    console.warn(`Receiver history failed (${res.status}) — falling back to unread scan`);
+    ids = await listReceiverCandidates(token);
+  }
+  ids = [...new Set(ids)];
+  let processed = 0;
+  for (const id of ids) {
+    processed += await ingestReceiverMessage({ adminClient, token, account, messageId: id, supabaseUrl, serviceKey });
+  }
+  if (newHistoryId) {
+    await adminClient.from("receiver_accounts").update({ gmail_history_id: newHistoryId }).eq("id", account.id);
+  }
+  await recordReceiverPoll(adminClient, account.id, null);
+  console.log(`Receiver ${account.email}: ${processed} deal(s) from ${ids.length} message(s)`);
+  return processed;
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
@@ -195,6 +231,19 @@ Deno.serve(async (req) => {
     );
 
     if (!matchedUser) {
+      // Not a primary account — is it a receiver (deal-inbox) mailbox?
+      const { data: receiver } = await adminClient
+        .from("receiver_accounts")
+        .select("id, user_id, email, google_access_token, google_refresh_token, gmail_history_id, enabled")
+        .ilike("email", emailAddress)
+        .maybeSingle();
+      if (receiver && (receiver as ReceiverAccount).enabled) {
+        const count = await handleReceiverNotification(adminClient, receiver as ReceiverAccount, String(newHistoryId ?? ""), supabaseUrl, supabaseServiceKey);
+        return new Response(JSON.stringify({ message: "Receiver processed", processed: count }), {
+          status: 200,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
       console.log(`No matching user for ${emailAddress}`);
       return new Response(JSON.stringify({ message: "User not found" }), {
         status: 200,
