@@ -20,6 +20,20 @@ You operate EasyVC through its MCP connector (`easyvc`). The human decides; you 
 5. **Follow through.** For each `uploaded` deal: `run_deep_research`. If the user wants memos: after `get_deal` shows `deep_research_status=completed`, `generate_memo`.
 6. **Report.** `get_ingest_report` (`since_days` as agreed). Write: new deals by name (with open links), documents attached, duplicates and what they duplicated, unsupported files with types, failures with reasons. End with one suggested next action.
 
+## When the Tavily connector is also available (`tavily_search`, `tavily_extract`, `tavily_crawl`, `tavily_map`)
+EasyVC's own deep research already uses Tavily server-side. Use the connector for what the pipeline
+doesn't do:
+- **Verify deck claims** before recommending: `tavily_search` the ARR/customer/partnership claims that
+  matter; quote the source URL in your report, never the deck alone.
+- **Founder diligence**: `tavily_search` `"<founder name>" <company>` and prior companies; `tavily_extract`
+  their LinkedIn or personal site when the pipeline's `get_deal` shows no key people.
+- **Thin research**: if `get_deal` shows `deep_research_status=failed` or empty investors/news, run
+  `tavily_search` for `"<company>" funding round investors` and `"<company>" news`, then write the
+  findings into the deal with `update_deal` (investors, funding_total, last_funding_round) and
+  `update_memo` (mode=append, with sources).
+- Prefer `tavily_extract` on a specific URL over `tavily_crawl`; crawl only a company's own site and
+  cap it — it is slow and costly.
+
 ## Rules
 - Idempotent by design: re-running is safe; the report shows `skipped · Already processed` for anything seen before. Don't force it.
 - Quote Gmail ids only when the user asks; otherwise use names and subjects.

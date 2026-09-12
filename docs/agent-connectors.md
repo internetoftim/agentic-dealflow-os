@@ -22,6 +22,16 @@ implements the `search` / `fetch` pair ChatGPT requires for deep-research connec
 EasyVC tool for use in chat with Developer Mode. Try: *"Use EasyVC to scan the deal inbox and tell me
 what's new"* — the model calls `scan_deal_inbox`, shows candidates, then `ingest_inbox_messages` on approval.
 
+## Pairing with the Tavily connector
+Add Tavily's MCP server next to EasyVC's and agents get raw web search for verification and
+founder diligence, alongside EasyVC's structured deal tools:
+- Claude Code / Cowork: this repo ships `.mcp.json` with both servers; export `TAVILY_API_KEY`
+  in your shell and Claude Code substitutes it (the key is never committed). Or at user scope:
+  `claude mcp add --scope user --transport http tavily "https://mcp.tavily.com/mcp/?tavilyApiKey=<key>"`.
+- claude.ai / ChatGPT: add `https://mcp.tavily.com/mcp/?tavilyApiKey=<key>` as a custom connector.
+The `deal-inbox-triage` skill tells the agent when to reach for `tavily_search` / `tavily_extract`
+(claim verification, founder checks, back-filling thin research into the deal).
+
 ## The agent-native contract
 | Step | Tool | Mutates? |
 |---|---|---|
