@@ -7,6 +7,8 @@
 // memo generation, processing control, sharing, workspace settings
 
 import { createClient, type SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { getReceiverToken, pollReceiverAccount, ingestReceiverMessage, type ReceiverAccount } from "../_shared/gmail-receiver.ts";
+import { scanForCandidates, summarize, RECEIVER_QUERY } from "../_shared/gmail-ingest.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY")!;
@@ -172,6 +174,48 @@ const TOOLS = [
     description:
       "Read workspace configuration: AI model, deep-research provider, Drive sync state, public intake link, and whether Agent Mode is enabled.",
     inputSchema: { type: "object", properties: {} },
+  },
+  {
+    name: "list_receiver_inboxes",
+    description:
+      "List the receiver (deal-inbox) Gmail accounts connected to this workspace, with status, last check time and errors.",
+    inputSchema: { type: "object", properties: {} },
+  },
+  {
+    name: "scan_deal_inbox",
+    description:
+      "Read-only preview of a receiver inbox: messages with attachments not yet ingested, with real Gmail message/attachment ids and each attachment classified as deck, document (xlsx/docx/csv — attached to the deal as data-room sources) or unsupported. Nothing is changed. Present the list to the user, then call ingest_inbox_messages with the chosen message_ids.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        receiver_email: { type: "string", description: "Which receiver inbox; defaults to the first enabled one" },
+        query: { type: "string", description: "Gmail search override (default: has:attachment in:inbox newer_than:30d). Threads are searched message-by-message." },
+        max: { type: "integer", minimum: 1, maximum: 100, default: 25 },
+      },
+    },
+  },
+  {
+    name: "get_ingest_report",
+    description:
+      "What was ingested and what was not: uploaded (new deal), attached (document added to a deal), duplicate, unsupported, skipped, failed — with reasons and deal ids. Covers every path (label, receiver inbox, intake, agents).",
+    inputSchema: {
+      type: "object",
+      properties: {
+        since_days: { type: "integer", minimum: 1, maximum: 90, default: 7 },
+        outcome: { type: "string", enum: ["uploaded", "attached", "duplicate", "unsupported", "skipped", "failed"] },
+        limit: { type: "integer", minimum: 1, maximum: 200, default: 50 },
+      },
+    },
+  },
+  {
+    name: "search",
+    description: "Search deals by free text (ChatGPT connector compatible alias of search_deals). Returns ids usable with fetch.",
+    inputSchema: { type: "object", properties: { query: { type: "string" } }, required: ["query"] },
+  },
+  {
+    name: "fetch",
+    description: "Fetch one deal by id with its extracted deck text (ChatGPT connector compatible alias of get_deal + get_deal_context).",
+    inputSchema: { type: "object", properties: { id: { type: "string" } }, required: ["id"] },
   },
   {
     name: "list_agent_activity",
@@ -373,6 +417,31 @@ const WRITE_TOOLS = [
     },
   },
   {
+    name: "ingest_inbox_messages",
+    description:
+      "Ingest specific Gmail messages from a receiver inbox by message_id (from scan_deal_inbox). Decks become deals and start the pipeline; documents attach to the deal; duplicates are detected by content hash. Idempotent. Requires Agent Mode.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        message_ids: { type: "array", items: { type: "string" }, minItems: 1, maxItems: 50 },
+        receiver_email: { type: "string" },
+      },
+      required: ["message_ids"],
+    },
+  },
+  {
+    name: "run_inbox_sweep",
+    description:
+      "Run the full receiver-inbox pass now (what the scheduler does): scan and ingest everything new, then return the report. Requires Agent Mode.",
+    inputSchema: { type: "object", properties: { receiver_email: { type: "string" } } },
+  },
+  {
+    name: "create_receiver_invite",
+    description:
+      "Mint a single-use, 7-day authorization link to hand to whoever controls a mailbox that should become a deal inbox. They open it, sign in with the mailbox's Google account, and it connects to this workspace. Requires Agent Mode.",
+    inputSchema: { type: "object", properties: { note: { type: "string", description: "Shown to the mailbox owner, e.g. 'the deals@ inbox'" } } },
+  },
+  {
     name: "get_agent_mode",
     description:
       "Check whether Agent Mode (write access) is enabled for the authenticated user, and list which write tools are available.",
@@ -420,6 +489,19 @@ async function logToolCall(
       error_message: errorMessage ?? null,
     } as any);
   } catch (_) { /* logging must never break a tool call */ }
+}
+
+async function resolveReceiver(userId: string, email?: string): Promise<{ account: ReceiverAccount; token: string }> {
+  let q = admin.from("receiver_accounts")
+    .select("id, user_id, email, google_access_token, google_refresh_token, gmail_history_id, enabled")
+    .eq("user_id", userId).eq("enabled", true).order("created_at", { ascending: true });
+  if (email) q = q.ilike("email", email);
+  const { data } = await q.limit(1);
+  const account = data?.[0] as ReceiverAccount | undefined;
+  if (!account) throw new Error(email ? `No enabled receiver inbox ${email}` : "No receiver inbox connected. Use create_receiver_invite or Settings → Deal Inbox.");
+  const token = await getReceiverToken(admin, account);
+  if (!token) throw new Error(`Google token for ${account.email} expired — the inbox must be reconnected`);
+  return { account, token };
 }
 
 async function assertOwnedDeal(dealId: string, userId: string) {
@@ -542,6 +624,41 @@ async function runTool(name: string, args: any, userId: string) {
         intake_url: `${APP_ORIGIN}/intake/${slug}`,
       };
     }
+    case "list_receiver_inboxes": {
+      const { data, error } = await admin.from("receiver_accounts")
+        .select("id, email, enabled, last_polled_at, last_error, created_at").eq("user_id", userId).order("created_at");
+      if (error) throw new Error(error.message);
+      return { inboxes: data ?? [], count: data?.length ?? 0 };
+    }
+    case "scan_deal_inbox": {
+      const { account, token } = await resolveReceiver(userId, args?.receiver_email);
+      const candidates = await scanForCandidates({ adminClient: admin, token, userId }, { query: args?.query || RECEIVER_QUERY, max: Math.min(args?.max ?? 25, 100) });
+      return {
+        inbox: account.email, query: args?.query || RECEIVER_QUERY, candidates, count: candidates.length,
+        hint: "Nothing was changed. Call ingest_inbox_messages with the message_ids to ingest.",
+      };
+    }
+    case "get_ingest_report": {
+      const since = new Date(Date.now() - (Math.min(args?.since_days ?? 7, 90)) * 86400_000).toISOString();
+      let q = admin.from("ingest_events")
+        .select("created_at, channel, outcome, reason, sender, subject, file_name, size_bytes, deal_id, source_id, gmail_message_id")
+        .eq("user_id", userId).gte("created_at", since).order("created_at", { ascending: false }).limit(Math.min(args?.limit ?? 50, 200));
+      if (args?.outcome) q = q.eq("outcome", args.outcome);
+      const { data, error } = await q;
+      if (error) throw new Error(error.message);
+      const counts: Record<string, number> = {};
+      for (const e of data ?? []) counts[e.outcome] = (counts[e.outcome] ?? 0) + 1;
+      return { since, counts, events: data ?? [] };
+    }
+    case "search": {
+      const out = await runTool("search_deals", { query: args?.query, limit: 10 }, userId);
+      return { results: (out.matches as any[]).map((d) => ({ id: d.id, title: d.name, url: `${APP_ORIGIN}/?deal=${d.id}` })) };
+    }
+    case "fetch": {
+      const deal = await runTool("get_deal", { deal_id: args?.id }, userId);
+      const ctx = await runTool("get_deal_context", { deal_id: args?.id, max_chars: 50000 }, userId);
+      return { id: args?.id, title: (deal as any).deal?.name, text: (ctx as any).text, url: `${APP_ORIGIN}/?deal=${args?.id}`, metadata: (deal as any).deal };
+    }
     case "list_agent_activity": {
       const limit = Math.min(args?.limit ?? 20, 100);
       const { data, error } = await admin.from("mcp_tool_calls")
@@ -576,7 +693,10 @@ async function runTool(name: string, args: any, userId: string) {
     case "delete_deal":
     case "share_deal":
     case "revoke_deal_share":
-    case "update_workspace_settings": {
+    case "update_workspace_settings":
+    case "ingest_inbox_messages":
+    case "run_inbox_sweep":
+    case "create_receiver_invite": {
       if (!(await isAgentModeEnabled(userId))) {
         await logToolCall(userId, name, args, false, "Agent Mode disabled");
         throw new Error(
@@ -809,11 +929,67 @@ async function runWriteTool(name: string, args: any, userId: string) {
       if (error) throw new Error(error.message);
       return { updated: Object.keys(updates) };
     }
+    case "ingest_inbox_messages": {
+      const ids = Array.isArray(args?.message_ids) ? args.message_ids.map(String).slice(0, 50) : [];
+      if (ids.length === 0) throw new Error("message_ids required");
+      const { account, token } = await resolveReceiver(userId, args?.receiver_email);
+      const reports = [];
+      for (const id of ids) {
+        reports.push(await ingestReceiverMessage({ adminClient: admin, token, account, messageId: id, supabaseUrl: SUPABASE_URL, serviceKey: SUPABASE_SERVICE_ROLE_KEY }));
+      }
+      // Agent-driven ingestion is recorded under its own channel for the audit trail.
+      await admin.from("ingest_events").update({ channel: "agent" }).eq("user_id", userId).in("gmail_message_id", ids).gte("created_at", new Date(Date.now() - 120_000).toISOString());
+      return { inbox: account.email, summary: summarize(reports), reports };
+    }
+    case "run_inbox_sweep": {
+      const { account } = await resolveReceiver(userId, args?.receiver_email);
+      const reports = await pollReceiverAccount({ adminClient: admin, account, supabaseUrl: SUPABASE_URL, serviceKey: SUPABASE_SERVICE_ROLE_KEY, max: 50 });
+      return { inbox: account.email, summary: summarize(reports), messages: reports.length, reports };
+    }
+    case "create_receiver_invite": {
+      const raw = randomToken("inv", 32).slice(4);
+      const hashHex = await sha256Hex(raw);
+      const expires_at = new Date(Date.now() + 7 * 86400_000).toISOString();
+      const note = typeof args?.note === "string" ? args.note.trim().slice(0, 200) : null;
+      const { error } = await admin.from("receiver_invites").insert({ user_id: userId, token_hash: hashHex, note, expires_at });
+      if (error) throw new Error(error.message);
+      return {
+        url: `${SUPABASE_URL}/functions/v1/receiver-oauth/invite?t=${raw}`, expires_at,
+        hint: "Send this link to the mailbox owner. They sign in with the mailbox's Google account; no EasyVC account needed. Single use.",
+      };
+    }
     default:
       throw new Error(`Unknown write tool: ${name}`);
   }
 }
 
+
+// ---------------- prompts (the workflow, not just the tools) ----------------
+const PROMPTS = [
+  {
+    name: "deal_inbox_triage",
+    description: "Triage the deal inbox: scan for new decks, confirm with the user, ingest, kick off research, and report what happened.",
+    arguments: [
+      { name: "receiver_email", description: "Which inbox (optional)", required: false },
+      { name: "since_days", description: "Look-back window, default 7", required: false },
+    ],
+    render: (a: Record<string, string>) => `You are triaging the EasyVC deal inbox${a.receiver_email ? ` ${a.receiver_email}` : ""}.
+
+1. Call scan_deal_inbox${a.receiver_email ? ` with receiver_email="${a.receiver_email}"` : ""}. Do not ingest yet.
+2. Show the user a compact table: sender, subject, date, each attachment with its kind (deck / document / unsupported). Group by thread if several messages share one. Flag anything that looks like spam, a newsletter, or an internal forward.
+3. Ask which to ingest (default: all decks). Then call ingest_inbox_messages with exactly those message_ids.
+4. For every 'uploaded' deal, call run_deep_research. If the user wants memos, call generate_memo after research completes (poll get_deal for deep_research_status=completed).
+5. Call get_ingest_report with since_days=${a.since_days || 7} and give a short written report: new deals (with names), documents attached, duplicates (and what they duplicated), unsupported files (and their types), anything failed. Suggest next actions, e.g. "3 decks are memo-ready; want a summary?"
+
+Never re-ingest a message the report shows as already processed. If no receiver inbox is connected, offer create_receiver_invite and explain the link is for whoever controls the mailbox.`,
+  },
+  {
+    name: "weekly_pipeline_digest",
+    description: "Weekly digest: what arrived, what moved, what needs a decision.",
+    arguments: [],
+    render: () => `Produce a weekly EasyVC digest. Call get_ingest_report (since_days=7), get_pipeline_summary, and list_deals (limit 25). Write: (1) inbound this week with sources, (2) deals by stage with anything stuck in processing or error, (3) memo-ready deals awaiting a decision, (4) duplicates/unsupported that may need a human. Keep it under 250 words, then offer to run deal_inbox_triage.`,
+  },
+];
 
 // ---------------- MCP JSON-RPC ----------------
 async function handleMcp(req: Request): Promise<Response> {
@@ -845,8 +1021,8 @@ async function handleMcp(req: Request): Promise<Response> {
           jsonrpc: "2.0", id,
           result: {
             protocolVersion: "2024-11-05",
-            capabilities: { tools: {} },
-            serverInfo: { name: "easyvc", version: "1.1.0" },
+            capabilities: { tools: {}, prompts: {} },
+            serverInfo: { name: "easyvc", version: "1.2.0" },
           },
         };
       }
@@ -864,6 +1040,14 @@ async function handleMcp(req: Request): Promise<Response> {
           jsonrpc: "2.0", id,
           result: { content: [{ type: "text", text: JSON.stringify(out, null, 2) }] },
         };
+      }
+      if (method === "prompts/list") {
+        return { jsonrpc: "2.0", id, result: { prompts: PROMPTS.map(({ name, description, arguments: a }) => ({ name, description, arguments: a })) } };
+      }
+      if (method === "prompts/get") {
+        const p = PROMPTS.find((x) => x.name === params?.name);
+        if (!p) return { jsonrpc: "2.0", id, error: { code: -32602, message: `Unknown prompt: ${params?.name}` } };
+        return { jsonrpc: "2.0", id, result: { description: p.description, messages: [{ role: "user", content: { type: "text", text: p.render(params?.arguments ?? {}) } }] } };
       }
       if (method === "ping") return { jsonrpc: "2.0", id, result: {} };
       if (method?.startsWith("notifications/")) return null;

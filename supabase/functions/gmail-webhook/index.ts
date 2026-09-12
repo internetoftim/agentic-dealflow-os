@@ -1,5 +1,6 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { getReceiverToken, ingestReceiverMessage, listReceiverCandidates, recordReceiverPoll, type ReceiverAccount } from "../_shared/gmail-receiver.ts";
+import { ingestGmailMessage } from "../_shared/gmail-ingest.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -178,7 +179,8 @@ async function handleReceiverNotification(
   ids = [...new Set(ids)];
   let processed = 0;
   for (const id of ids) {
-    processed += await ingestReceiverMessage({ adminClient, token, account, messageId: id, supabaseUrl, serviceKey });
+    const r = await ingestReceiverMessage({ adminClient, token, account, messageId: id, supabaseUrl, serviceKey });
+    processed += r.events.filter((e) => e.outcome === "uploaded").length;
   }
   if (newHistoryId) {
     await adminClient.from("receiver_accounts").update({ gmail_history_id: newHistoryId }).eq("id", account.id);
@@ -345,111 +347,14 @@ Deno.serve(async (req) => {
 
     let processed = 0;
 
+    // Shared core: ledger (idempotent), content-hash dedup, documents
+    // attached as data-room sources, every outcome recorded.
     for (const msgId of messageIds) {
-      try {
-        const msgRes = await fetch(
-          `https://gmail.googleapis.com/gmail/v1/users/me/messages/${msgId}`,
-          { headers: { Authorization: `Bearer ${token}` } }
-        );
-        if (!msgRes.ok) continue;
-        const fullMessage = await msgRes.json();
-
-        const headers = fullMessage.payload?.headers || [];
-        const subject = headers.find((h: any) => h.name.toLowerCase() === "subject")?.value || "No Subject";
-        const attachments = findAttachments(fullMessage.payload?.parts || []);
-
-        if (attachments.length === 0) {
-          await markAsRead(token, msgId);
-          continue;
-        }
-
-        console.log(`Processing ${attachments.length} attachment(s) from "${subject}"`);
-
-        for (const attachment of attachments) {
-          const gmailMessageId = `${msgId}:${attachment.filename}`;
-
-          const fileBytes = await getAttachment(token, msgId, attachment.attachmentId);
-          if (!fileBytes) continue;
-
-          const fileSizeMB = (fileBytes.length / (1024 * 1024)).toFixed(1);
-          const dealName = attachment.filename
-            .replace(/\.(pdf|pptx?)\s*$/i, "")
-            .replace(/[_-]/g, " ")
-            .trim() || subject;
-
-          // Create deal
-          const { data: deal, error: dealError } = await adminClient
-            .from("deals")
-            .insert({
-              user_id: userId,
-              name: dealName,
-              source: "email",
-              status: "uploading",
-              auto_ingested: true,
-              deck_size: `${fileSizeMB}MB`,
-            })
-            .select()
-            .single();
-
-          if (dealError) {
-            console.error(`Failed to create deal:`, dealError);
-            continue;
-          }
-
-          // Upload to storage
-          const storagePath = `${userId}/${deal.id}/${attachment.filename}`;
-          const mimeType = attachment.filename.toLowerCase().endsWith(".pdf")
-            ? "application/pdf"
-            : "application/vnd.openxmlformats-officedocument.presentationml.presentation";
-
-          const { error: uploadError } = await adminClient.storage
-            .from("decks")
-            .upload(storagePath, new Blob([fileBytes.buffer as ArrayBuffer], { type: mimeType }), { upsert: true });
-
-          if (uploadError) {
-            console.error(`Upload failed:`, uploadError);
-            await adminClient.from("deals").delete().eq("id", deal.id);
-            continue;
-          }
-
-          // Create source record with gmail_message_id for dedup
-          const { error: sourceError } = await adminClient.from("sources").insert({
-            deal_id: deal.id,
-            user_id: userId,
-            file_name: attachment.filename,
-            original_size: `${fileSizeMB}MB`,
-            storage_path: storagePath,
-            source_type: "email",
-            processing_status: "uploaded",
-            gmail_message_id: gmailMessageId,
-          });
-
-          if (sourceError) {
-            // Unique constraint violation = duplicate, clean up the deal
-            console.log(`Duplicate detected (${gmailMessageId}), rolling back deal`);
-            await adminClient.from("deals").delete().eq("id", deal.id);
-            await adminClient.storage.from("decks").remove([storagePath]);
-            continue;
-          }
-
-          // Trigger process-deck
-          fetch(`${supabaseUrl}/functions/v1/process-deck`, {
-            method: "POST",
-            headers: {
-              Authorization: `Bearer ${supabaseServiceKey}`,
-              "Content-Type": "application/json",
-            },
-            body: JSON.stringify({ dealId: deal.id, storagePath }),
-          }).catch((e) => console.warn("process-deck fire-and-forget error:", e));
-
-          processed++;
-        }
-
-        await markAsRead(token, msgId);
-      } catch (msgError) {
-        console.error(`Error processing message ${msgId}:`, msgError);
-        await markAsRead(token, msgId).catch(() => {});
-      }
+      const r = await ingestGmailMessage(
+        { adminClient, token, userId, channel: "label", supabaseUrl, serviceKey: supabaseServiceKey },
+        msgId,
+      );
+      processed += r.events.filter((e) => e.outcome === "uploaded").length;
     }
 
     // Update historyId

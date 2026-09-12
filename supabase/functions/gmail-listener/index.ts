@@ -1,5 +1,6 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { pollReceiverAccount, type ReceiverAccount } from "../_shared/gmail-receiver.ts";
+import { ingestGmailMessage } from "../_shared/gmail-ingest.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -320,148 +321,14 @@ Deno.serve(async (req) => {
 
         console.log(`Found ${messages.length} unread deck email(s) for user ${user_id}`);
 
+        // Shared core: ledger (idempotent), content-hash dedup, documents
+        // attached as data-room sources, every outcome recorded.
         for (const msg of messages) {
-          try {
-            // 3. Get full message details
-            const fullMessage = await getMessage(token, msg.id);
-            if (!fullMessage) continue;
-
-            const headers = fullMessage.payload?.headers || [];
-            const subject = extractSubject(headers);
-            const senderName = extractSenderName(headers);
-
-            // 4. Find deck attachments
-            const attachments = findAttachments(fullMessage.payload?.parts || []);
-
-            if (attachments.length === 0) {
-              console.log(`No deck attachments in email "${subject}" — skipping`);
-              await markAsRead(token, msg.id);
-              continue;
-            }
-
-            console.log(`Processing ${attachments.length} attachment(s) from "${subject}"`);
-
-            for (const attachment of attachments) {
-              // 5. Download attachment
-              const fileBytes = await getAttachment(
-                token,
-                msg.id,
-                attachment.attachmentId
-              );
-              if (!fileBytes) {
-                console.warn(`Failed to download attachment ${attachment.filename}`);
-                continue;
-              }
-
-              const fileSizeMB = (fileBytes.length / (1024 * 1024)).toFixed(1);
-              console.log(`Downloaded ${attachment.filename} (${fileSizeMB}MB)`);
-
-              // 6. Derive deal name from filename or subject
-              const dealName = attachment.filename
-                .replace(/\.(pdf|pptx?)\s*$/i, "")
-                .replace(/[_-]/g, " ")
-                .trim() || subject;
-
-              // 7. Create deal record
-              const { data: deal, error: dealError } = await adminClient
-                .from("deals")
-                .insert({
-                  user_id,
-                  name: dealName,
-                  source: "email",
-                  status: "uploading",
-                  auto_ingested: true,
-                  deck_size: `${fileSizeMB}MB`,
-                })
-                .select()
-                .single();
-
-              if (dealError) {
-                console.error(`Failed to create deal for ${attachment.filename}:`, dealError);
-                continue;
-              }
-
-              // 8. Upload file to Supabase Storage
-              const storagePath = `${user_id}/${deal.id}/${attachment.filename}`;
-              const mimeType = attachment.filename.toLowerCase().endsWith(".pdf")
-                ? "application/pdf"
-                : "application/vnd.openxmlformats-officedocument.presentationml.presentation";
-
-              const { error: uploadError } = await adminClient.storage
-                .from("decks")
-                .upload(
-                  storagePath,
-                  new Blob([fileBytes.buffer as ArrayBuffer], { type: mimeType }),
-                  { upsert: true }
-                );
-
-              if (uploadError) {
-                console.error(`Failed to upload ${attachment.filename}:`, uploadError);
-                // Clean up the deal
-                await adminClient.from("deals").delete().eq("id", deal.id);
-                continue;
-              }
-
-              // 9. Create source record
-              await adminClient.from("sources").insert({
-                deal_id: deal.id,
-                user_id,
-                file_name: attachment.filename,
-                original_size: `${fileSizeMB}MB`,
-                storage_path: storagePath,
-                source_type: "email",
-                processing_status: "uploaded",
-              });
-
-              // 10. Trigger process-deck pipeline (true fire-and-forget).
-              // We MUST NOT await the response — process-deck runs for minutes
-              // and would otherwise kill this listener's request budget,
-              // aborting process-deck mid-run (was leaving deals stuck in "extracting").
-              // EdgeRuntime.waitUntil keeps the runtime alive long enough to
-              // dispatch the request, but this handler returns immediately.
-              const dispatch = fetch(
-                `${supabaseUrl}/functions/v1/process-deck`,
-                {
-                  method: "POST",
-                  headers: {
-                    Authorization: `Bearer ${supabaseServiceKey}`,
-                    "Content-Type": "application/json",
-                  },
-                  body: JSON.stringify({
-                    dealId: deal.id,
-                    storagePath,
-                  }),
-                }
-              ).then(async (r) => {
-                if (!r.ok) {
-                  console.warn(
-                    `process-deck dispatch returned ${r.status} for deal ${deal.id}:`,
-                    await r.text().catch(() => "")
-                  );
-                } else {
-                  console.log(`Dispatched process-deck for deal ${deal.id} (${dealName})`);
-                  // Drain body so the connection can close cleanly.
-                  await r.text().catch(() => "");
-                }
-              }).catch((e) => {
-                console.warn(`process-deck dispatch error for deal ${deal.id}:`, e);
-              });
-              // @ts-expect-error EdgeRuntime is provided by Supabase Edge Functions.
-              if (typeof EdgeRuntime !== "undefined" && EdgeRuntime?.waitUntil) {
-                // @ts-expect-error see above
-                EdgeRuntime.waitUntil(dispatch);
-              }
-
-              totalProcessed++;
-            }
-
-            // 11. Mark email as read after processing all attachments
-            await markAsRead(token, msg.id);
-          } catch (msgError) {
-            console.error(`Error processing message ${msg.id}:`, msgError);
-            // Mark as read even on error to avoid reprocessing loops
-            await markAsRead(token, msg.id).catch(() => {});
-          }
+          const r = await ingestGmailMessage(
+            { adminClient, token, userId: user_id, channel: "label", supabaseUrl, serviceKey: supabaseServiceKey },
+            msg.id,
+          );
+          totalProcessed += r.events.filter((e) => e.outcome === "uploaded").length;
         }
       } catch (userError) {
         console.error(`Error processing user ${user_id}:`, userError);
@@ -475,7 +342,8 @@ Deno.serve(async (req) => {
       .select("id, user_id, email, google_access_token, google_refresh_token, gmail_history_id, enabled")
       .eq("enabled", true);
     for (const account of (receivers ?? []) as ReceiverAccount[]) {
-      receiverProcessed += await pollReceiverAccount({ adminClient, account, supabaseUrl, serviceKey: supabaseServiceKey });
+      const reports = await pollReceiverAccount({ adminClient, account, supabaseUrl, serviceKey: supabaseServiceKey });
+      receiverProcessed += reports.flatMap((r) => r.events).filter((e) => e.outcome === "uploaded").length;
     }
     if (receivers?.length) console.log(`Receiver inboxes: ${receivers.length} polled, ${receiverProcessed} deal(s) created`);
 

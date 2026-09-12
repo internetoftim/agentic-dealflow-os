@@ -351,6 +351,66 @@ export type Database = {
         }
         Relationships: []
       }
+      ingest_events: {
+        Row: {
+          channel: string
+          content_hash: string | null
+          created_at: string
+          deal_id: string | null
+          file_name: string | null
+          gmail_attachment_id: string | null
+          gmail_message_id: string | null
+          id: string
+          mime_type: string | null
+          outcome: string
+          reason: string | null
+          receiver_account_id: string | null
+          sender: string | null
+          size_bytes: number | null
+          source_id: string | null
+          subject: string | null
+          user_id: string
+        }
+        Insert: {
+          channel: string
+          content_hash?: string | null
+          created_at?: string
+          deal_id?: string | null
+          file_name?: string | null
+          gmail_attachment_id?: string | null
+          gmail_message_id?: string | null
+          id?: string
+          mime_type?: string | null
+          outcome: string
+          reason?: string | null
+          receiver_account_id?: string | null
+          sender?: string | null
+          size_bytes?: number | null
+          source_id?: string | null
+          subject?: string | null
+          user_id: string
+        }
+        Update: {
+          channel?: string
+          content_hash?: string | null
+          created_at?: string
+          deal_id?: string | null
+          file_name?: string | null
+          gmail_attachment_id?: string | null
+          gmail_message_id?: string | null
+          id?: string
+          mime_type?: string | null
+          outcome?: string
+          reason?: string | null
+          receiver_account_id?: string | null
+          sender?: string | null
+          size_bytes?: number | null
+          source_id?: string | null
+          subject?: string | null
+          user_id?: string
+        }
+        Relationships: []
+      }
       mcp_access_tokens: {
         Row: {
           created_at: string
@@ -654,6 +714,7 @@ export type Database = {
       sources: {
         Row: {
           compressed_size: string | null
+          content_hash: string | null
           created_at: string
           deal_id: string
           extracted_text: string | null
@@ -669,6 +730,7 @@ export type Database = {
         }
         Insert: {
           compressed_size?: string | null
+          content_hash?: string | null
           created_at?: string
           deal_id: string
           extracted_text?: string | null
@@ -684,6 +746,7 @@ export type Database = {
         }
         Update: {
           compressed_size?: string | null
+          content_hash?: string | null
           created_at?: string
           deal_id?: string
           extracted_text?: string | null

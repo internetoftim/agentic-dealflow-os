@@ -15,6 +15,7 @@ vi.mock("@/hooks/useReceiverAccounts", () => ({
   useReceiverAccounts: () => ({ accounts: accountsState, invites: invitesState, isLoading: false, connect, setEnabled, disconnect, createInvite, revokeInvite }),
 }));
 vi.mock("sonner", () => ({ toast }));
+vi.mock("@/hooks/useIngestEvents", () => ({ useIngestEvents: () => ({ events: [], isLoading: false }) }));
 
 import { ReceiverInboxSection } from "@/components/ReceiverInboxSection";
 

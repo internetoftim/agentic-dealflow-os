@@ -2,6 +2,8 @@ import { useEffect, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { Inbox, Plus, Trash2, Loader2, AlertCircle, Link2, Copy, Check, Mail, X } from "lucide-react";
 import { useReceiverAccounts } from "@/hooks/useReceiverAccounts";
+import { useIngestEvents, type IngestOutcome } from "@/hooks/useIngestEvents";
+import { Link } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { toast } from "sonner";
@@ -24,6 +26,8 @@ export function ReceiverInboxSection() {
   const [inviteNote, setInviteNote] = useState("");
   const [latestInvite, setLatestInvite] = useState<{ url: string; expires_at: string } | null>(null);
   const [copied, setCopied] = useState(false);
+  const { events } = useIngestEvents(30);
+  const [outcomeFilter, setOutcomeFilter] = useState<IngestOutcome | "all">("all");
   const [searchParams, setSearchParams] = useSearchParams();
 
   // Google bounces back here with ?receiver=connected|error
@@ -177,6 +181,49 @@ export function ReceiverInboxSection() {
                   <Mail className="h-3.5 w-3.5" /> Email
                 </a>
               </Button>
+            </div>
+          </div>
+        )}
+
+        {events.length > 0 && (
+          <div>
+            <div className="flex items-center justify-between mb-1.5">
+              <p className="text-xs font-medium text-foreground">Recent activity</p>
+              <div className="flex gap-1">
+                {(["all", "uploaded", "attached", "duplicate", "unsupported", "skipped", "failed"] as const).map((o) => (
+                  <button
+                    key={o}
+                    onClick={() => setOutcomeFilter(o)}
+                    className={`rounded-[4px] px-1.5 py-0.5 text-[10px] transition-colors ${
+                      outcomeFilter === o ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"
+                    }`}
+                  >
+                    {o}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div className="divide-y divide-border rounded-[5px] border border-border max-h-72 overflow-auto">
+              {events.filter((e) => outcomeFilter === "all" || e.outcome === outcomeFilter).map((e) => (
+                <div key={e.id} className="flex items-start gap-3 px-3 py-2" data-testid="ingest-event">
+                  <span className={`mt-1 h-1.5 w-1.5 rounded-full shrink-0 ${
+                    e.outcome === "uploaded" ? "bg-success" : e.outcome === "attached" ? "bg-brand" :
+                    e.outcome === "failed" ? "bg-destructive" : e.outcome === "duplicate" ? "bg-warning" : "bg-muted-foreground/40"
+                  }`} />
+                  <div className="min-w-0 flex-1">
+                    <p className="text-[12px] text-foreground truncate">
+                      <span className="font-medium">{e.outcome}</span>
+                      {e.file_name && <> · {e.file_name}</>}
+                      {e.deal_id && (e.outcome === "uploaded" || e.outcome === "attached") && (
+                        <> · <Link to={`/?deal=${e.deal_id}`} className="text-brand hover:underline">open deal</Link></>
+                      )}
+                    </p>
+                    <p className="text-[11px] text-muted-foreground truncate">
+                      {e.subject || "—"}{e.sender ? ` · ${e.sender}` : ""}{e.reason ? ` · ${e.reason}` : ""} · {e.channel} · {relative(e.created_at)}
+                    </p>
+                  </div>
+                </div>
+              ))}
             </div>
           </div>
         )}
