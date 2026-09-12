@@ -2,6 +2,15 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 
+export interface ReceiverInvite {
+  id: string;
+  note: string | null;
+  expires_at: string;
+  used_at: string | null;
+  used_by_email: string | null;
+  created_at: string;
+}
+
 export interface ReceiverAccount {
   id: string;
   email: string;
@@ -32,7 +41,52 @@ export function useReceiverAccounts() {
     enabled: !!user,
   });
 
-  const invalidate = () => queryClient.invalidateQueries({ queryKey: ["receiver-accounts"] });
+  const invitesQuery = useQuery({
+    queryKey: ["receiver-invites", user?.id],
+    queryFn: async (): Promise<ReceiverInvite[]> => {
+      const { data, error } = await supabase
+        .from("receiver_invites")
+        .select("id, note, expires_at, used_at, used_by_email, created_at")
+        .order("created_at", { ascending: false });
+      if (error) throw error;
+      return (data ?? []) as ReceiverInvite[];
+    },
+    enabled: !!user,
+  });
+
+  const invalidate = () => {
+    queryClient.invalidateQueries({ queryKey: ["receiver-accounts"] });
+    queryClient.invalidateQueries({ queryKey: ["receiver-invites"] });
+  };
+
+  /** Mint a link for whoever controls the mailbox; they complete Google consent themselves. */
+  const createInvite = useMutation({
+    mutationFn: async (note?: string) => {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session?.access_token) throw new Error("Not signed in");
+      const res = await fetch(`${RECEIVER_OAUTH}/invite`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${session.access_token}`,
+          apikey: import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ note: note ?? null }),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok || !body.url) throw new Error(body.error || "Could not create invite");
+      return body as { id: string; url: string; expires_at: string };
+    },
+    onSuccess: invalidate,
+  });
+
+  const revokeInvite = useMutation({
+    mutationFn: async (id: string) => {
+      const { error } = await supabase.from("receiver_invites").delete().eq("id", id);
+      if (error) throw error;
+    },
+    onSuccess: invalidate,
+  });
 
   /** Begin Google consent for a new receiver mailbox; the browser leaves the app. */
   const connect = useMutation({
@@ -70,5 +124,14 @@ export function useReceiverAccounts() {
     onSuccess: invalidate,
   });
 
-  return { accounts: query.data ?? [], isLoading: query.isLoading, connect, setEnabled, disconnect };
+  return {
+    accounts: query.data ?? [],
+    invites: invitesQuery.data ?? [],
+    isLoading: query.isLoading,
+    connect,
+    setEnabled,
+    disconnect,
+    createInvite,
+    revokeInvite,
+  };
 }

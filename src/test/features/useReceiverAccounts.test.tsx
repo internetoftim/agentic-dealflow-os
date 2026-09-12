@@ -61,4 +61,26 @@ describe("useReceiverAccounts", () => {
     expect(b).toBeDefined();
     expect(b.eq).toHaveBeenCalledWith("id", "r1");
   });
+
+  it("mints an invite through /invite with the user's JWT and returns the link", async () => {
+    mock = makeSupabaseMock({ tables: { receiver_accounts: { data: [] }, receiver_invites: { data: [] } } });
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ id: "i1", url: "https://x/invite?t=abc", expires_at: "2026-09-19T00:00:00Z" }), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+    const { result } = renderHook(() => useReceiverAccounts(), { wrapper });
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+    const inv = await result.current.createInvite.mutateAsync("ops inbox");
+    expect(inv.url).toBe("https://x/invite?t=abc");
+    const [calledUrl, init] = fetchMock.mock.calls[0] as any;
+    expect(calledUrl).toMatch(/\/receiver-oauth\/invite$/);
+    expect(init.headers.Authorization).toBe("Bearer jwt-123");
+    expect(JSON.parse(init.body)).toEqual({ note: "ops inbox" });
+  });
+
+  it("never selects the invite token hash from the client", async () => {
+    mock = makeSupabaseMock({ tables: { receiver_accounts: { data: [] }, receiver_invites: { data: [] } } });
+    const { result } = renderHook(() => useReceiverAccounts(), { wrapper });
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+    const invitesBuilder = mock.supabase.from.mock.results.map((r: any) => r.value)[mock.supabase.from.mock.calls.findIndex((c: any) => c[0] === "receiver_invites")];
+    expect(invitesBuilder.select.mock.calls[0][0]).not.toMatch(/token/);
+  });
 });

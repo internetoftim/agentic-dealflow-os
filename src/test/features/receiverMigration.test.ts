@@ -25,3 +25,16 @@ describe("receiver_accounts migration contract", () => {
     }
   });
 });
+
+const invitesSql = readFileSync(resolve(__dirname, "../../../supabase/migrations/20260912120000_receiver_invites.sql"), "utf8");
+
+describe("receiver_invites migration contract", () => {
+  it("stores only a token hash, owner-scoped, unreadable by anon", () => {
+    expect(invitesSql).toMatch(/token_hash text NOT NULL UNIQUE/);
+    expect(invitesSql).not.toMatch(/\btoken text\b/);
+    expect(invitesSql).toMatch(/REVOKE ALL ON public\.receiver_invites FROM anon/);
+    const grant = invitesSql.match(/GRANT SELECT \(([^)]+)\)\s+ON public\.receiver_invites TO authenticated/);
+    expect(grant![1]).not.toMatch(/token_hash/);
+    expect(invitesSql).toMatch(/"Owners can revoke their invites"[\s\S]*?USING \(user_id = auth\.uid\(\)\)/);
+  });
+});

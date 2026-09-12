@@ -1,6 +1,6 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useSearchParams } from "react-router-dom";
-import { Inbox, Plus, Trash2, Loader2, AlertCircle } from "lucide-react";
+import { Inbox, Plus, Trash2, Loader2, AlertCircle, Link2, Copy, Check, Mail, X } from "lucide-react";
 import { useReceiverAccounts } from "@/hooks/useReceiverAccounts";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
@@ -20,7 +20,10 @@ function relative(iso: string | null): string {
  * forwarded to it with a deck attached is ingested — no label required.
  */
 export function ReceiverInboxSection() {
-  const { accounts, isLoading, connect, setEnabled, disconnect } = useReceiverAccounts();
+  const { accounts, invites, isLoading, connect, setEnabled, disconnect, createInvite, revokeInvite } = useReceiverAccounts();
+  const [inviteNote, setInviteNote] = useState("");
+  const [latestInvite, setLatestInvite] = useState<{ url: string; expires_at: string } | null>(null);
+  const [copied, setCopied] = useState(false);
   const [searchParams, setSearchParams] = useSearchParams();
 
   // Google bounces back here with ?receiver=connected|error
@@ -99,14 +102,120 @@ export function ReceiverInboxSection() {
           <p className="text-xs text-muted-foreground italic">No deal inbox connected yet.</p>
         )}
 
-        <Button size="sm" variant="outline" className="gap-1.5" disabled={connect.isPending} onClick={startConnect}>
-          {connect.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Plus className="h-3.5 w-3.5" />}
-          Connect a receiver Gmail
-        </Button>
-        <p className="text-[11px] text-muted-foreground">
-          You'll sign in to the <em>receiver</em> account on Google and grant read access. Your primary
-          sign-in is unaffected. Tip: set up a forwarding rule from your main mailbox to it.
-        </p>
+        <div className="grid gap-4 sm:grid-cols-2">
+          <div className="space-y-2">
+            <p className="text-xs font-medium text-foreground">You control the mailbox</p>
+            <Button size="sm" variant="outline" className="gap-1.5" disabled={connect.isPending} onClick={startConnect}>
+              {connect.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Plus className="h-3.5 w-3.5" />}
+              Connect a receiver Gmail
+            </Button>
+            <p className="text-[11px] text-muted-foreground">
+              You'll sign in to the <em>receiver</em> account on Google and grant read access. Your
+              primary sign-in is unaffected.
+            </p>
+          </div>
+          <div className="space-y-2">
+            <p className="text-xs font-medium text-foreground">Someone else controls it</p>
+            <input
+              value={inviteNote}
+              onChange={(e) => setInviteNote(e.target.value)}
+              maxLength={200}
+              placeholder="Optional note for them, e.g. “deals@ inbox”"
+              className="w-full rounded-[5px] border border-input bg-background px-2.5 py-1.5 text-[12px] outline-none placeholder:text-muted-foreground focus:border-brand/50"
+            />
+            <Button
+              size="sm"
+              variant="outline"
+              className="gap-1.5"
+              disabled={createInvite.isPending}
+              onClick={() =>
+                toast.promise(
+                  createInvite.mutateAsync(inviteNote.trim() || undefined).then((inv) => {
+                    setLatestInvite(inv);
+                    setInviteNote("");
+                  }),
+                  { loading: "Creating invite…", success: "Invite link ready — send it to the mailbox owner", error: (e) => e.message },
+                )
+              }
+            >
+              {createInvite.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Link2 className="h-3.5 w-3.5" />}
+              Create an authorization link
+            </Button>
+            <p className="text-[11px] text-muted-foreground">
+              They open the link, see who's asking and why, and sign in with the mailbox's Google
+              account. No EasyVC account needed. Single use, expires in 7 days.
+            </p>
+          </div>
+        </div>
+
+        {latestInvite && (
+          <div className="rounded-[5px] border border-brand/40 bg-brand-muted/30 p-3 space-y-2">
+            <p className="text-xs font-medium text-foreground">Send this link to the mailbox owner</p>
+            <div className="flex items-center gap-2">
+              <code className="flex-1 truncate rounded-[4px] bg-card border border-border px-2 py-1.5 text-[11px] font-mono text-muted-foreground select-all">
+                {latestInvite.url}
+              </code>
+              <Button
+                size="sm"
+                variant="outline"
+                className="gap-1.5 shrink-0"
+                onClick={async () => {
+                  await navigator.clipboard.writeText(latestInvite.url);
+                  setCopied(true);
+                  setTimeout(() => setCopied(false), 1500);
+                }}
+              >
+                {copied ? <Check className="h-3.5 w-3.5 text-success" /> : <Copy className="h-3.5 w-3.5" />}
+                Copy
+              </Button>
+              <Button size="sm" variant="outline" className="gap-1.5 shrink-0" asChild>
+                <a
+                  href={`mailto:?subject=${encodeURIComponent("Connect your mailbox as a deal inbox")}&body=${encodeURIComponent(
+                    `Please open this link and sign in with the mailbox's Google account to connect it as a deal inbox:\n\n${latestInvite.url}\n\nIt's single-use and expires in 7 days.`,
+                  )}`}
+                >
+                  <Mail className="h-3.5 w-3.5" /> Email
+                </a>
+              </Button>
+            </div>
+          </div>
+        )}
+
+        {invites.length > 0 && (
+          <div>
+            <p className="text-xs font-medium text-foreground mb-1.5">Authorization links</p>
+            <div className="divide-y divide-border rounded-[5px] border border-border">
+              {invites.map((inv) => {
+                const expired = !inv.used_at && new Date(inv.expires_at) < new Date();
+                const status = inv.used_at
+                  ? `Used by ${inv.used_by_email ?? "the mailbox owner"}`
+                  : expired ? "Expired" : `Pending · expires ${relative(inv.expires_at).replace(" ago", "")}`;
+                return (
+                  <div key={inv.id} className="flex items-center gap-3 px-3 py-2">
+                    <div className="min-w-0 flex-1">
+                      <p className="text-[12px] text-foreground truncate">{inv.note || "Deal inbox invite"}</p>
+                      <p className={`text-[11px] ${inv.used_at ? "text-success" : expired ? "text-muted-foreground" : "text-muted-foreground"}`}>{status}</p>
+                    </div>
+                    {!inv.used_at && (
+                      <button
+                        title="Revoke link"
+                        aria-label={`Revoke invite ${inv.id}`}
+                        className="text-muted-foreground hover:text-destructive transition-colors"
+                        onClick={() =>
+                          toast.promise(revokeInvite.mutateAsync(inv.id), {
+                            loading: "Revoking…", success: "Link revoked", error: (e) => e.message,
+                          })
+                        }
+                      >
+                        <X className="h-3.5 w-3.5" />
+                      </button>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
       </div>
     </section>
   );

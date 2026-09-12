@@ -1,7 +1,11 @@
 // Receiver (deal-inbox) Gmail OAuth.
-//   POST /start     — user JWT required; returns { url } to send the browser to Google
-//   GET  /callback  — Google redirects here; exchanges the code, stores tokens,
-//                     registers a Gmail watch, and bounces back to the app.
+//   POST /start        — user JWT; returns { url } to send the browser to Google (self-connect)
+//   POST /invite       — user JWT; mints a single-use invite link for the mailbox's owner
+//   GET  /invite?t=    — landing page for the invitee (no app account needed)
+//   GET  /authorize?t= — invitee clicked Connect; redirects to Google
+//   GET  /callback     — Google redirects here; exchanges the code, stores tokens,
+//                        registers a Gmail watch, and bounces back (app or /done page)
+//   GET  /done         — plain result page for invitees
 //
 // State is an HMAC-signed payload (user id, expiry, return URL) so the callback
 // can trust who initiated the connection without any server-side session.
@@ -15,7 +19,9 @@ const SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const CLIENT_ID = Deno.env.get("GOOGLE_CLIENT_ID") ?? "";
 const CLIENT_SECRET = Deno.env.get("GOOGLE_CLIENT_SECRET") ?? "";
 const APP_ORIGIN = Deno.env.get("APP_ORIGIN") ?? "https://onepointsix.ai";
-const REDIRECT_URI = `${SUPABASE_URL}/functions/v1/receiver-oauth/callback`;
+const FUNCTION_BASE = `${SUPABASE_URL}/functions/v1/receiver-oauth`;
+const REDIRECT_URI = `${FUNCTION_BASE}/callback`;
+const INVITE_TTL_MS = 7 * 24 * 60 * 60_000;
 const SCOPES = [
   "https://www.googleapis.com/auth/gmail.readonly",
   "https://www.googleapis.com/auth/gmail.modify",
@@ -44,16 +50,42 @@ function b64urlDecode(s: string): string {
   return atob(s.replaceAll("-", "+").replaceAll("_", "/") + "=".repeat((4 - (s.length % 4)) % 4));
 }
 
-async function signState(data: { uid: string; ret: string }): Promise<string> {
+type State = { uid: string; ret: string; inv?: string };
+async function signState(data: State): Promise<string> {
   const payload = b64url(enc.encode(JSON.stringify({ ...data, exp: Date.now() + 10 * 60_000 })));
   return `${payload}.${await hmac(payload)}`;
 }
-async function verifyState(state: string): Promise<{ uid: string; ret: string } | null> {
+async function verifyState(state: string): Promise<State | null> {
   const [payload, sig] = state.split(".");
   if (!payload || !sig || (await hmac(payload)) !== sig) return null;
   const data = JSON.parse(b64urlDecode(payload));
   if (typeof data.exp !== "number" || data.exp < Date.now()) return null;
-  return { uid: data.uid, ret: data.ret };
+  return { uid: data.uid, ret: data.ret, inv: data.inv };
+}
+
+async function sha256Hex(input: string): Promise<string> {
+  const buf = await crypto.subtle.digest("SHA-256", enc.encode(input));
+  return Array.from(new Uint8Array(buf)).map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+function randomToken(): string {
+  const bytes = new Uint8Array(32);
+  crypto.getRandomValues(bytes);
+  return b64url(bytes);
+}
+
+/** Resolve a raw invite token to a live (unused, unexpired) invite row. */
+async function loadInvite(rawToken: string) {
+  if (!rawToken) return null;
+  const { data } = await admin.from("receiver_invites")
+    .select("id, user_id, note, expires_at, used_at")
+    .eq("token_hash", await sha256Hex(rawToken)).maybeSingle();
+  if (!data || data.used_at || new Date(data.expires_at) < new Date()) return null;
+  return data;
+}
+
+async function inviterLabel(userId: string): Promise<string> {
+  const { data } = await admin.from("profiles").select("email, display_name").eq("user_id", userId).maybeSingle();
+  return (data as any)?.display_name || (data as any)?.email || "A OnePointSix workspace owner";
 }
 
 /** Only bounce back to origins we own (prod, local dev, Lovable previews). */
@@ -64,6 +96,7 @@ function safeReturn(ret: unknown): string {
     const u = new URL(ret);
     const host = u.hostname;
     const ok = u.origin === APP_ORIGIN
+      || ret.startsWith(`${FUNCTION_BASE}/done`)
       || host === "localhost" || host === "127.0.0.1"
       || host.endsWith(".lovable.app") || host.endsWith(".lovableproject.com");
     return ok ? ret : fallback;
@@ -79,18 +112,7 @@ function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), { status, headers: { ...corsHeaders, "Content-Type": "application/json" } });
 }
 
-// ---------------------------------------------------------------- handlers
-async function handleStart(req: Request): Promise<Response> {
-  const authHeader = req.headers.get("Authorization") ?? "";
-  if (!authHeader.startsWith("Bearer ")) return json({ error: "Unauthorized" }, 401);
-  const userClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, { global: { headers: { Authorization: authHeader } } });
-  const { data: { user }, error } = await userClient.auth.getUser();
-  if (error || !user) return json({ error: "Unauthorized" }, 401);
-  if (!CLIENT_ID) return json({ error: "GOOGLE_CLIENT_ID is not configured" }, 500);
-
-  const body = await req.json().catch(() => ({}));
-  const state = await signState({ uid: user.id, ret: safeReturn(body?.returnTo) });
-
+function googleAuthUrl(state: string): string {
   const url = new URL("https://accounts.google.com/o/oauth2/v2/auth");
   url.searchParams.set("client_id", CLIENT_ID);
   url.searchParams.set("redirect_uri", REDIRECT_URI);
@@ -100,7 +122,104 @@ async function handleStart(req: Request): Promise<Response> {
   url.searchParams.set("prompt", "consent select_account");
   url.searchParams.set("include_granted_scopes", "true");
   url.searchParams.set("state", state);
-  return json({ url: url.toString() });
+  return url.toString();
+}
+
+// ---------------------------------------------------------------- html pages
+function page(title: string, body: string): Response {
+  const html = `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>${title}</title>
+<style>
+  body{margin:0;background:#f7f6f3;color:#15181f;font:15px/1.6 Inter,system-ui,-apple-system,sans-serif}
+  main{max-width:520px;margin:12vh auto;padding:0 24px}
+  .card{background:#fff;border:1px solid #e3dfd7;border-radius:6px;padding:28px 30px}
+  h1{font:600 20px/1.3 Inter,system-ui,sans-serif;letter-spacing:-.01em;margin:0 0 8px}
+  p{margin:0 0 12px;color:#55585f} .muted{font-size:12px;color:#8a8d94}
+  .btn{display:inline-block;margin-top:14px;background:#1b2436;color:#f7f6f3;text-decoration:none;padding:10px 16px;border-radius:5px;font-weight:500;font-size:14px}
+  .brand{font-weight:600;color:#15181f} .ok{color:#2f6b4e} .err{color:#9b3a30}
+  ul{padding-left:18px;color:#55585f}
+</style></head><body><main><div class="card">${body}</div>
+<p class="muted" style="margin-top:14px">OnePointSix · EasyVC deal inbox</p></main></body></html>`;
+  return new Response(html, { headers: { ...corsHeaders, "Content-Type": "text/html; charset=utf-8" } });
+}
+const esc = (s: string) => s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]!));
+
+// ---------------------------------------------------------------- handlers
+async function authedUser(req: Request) {
+  const authHeader = req.headers.get("Authorization") ?? "";
+  if (!authHeader.startsWith("Bearer ")) return null;
+  const userClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, { global: { headers: { Authorization: authHeader } } });
+  const { data: { user }, error } = await userClient.auth.getUser();
+  return error ? null : user;
+}
+
+/** Owner mints a link to hand to whoever controls the mailbox. */
+async function handleInvite(req: Request): Promise<Response> {
+  const user = await authedUser(req);
+  if (!user) return json({ error: "Unauthorized" }, 401);
+  const body = await req.json().catch(() => ({}));
+  const note = typeof body?.note === "string" ? body.note.trim().slice(0, 200) : null;
+  const raw = randomToken();
+  const expires_at = new Date(Date.now() + INVITE_TTL_MS).toISOString();
+  const { data, error } = await admin.from("receiver_invites")
+    .insert({ user_id: user.id, token_hash: await sha256Hex(raw), note, expires_at })
+    .select("id, expires_at").single();
+  if (error || !data) return json({ error: error?.message ?? "Could not create invite" }, 500);
+  return json({ id: data.id, url: `${FUNCTION_BASE}/invite?t=${raw}`, expires_at: data.expires_at });
+}
+
+/** Invitee landing page: who is asking, what will happen, one button. */
+async function handleInvitePage(req: Request): Promise<Response> {
+  const t = new URL(req.url).searchParams.get("t") ?? "";
+  const invite = await loadInvite(t);
+  if (!invite) {
+    return page("Invite unavailable", `<h1 class="err">This link is no longer valid</h1>
+      <p>It may have expired, been revoked, or already been used. Ask the person who sent it for a new one.</p>`);
+  }
+  const who = esc(await inviterLabel(invite.user_id));
+  const note = invite.note ? `<p><em>“${esc(invite.note)}”</em></p>` : "";
+  return page("Connect a deal inbox", `
+    <h1>Connect this mailbox as a deal inbox</h1>
+    <p><span class="brand">${who}</span> is asking to connect a Gmail mailbox you control to their EasyVC deal workspace.</p>
+    ${note}
+    <p>What this does:</p>
+    <ul>
+      <li>Any email that arrives in the mailbox with a pitch deck attached (PDF/PowerPoint) is ingested into <span class="brand">${who}</span>'s workspace.</li>
+      <li>Processed emails are marked as read. Nothing is sent from the mailbox and no email is deleted.</li>
+      <li>You can revoke access at any time from your Google account's connected apps.</li>
+    </ul>
+    <p>On the next screen, sign in with the Google account of <strong>the mailbox to connect</strong> — not your personal one, unless they're the same.</p>
+    <a class="btn" href="${FUNCTION_BASE}/authorize?t=${encodeURIComponent(t)}">Connect with Google</a>
+    <p class="muted" style="margin-top:14px">Link expires ${esc(new Date(invite.expires_at).toUTCString())}.</p>`);
+}
+
+/** Invitee clicked Connect: send them to Google with state bound to the inviter. */
+async function handleAuthorize(req: Request): Promise<Response> {
+  const t = new URL(req.url).searchParams.get("t") ?? "";
+  const invite = await loadInvite(t);
+  if (!invite) return page("Invite unavailable", `<h1 class="err">This link is no longer valid</h1><p>Ask for a new invite.</p>`);
+  if (!CLIENT_ID) return page("Not configured", `<h1 class="err">Google sign-in is not configured</h1>`);
+  const state = await signState({ uid: invite.user_id, ret: `${FUNCTION_BASE}/done`, inv: invite.id });
+  return new Response(null, { status: 302, headers: { ...corsHeaders, Location: googleAuthUrl(state) } });
+}
+
+function handleDone(req: Request): Response {
+  const p = new URL(req.url).searchParams;
+  if (p.get("receiver") === "connected") {
+    return page("Inbox connected", `<h1 class="ok">Connected</h1>
+      <p><strong>${esc(p.get("email") ?? "The mailbox")}</strong> is now a deal inbox. Decks sent to it will be picked up automatically — you can close this page.</p>`);
+  }
+  return page("Connection failed", `<h1 class="err">Couldn't connect the mailbox</h1>
+    <p>${esc(p.get("reason") ?? "Unknown error")}</p><p>You can go back to the invite link and try again.</p>`);
+}
+
+async function handleStart(req: Request): Promise<Response> {
+  const user = await authedUser(req);
+  if (!user) return json({ error: "Unauthorized" }, 401);
+  if (!CLIENT_ID) return json({ error: "GOOGLE_CLIENT_ID is not configured" }, 500);
+  const body = await req.json().catch(() => ({}));
+  const state = await signState({ uid: user.id, ret: safeReturn(body?.returnTo) });
+  return json({ url: googleAuthUrl(state) });
 }
 
 async function handleCallback(req: Request): Promise<Response> {
@@ -108,6 +227,12 @@ async function handleCallback(req: Request): Promise<Response> {
   const state = await verifyState(params.get("state") ?? "");
   const ret = safeReturn(state?.ret);
   if (!state) return redirect(ret, { receiver: "error", reason: "Invalid or expired state" });
+  if (state.inv) {
+    const { data: inv } = await admin.from("receiver_invites").select("used_at, expires_at").eq("id", state.inv).maybeSingle();
+    if (!inv || inv.used_at || new Date(inv.expires_at) < new Date()) {
+      return redirect(ret, { receiver: "error", reason: "This invite is no longer valid" });
+    }
+  }
   if (params.get("error")) return redirect(ret, { receiver: "error", reason: params.get("error")! });
   const code = params.get("code");
   if (!code) return redirect(ret, { receiver: "error", reason: "Missing code" });
@@ -165,6 +290,10 @@ async function handleCallback(req: Request): Promise<Response> {
     catch (e) { console.warn("Receiver watch registration failed (poll still active):", e); }
   }
 
+  if (state.inv) {
+    await admin.from("receiver_invites")
+      .update({ used_at: new Date().toISOString(), used_by_email: email }).eq("id", state.inv);
+  }
   return redirect(ret, { receiver: "connected", email });
 }
 
@@ -173,7 +302,11 @@ Deno.serve(async (req) => {
   const path = new URL(req.url).pathname;
   try {
     if (req.method === "POST" && path.endsWith("/start")) return await handleStart(req);
+    if (req.method === "POST" && path.endsWith("/invite")) return await handleInvite(req);
+    if (req.method === "GET" && path.endsWith("/invite")) return await handleInvitePage(req);
+    if (req.method === "GET" && path.endsWith("/authorize")) return await handleAuthorize(req);
     if (req.method === "GET" && path.endsWith("/callback")) return await handleCallback(req);
+    if (req.method === "GET" && path.endsWith("/done")) return handleDone(req);
     return json({ error: "Not found" }, 404);
   } catch (e) {
     console.error("receiver-oauth error:", e);

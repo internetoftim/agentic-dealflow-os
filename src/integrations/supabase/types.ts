@@ -618,6 +618,39 @@ export type Database = {
         }
         Relationships: []
       }
+      receiver_invites: {
+        Row: {
+          created_at: string
+          expires_at: string
+          id: string
+          note: string | null
+          token_hash: string
+          used_at: string | null
+          used_by_email: string | null
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          expires_at: string
+          id?: string
+          note?: string | null
+          token_hash: string
+          used_at?: string | null
+          used_by_email?: string | null
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          expires_at?: string
+          id?: string
+          note?: string | null
+          token_hash?: string
+          used_at?: string | null
+          used_by_email?: string | null
+          user_id?: string
+        }
+        Relationships: []
+      }
       sources: {
         Row: {
           compressed_size: string | null
