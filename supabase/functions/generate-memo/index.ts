@@ -1,4 +1,5 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { getUserGoogleAccessToken } from "../_shared/google-tokens.ts";
 import { marked } from "https://esm.sh/marked@15.0.4";
 
 const corsHeaders = {
@@ -125,7 +126,7 @@ Deno.serve(async (req) => {
     const [dealResult, sourcesResult, settingsResult] = await Promise.all([
       adminClient.from("deals").select("*").eq("id", dealId).eq("user_id", userId).single(),
       adminClient.from("sources").select("file_name, extracted_text").eq("deal_id", dealId).eq("user_id", userId),
-      adminClient.from("user_settings").select("ai_model, memo_prompt, google_provider_token, drive_sync_enabled, recap_naming_pattern, drive_folder").eq("user_id", userId).single(),
+      adminClient.from("user_settings").select("ai_model, memo_prompt, drive_sync_enabled, recap_naming_pattern, drive_folder").eq("user_id", userId).single(),
     ]);
 
     const deal = dealResult.data;
@@ -223,7 +224,9 @@ DEAL CONTEXT:
     let driveFileId: string | null = null;
     let driveFileName: string | null = null;
 
-    if (settings?.google_provider_token && settings?.drive_sync_enabled) {
+    // Refresh-aware Drive token (the stored one may be expired); null = Drive off.
+    const driveToken = settings?.drive_sync_enabled ? await getUserGoogleAccessToken(adminClient, userId) : null;
+    if (driveToken && settings?.drive_sync_enabled) {
       try {
         const recapPattern = (settings as any)?.recap_naming_pattern || "<WEBSITE> recap <MonthYYYY> p<pages>";
         driveFileName = applyNamingPattern(recapPattern, deal);
@@ -278,7 +281,7 @@ DEAL CONTEXT:
           const q: string = `name='${escapedName}' and mimeType='application/vnd.google-apps.folder' and trashed=false${parentQuery}`;
           const folderSearchRes: Response = await fetch(
             `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(q)}&fields=files(id)`,
-            { headers: { Authorization: `Bearer ${settings.google_provider_token}` } }
+            { headers: { Authorization: `Bearer ${driveToken}` } }
           );
 
           let segmentId: string | null = null;
@@ -296,7 +299,7 @@ DEAL CONTEXT:
             const createRes = await fetch("https://www.googleapis.com/drive/v3/files", {
               method: "POST",
               headers: {
-                Authorization: `Bearer ${settings.google_provider_token}`,
+                Authorization: `Bearer ${driveToken}`,
                 "Content-Type": "application/json",
               },
               body: JSON.stringify(createBody),
@@ -324,7 +327,7 @@ DEAL CONTEXT:
           "https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart",
           {
             method: "POST",
-            headers: { Authorization: `Bearer ${settings.google_provider_token}` },
+            headers: { Authorization: `Bearer ${driveToken}` },
             body: tempForm,
           }
         );
@@ -342,7 +345,7 @@ DEAL CONTEXT:
         // Step 5b: Export Google Doc as PDF
         const exportRes = await fetch(
           `https://www.googleapis.com/drive/v3/files/${tempDocId}/export?mimeType=application/pdf`,
-          { headers: { Authorization: `Bearer ${settings.google_provider_token}` } }
+          { headers: { Authorization: `Bearer ${driveToken}` } }
         );
 
         if (!exportRes.ok) {
@@ -351,7 +354,7 @@ DEAL CONTEXT:
           // Clean up temp doc
           await fetch(`https://www.googleapis.com/drive/v3/files/${tempDocId}`, {
             method: "DELETE",
-            headers: { Authorization: `Bearer ${settings.google_provider_token}` },
+            headers: { Authorization: `Bearer ${driveToken}` },
           });
           throw new Error("Failed to export PDF from Google Docs");
         }
@@ -374,7 +377,7 @@ DEAL CONTEXT:
           "https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart",
           {
             method: "POST",
-            headers: { Authorization: `Bearer ${settings.google_provider_token}` },
+            headers: { Authorization: `Bearer ${driveToken}` },
             body: pdfForm,
           }
         );
@@ -391,7 +394,7 @@ DEAL CONTEXT:
         // Step 5d: Delete temporary Google Doc
         await fetch(`https://www.googleapis.com/drive/v3/files/${tempDocId}`, {
           method: "DELETE",
-          headers: { Authorization: `Bearer ${settings.google_provider_token}` },
+          headers: { Authorization: `Bearer ${driveToken}` },
         }).catch((e) => console.warn("Failed to delete temp doc:", e));
 
       } catch (e) {

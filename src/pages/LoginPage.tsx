@@ -3,6 +3,7 @@ import { Navigate, Link } from "react-router-dom";
 import { Helmet } from "react-helmet-async";
 import { Inbox, FileText, Sparkles, KanbanSquare, ShieldCheck, Workflow, FileDown, ArrowRight, Send } from "lucide-react";
 import { BrandMark } from "@/components/BrandMark";
+import { GOOGLE_LIMITED_USE_DISCLOSURE } from "@/pages/LegalPage";
 
 
 const LOGIN_JSONLD = {
@@ -107,6 +108,20 @@ export default function LoginPage() {
               <ShieldCheck className="h-3.5 w-3.5" />
               Invite-only. New sign-ups require admin approval.
             </div>
+
+            {/* Google verification requires the homepage to link the policy and carry this disclosure. */}
+            <div className="mt-6 border-t border-border pt-5 text-[11.5px] leading-relaxed text-muted-foreground">
+              <p>
+                Signing in asks only for your Google profile and permission to save files EasyVC creates to
+                your Drive. Gmail access is optional and requested separately if you enable inbox ingestion.
+              </p>
+              <p className="mt-2">{GOOGLE_LIMITED_USE_DISCLOSURE}</p>
+              <p className="mt-2 flex gap-4">
+                <Link to="/privacy" className="hover:text-foreground underline underline-offset-2">Privacy Policy</Link>
+                <Link to="/terms" className="hover:text-foreground underline underline-offset-2">Terms of Service</Link>
+                <a href="mailto:vc@onepointsix.ai" className="hover:text-foreground">vc@onepointsix.ai</a>
+              </p>
+            </div>
           </div>
 
           {/* Right: Sign-in */}
@@ -130,12 +145,11 @@ export default function LoginPage() {
               <ul className="mt-6 space-y-2 text-[12px] text-muted-foreground border-t border-border pt-5">
                 <li className="flex gap-2">
                   <span className="text-brand shrink-0">—</span>
-                  Grants Drive access for deck sync
+                  Asks for your profile and Drive access limited to files EasyVC creates
                 </li>
                 <li className="flex gap-2">
                   <span className="text-brand shrink-0">—</span>
-                  Auto-processes emails via a dedicated Gmail label, or inbound submissions to a
-                  dedicated mailbox
+                  Gmail ingestion is optional — enable it later in Settings and grant it separately
                 </li>
               </ul>
             </div>

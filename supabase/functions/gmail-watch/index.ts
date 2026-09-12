@@ -1,56 +1,11 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { getUserGoogleAccessToken } from "../_shared/google-tokens.ts";
 import { getReceiverToken, registerReceiverWatch, type ReceiverAccount } from "../_shared/gmail-receiver.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
-
-/** Refresh a Google access token using the refresh token */
-async function refreshAccessToken(refreshToken: string): Promise<string | null> {
-  const clientId = Deno.env.get("GOOGLE_CLIENT_ID");
-  const clientSecret = Deno.env.get("GOOGLE_CLIENT_SECRET");
-  if (!clientId || !clientSecret) return null;
-
-  const res = await fetch("https://oauth2.googleapis.com/token", {
-    method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: new URLSearchParams({
-      client_id: clientId,
-      client_secret: clientSecret,
-      refresh_token: refreshToken,
-      grant_type: "refresh_token",
-    }),
-  });
-
-  if (!res.ok) {
-    console.error("Token refresh failed:", await res.text());
-    return null;
-  }
-  return (await res.json()).access_token;
-}
-
-async function getValidToken(
-  adminClient: any,
-  userId: string,
-  currentToken: string | null,
-  refreshToken: string | null
-): Promise<string | null> {
-  if (currentToken) {
-    const testRes = await fetch("https://gmail.googleapis.com/gmail/v1/users/me/profile", {
-      headers: { Authorization: `Bearer ${currentToken}` },
-    });
-    if (testRes.ok) return currentToken;
-  }
-
-  if (!refreshToken) return null;
-
-  const newToken = await refreshAccessToken(refreshToken);
-  if (newToken) {
-    await adminClient.from("user_settings").update({ google_provider_token: newToken }).eq("user_id", userId);
-  }
-  return newToken;
-}
 
 /**
  * Gmail Watch — registers Gmail push notifications via users.watch().
@@ -92,7 +47,7 @@ Deno.serve(async (req) => {
     // Get all users with Gmail listening enabled
     const { data: users, error: usersError } = await adminClient
       .from("user_settings")
-      .select("user_id, google_provider_token, google_provider_refresh_token")
+      .select("user_id")
       .eq("gmail_label_enabled", true);
 
     if (usersError) throw usersError;
@@ -104,12 +59,7 @@ Deno.serve(async (req) => {
       const { user_id } = userSettings;
 
       try {
-        const token = await getValidToken(
-          adminClient,
-          user_id,
-          userSettings.google_provider_token,
-          userSettings.google_provider_refresh_token
-        );
+        const token = await getUserGoogleAccessToken(adminClient, user_id);
 
         if (!token) {
           results.push({ user_id, status: "error", reason: "no valid token" });

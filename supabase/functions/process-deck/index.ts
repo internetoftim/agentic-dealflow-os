@@ -1,5 +1,6 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { createWebResearch } from "../_shared/web-research.ts";
+import { getUserGoogleAccessToken } from "../_shared/google-tokens.ts";
 import { BlobReader, ZipReader, TextWriter } from "https://esm.sh/@zip.js/zip.js@2.7.34";
 import { PDFDocument } from "https://esm.sh/pdf-lib@1.17.1?bundle-deps";
 
@@ -426,7 +427,7 @@ Deno.serve(async (req) => {
     // Fetch user settings (needed for Google token for conversion + AI model)
     const { data: settings } = await adminClient
       .from("user_settings")
-      .select("ai_model, drive_sync_enabled, google_provider_token, naming_pattern, drive_folder")
+      .select("ai_model, drive_sync_enabled, naming_pattern, drive_folder")
       .eq("user_id", userId)
       .single();
     const model = settings?.ai_model ?? "gpt-5.4";
@@ -456,14 +457,16 @@ Deno.serve(async (req) => {
       }
       await setDealStatus(adminClient, dealId, "converting");
 
-      if (!settings?.google_provider_token) {
+      // Refresh-aware: the stored access token may be an hour old.
+      const driveToken = await getUserGoogleAccessToken(adminClient, userId);
+      if (!driveToken) {
         throw new Error("Google Drive not connected — required for PPTX to PDF conversion");
       }
 
       console.log("Converting PPTX to PDF via Google Drive API...");
       const conversionResult = await convertPptxToPdfViaDrive(
         arrayBuffer,
-        settings.google_provider_token,
+        driveToken,
         fileName
       );
       arrayBuffer = conversionResult.pdfBytes.buffer as ArrayBuffer;

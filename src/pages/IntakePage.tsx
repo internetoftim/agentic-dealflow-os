@@ -5,7 +5,8 @@ import { toast } from "sonner";
 import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/integrations/supabase/client";
 
-const BASE_APP_URL = "https://easyvc.lovable.app";
+// Intake links must point at the domain founders will trust — the one the app is served from.
+const BASE_APP_URL = typeof window !== "undefined" ? window.location.origin : "https://www.onepointsix.ai";
 
 export default function IntakePage() {
   const { user } = useAuth();

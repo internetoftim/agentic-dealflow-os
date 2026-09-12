@@ -19,13 +19,16 @@ vi.mock("@/integrations/supabase/client", () => ({ get supabase() { return mock.
 import { ProtectedRoute } from "@/components/ProtectedRoute";
 import { useSources, hasInFlight, PROCESSING_POLL_MS, SOURCE_LIST_COLUMNS } from "@/hooks/useDeals";
 
+// ProtectedRoute's approval gate reads profiles via react-query.
 const app = () => render(
-  <MemoryRouter initialEntries={["/"]}>
-    <Routes>
-      <Route path="/login" element={<p>login page</p>} />
-      <Route path="/" element={<ProtectedRoute><p>dashboard</p></ProtectedRoute>} />
-    </Routes>
-  </MemoryRouter>,
+  <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+    <MemoryRouter initialEntries={["/"]}>
+      <Routes>
+        <Route path="/login" element={<p>login page</p>} />
+        <Route path="/" element={<ProtectedRoute><p>dashboard</p></ProtectedRoute>} />
+      </Routes>
+    </MemoryRouter>
+  </QueryClientProvider>,
 );
 
 describe("ProtectedRoute under auth-lock contention", () => {
@@ -54,10 +57,26 @@ describe("ProtectedRoute under auth-lock contention", () => {
     expect(screen.getByText("login page")).toBeInTheDocument();
   });
 
-  it("renders the app when signed in", () => {
+  it("renders the app when signed in and approved", async () => {
     authState = { user: { id: "me" }, loading: false, bootTimedOut: false };
+    mock = makeSupabaseMock({ tables: { profiles: { data: { approval_status: "approved" } } } });
     app();
-    expect(screen.getByText("dashboard")).toBeInTheDocument();
+    expect(await screen.findByText("dashboard")).toBeInTheDocument();
+  });
+
+  it("holds unapproved accounts at a waiting screen instead of the app", async () => {
+    authState = { user: { id: "me" }, loading: false, bootTimedOut: false };
+    mock = makeSupabaseMock({ tables: { profiles: { data: { approval_status: "pending" } } } });
+    app();
+    expect(await screen.findByText(/awaiting approval/)).toBeInTheDocument();
+    expect(screen.queryByText("dashboard")).toBeNull();
+  });
+
+  it("fails open when the profile lookup returns nothing (backfilled users are approved)", async () => {
+    authState = { user: { id: "me" }, loading: false, bootTimedOut: false };
+    mock = makeSupabaseMock({ tables: { profiles: { data: null } } });
+    app();
+    expect(await screen.findByText("dashboard")).toBeInTheDocument();
   });
 });
 

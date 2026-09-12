@@ -18,48 +18,13 @@ export interface ReceiverAccount {
 }
 
 import { ingestGmailMessage, searchMessages, RECEIVER_QUERY, type MessageReport } from "./gmail-ingest.ts";
+import { getReceiverAccessToken } from "./google-tokens.ts";
 
 const GMAIL = "https://gmail.googleapis.com/gmail/v1/users/me";
 
-export async function refreshGoogleAccessToken(refreshToken: string): Promise<string | null> {
-  const clientId = Deno.env.get("GOOGLE_CLIENT_ID");
-  const clientSecret = Deno.env.get("GOOGLE_CLIENT_SECRET");
-  if (!clientId || !clientSecret) {
-    console.error("Missing GOOGLE_CLIENT_ID or GOOGLE_CLIENT_SECRET");
-    return null;
-  }
-  const res = await fetch("https://oauth2.googleapis.com/token", {
-    method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: new URLSearchParams({
-      client_id: clientId,
-      client_secret: clientSecret,
-      refresh_token: refreshToken,
-      grant_type: "refresh_token",
-    }),
-  });
-  if (!res.ok) {
-    console.error("Receiver token refresh failed:", await res.text());
-    return null;
-  }
-  return (await res.json()).access_token ?? null;
-}
-
-/** Valid access token for a receiver, refreshing and persisting when needed. */
+/** Valid access token for a receiver (encrypted at rest; refreshed and re-encrypted as needed). */
 export async function getReceiverToken(adminClient: any, account: ReceiverAccount): Promise<string | null> {
-  if (account.google_access_token) {
-    const probe = await fetch(`${GMAIL}/profile`, {
-      headers: { Authorization: `Bearer ${account.google_access_token}` },
-    });
-    if (probe.ok) return account.google_access_token;
-  }
-  if (!account.google_refresh_token) return null;
-  const fresh = await refreshGoogleAccessToken(account.google_refresh_token);
-  if (fresh) {
-    await adminClient.from("receiver_accounts")
-      .update({ google_access_token: fresh }).eq("id", account.id);
-  }
-  return fresh;
+  return getReceiverAccessToken(adminClient, account);
 }
 
 export async function recordReceiverPoll(adminClient: any, accountId: string, error: string | null) {

@@ -21,6 +21,7 @@ import McpAuthorize from "@/pages/McpAuthorize";
 import ConvertLink from "@/pages/ConvertLink";
 import ConversionDashboard from "@/pages/ConversionDashboard";
 import MyConversions from "@/pages/MyConversions";
+import { PrivacyPolicy, TermsOfService } from "@/pages/LegalPage";
 
 
 // Shared across every tab: keep data fresh via realtime + targeted polling,
@@ -48,6 +49,8 @@ const App = () => (
         <AuthProvider>
           <Routes>
             <Route path="/login" element={<LoginPage />} />
+            <Route path="/privacy" element={<PrivacyPolicy />} />
+            <Route path="/terms" element={<TermsOfService />} />
             <Route path="/intake/:userId" element={<PublicIntake />} />
             <Route path="/convert" element={<ConvertLink />} />
             <Route path="/converted/:token" element={<ConversionDashboard />} />

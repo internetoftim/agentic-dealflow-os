@@ -1,4 +1,5 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { getUserGoogleAccessToken } from "../_shared/google-tokens.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -107,11 +108,12 @@ Deno.serve(async (req) => {
     // Get user's Google token and naming settings
     const { data: settings } = await adminClient
       .from("user_settings")
-      .select("google_provider_token, drive_sync_enabled, naming_pattern, naming_mode, drive_folder")
+      .select("drive_sync_enabled, naming_pattern, naming_mode, drive_folder")
       .eq("user_id", resolvedUserId)
       .single();
 
-    if (!settings?.google_provider_token || !settings?.drive_sync_enabled) {
+    const driveToken = settings?.drive_sync_enabled ? await getUserGoogleAccessToken(adminClient, resolvedUserId) : null;
+    if (!driveToken || !settings?.drive_sync_enabled) {
       return new Response(
         JSON.stringify({ error: "Google Drive not connected or sync disabled" }),
         { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
@@ -155,7 +157,7 @@ Deno.serve(async (req) => {
       const q: string = `name='${escapedName}' and mimeType='application/vnd.google-apps.folder' and trashed=false${parentQuery}`;
       const folderSearchRes: Response = await fetch(
         `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(q)}&fields=files(id)`,
-        { headers: { Authorization: `Bearer ${settings.google_provider_token}` } }
+        { headers: { Authorization: `Bearer ${driveToken}` } }
       );
 
       let segmentId: string | null = null;
@@ -180,7 +182,7 @@ Deno.serve(async (req) => {
           {
             method: "POST",
             headers: {
-              Authorization: `Bearer ${settings.google_provider_token}`,
+              Authorization: `Bearer ${driveToken}`,
               "Content-Type": "application/json",
             },
             body: JSON.stringify(createBody),
@@ -219,7 +221,7 @@ Deno.serve(async (req) => {
       {
         method: "POST",
         headers: {
-          Authorization: `Bearer ${settings.google_provider_token}`,
+          Authorization: `Bearer ${driveToken}`,
         },
         body: form,
       }

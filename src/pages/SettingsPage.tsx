@@ -8,6 +8,7 @@ import { StorageCleanupSection } from "@/components/StorageCleanupSection";
 import { AIAgentsSection } from "@/components/AIAgentsSection";
 import { TeamSection } from "@/components/TeamSection";
 import { ReceiverInboxSection } from "@/components/ReceiverInboxSection";
+import { DataPrivacySection } from "@/components/DataPrivacySection";
 
 const DEFAULT_PATTERN = "<WEBSITE> deck <MonthYYYY> p<pages>.pdf";
 const DEFAULT_RECAP_PATTERN = "<WEBSITE> recap <MonthYYYY> p<pages>";
@@ -51,8 +52,10 @@ function Toggle({ checked, onChange }: { checked: boolean; onChange: (v: boolean
 }
 
 export default function SettingsPage() {
-  const { user } = useAuth();
+  const { user , requestGmailAccess } = useAuth();
   const [gmailLabel, setGmailLabel] = useState(true);
+  const [googleScopes, setGoogleScopes] = useState<string | null>(null);
+  const hasGmailScope = !!googleScopes && googleScopes.includes("gmail.modify");
   const [driveSync, setDriveSync] = useState(true);
   const [spamFilter, setSpamFilter] = useState(true);
   const [namingTab, setNamingTab] = useState<"auto" | "manual">("auto");
@@ -74,13 +77,14 @@ export default function SettingsPage() {
     if (!user) return;
     supabase
       .from("user_settings")
-      .select("ai_model, gmail_label_enabled, drive_sync_enabled, spam_filter_enabled, deep_research_provider, naming_pattern, naming_mode, drive_folder, memo_prompt, recap_naming_pattern, intake_slug")
+      .select("ai_model, gmail_label_enabled, drive_sync_enabled, spam_filter_enabled, deep_research_provider, naming_pattern, naming_mode, drive_folder, memo_prompt, recap_naming_pattern, intake_slug, google_scopes")
       .eq("user_id", user.id)
       .single()
       .then(({ data }) => {
         if (data) {
           setAiModel(data.ai_model ?? "gpt-5.4");
           setGmailLabel(data.gmail_label_enabled ?? true);
+          setGoogleScopes((data as any).google_scopes ?? null);
           setDriveSync(data.drive_sync_enabled ?? true);
           setSpamFilter(data.spam_filter_enabled ?? true);
           setDeepResearchProvider((data as any).deep_research_provider ?? "custom");
@@ -230,13 +234,13 @@ export default function SettingsPage() {
                 <input
                   type="text"
                   readOnly
-                  value={`https://easyvc.lovable.app/intake/${intakeSlug || user.id}`}
+                  value={`${window.location.origin}/intake/${intakeSlug || user.id}`}
                   className="flex-1 rounded-md border border-input bg-muted/50 px-3 py-2 text-sm font-mono outline-none text-muted-foreground select-all"
                   onClick={(e) => (e.target as HTMLInputElement).select()}
                 />
                 <button
                   onClick={() => {
-                    navigator.clipboard.writeText(`https://easyvc.lovable.app/intake/${intakeSlug || user.id}`);
+                    navigator.clipboard.writeText(`${window.location.origin}/intake/${intakeSlug || user.id}`);
                     toast.success("Intake link copied!");
                   }}
                   className="flex items-center gap-1.5 rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-foreground hover:opacity-90 transition-opacity"
@@ -629,10 +633,22 @@ export default function SettingsPage() {
           <div className="flex items-center justify-between">
             <div>
               <p className="text-sm text-foreground">Gmail Auto-Ingest</p>
-              <p className="text-xs text-muted-foreground">Listen to Gmail label <code className="rounded bg-muted px-1.5 py-0.5 text-xs">deck</code> and auto-ingest attached decks</p>
+              <p className="text-xs text-muted-foreground">
+                Listen to Gmail label <code className="rounded bg-muted px-1.5 py-0.5 text-xs">deck</code> and auto-ingest attached decks
+                {!hasGmailScope && <span className="block mt-0.5 text-[11px]">Turning this on asks Google for Gmail access (not granted at sign-in).</span>}
+              </p>
             </div>
-            <Toggle checked={gmailLabel} onChange={async (v) => {
+            <Toggle checked={gmailLabel && hasGmailScope} onChange={async (v) => {
               if (!user) return;
+              if (v && !hasGmailScope) {
+                // Restricted scope: ask Google for it only now, only for this user.
+                toast.message("Gmail access is granted separately — redirecting to Google");
+                await supabase
+                  .from("user_settings")
+                  .upsert({ user_id: user.id, gmail_label_enabled: true } as any, { onConflict: "user_id" });
+                await requestGmailAccess();
+                return;
+              }
               setGmailLabel(v);
               const { error } = await supabase
                 .from("user_settings")
@@ -702,6 +718,8 @@ export default function SettingsPage() {
         <h2 className="text-sm font-semibold text-foreground mb-4">DocSend Ingestion</h2>
         <BookmarkletInstaller />
       </section> */}
+      <DataPrivacySection />
+
     </div>
   );
 }

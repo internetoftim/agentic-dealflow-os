@@ -12,6 +12,7 @@
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { registerReceiverWatch } from "../_shared/gmail-receiver.ts";
+import { encryptToken } from "../_shared/google-tokens.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY")!;
@@ -22,8 +23,9 @@ const APP_ORIGIN = Deno.env.get("APP_ORIGIN") ?? "https://onepointsix.ai";
 const FUNCTION_BASE = `${SUPABASE_URL}/functions/v1/receiver-oauth`;
 const REDIRECT_URI = `${FUNCTION_BASE}/callback`;
 const INVITE_TTL_MS = 7 * 24 * 60 * 60_000;
+// gmail.modify already includes read access; also requesting the read-only
+// Gmail scope is redundant and gets flagged in verification review.
 const SCOPES = [
-  "https://www.googleapis.com/auth/gmail.readonly",
   "https://www.googleapis.com/auth/gmail.modify",
   "https://www.googleapis.com/auth/userinfo.email",
 ].join(" ");
@@ -273,8 +275,8 @@ async function handleCallback(req: Request): Promise<Response> {
   const { data: account, error: upsertError } = await admin.from("receiver_accounts").upsert({
     user_id: state.uid,
     email,
-    google_access_token: tokens.access_token,
-    google_refresh_token: tokens.refresh_token,
+    google_access_token: await encryptToken(tokens.access_token),
+    google_refresh_token: await encryptToken(tokens.refresh_token),
     enabled: true,
     last_error: null,
   }, { onConflict: "email" }).select("*").single();
