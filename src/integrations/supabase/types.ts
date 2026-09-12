@@ -905,6 +905,7 @@ export type Database = {
           google_scopes: string | null
           id: string
           intake_slug: string | null
+          local_model_id: string | null
           memo_prompt: string | null
           naming_mode: string | null
           naming_pattern: string | null
@@ -928,6 +929,7 @@ export type Database = {
           google_scopes?: string | null
           id?: string
           intake_slug?: string | null
+          local_model_id?: string | null
           memo_prompt?: string | null
           naming_mode?: string | null
           naming_pattern?: string | null
@@ -951,6 +953,7 @@ export type Database = {
           google_scopes?: string | null
           id?: string
           intake_slug?: string | null
+          local_model_id?: string | null
           memo_prompt?: string | null
           naming_mode?: string | null
           naming_pattern?: string | null

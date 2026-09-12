@@ -4,6 +4,8 @@ import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { compressDeck } from "@/lib/compressPdf";
 import { extractTextFromPdf, type VisionProgress } from "@/lib/localVision";
+import { useAiModelSetting, useLocalLlm } from "@/contexts/LocalLlmContext";
+import { getPreset } from "@/lib/localModels";
 
 export interface Deal {
   id: string;
@@ -340,6 +342,8 @@ export function useDeleteDeals() {
 }
 
 export function useCreateDealWithUpload() {
+  const { isLocal, localModelId } = useAiModelSetting();
+  const localLlm = useLocalLlm();
   const queryClient = useQueryClient();
   const { user } = useAuth();
 
@@ -369,7 +373,9 @@ export function useCreateDealWithUpload() {
         .select("ai_model")
         .eq("user_id", user.id)
         .single();
-      const isLocalModel = settings?.ai_model === "local-florence2";
+      // Local extraction only makes sense with a vision-capable local model (Gemma 3n / Gemma 4).
+      const localPreset = getPreset(localModelId ?? "");
+      const isLocalModel = settings?.ai_model === "local-florence2" || (isLocal && !!localPreset?.vision);
 
       // 1. Create the deal — if another job is active, set status to "queued"
       const initialStatus = hasActiveJob ? "queued" : "uploading";
@@ -433,7 +439,14 @@ export function useCreateDealWithUpload() {
       if (isLocalModel && !isPptx) {
         try {
           const pdfBuffer = await compressed.arrayBuffer();
-          const result = await extractTextFromPdf(pdfBuffer, onVisionProgress);
+          const ocr = isLocal && localPreset?.vision
+            ? async (dataUrl: string) => {
+                await localLlm.ensureLoaded(localPreset.id);
+                const r = await localLlm.generate([{ role: "user", content: "Extract ALL text visible in this slide. Return only the text, in reading order, including numbers and chart labels. No commentary." }], [{ dataUrl }]);
+                return r.text;
+              }
+            : undefined;
+          const result = await extractTextFromPdf(pdfBuffer, onVisionProgress, ocr);
           localExtractedText = result.text;
         } catch (e) {
           console.warn("Local vision extraction failed, will fall back to server:", e);

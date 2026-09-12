@@ -73,3 +73,7 @@ verify_jwt = false
 
 [functions.account]
 verify_jwt = false
+
+# Validates the user JWT itself (same pattern as the other functions).
+[functions.get-hf-token]
+verify_jwt = false

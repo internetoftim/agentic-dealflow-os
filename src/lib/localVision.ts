@@ -91,9 +91,13 @@ async function extractTextFromCanvas(
 /**
  * Render PDF pages to images using pdf.js and extract text from each via Gemma 3n.
  */
+export type PageOcr = (imageDataUrl: string, pageNum: number) => Promise<string>;
+
 export async function extractTextFromPdf(
   pdfArrayBuffer: ArrayBuffer,
-  onProgress?: (p: VisionProgress) => void
+  onProgress?: (p: VisionProgress) => void,
+  /** Supplied by the local-model provider when a vision engine is loaded; otherwise the built-in Gemma 3n loader is used. */
+  ocr?: PageOcr,
 ): Promise<{ text: string; pageCount: number }> {
   // Dynamically import pdf.js
   const pdfjsLib = await import("pdfjs-dist");
@@ -108,8 +112,8 @@ export async function extractTextFromPdf(
     message: `Processing ${pageCount} pages with Gemma 3n…`,
   });
 
-  // Ensure model is loaded
-  await loadVisionModel(onProgress);
+  // Ensure a vision model is available
+  if (!ocr) await loadVisionModel(onProgress);
 
   const pageTexts: string[] = [];
   const SCALE = 1.5; // render at 1.5x for good OCR quality
@@ -132,8 +136,8 @@ export async function extractTextFromPdf(
 
     await page.render({ canvasContext: ctx, viewport }).promise;
 
-    // Run multimodal OCR via Gemma 3n
-    const text = await extractTextFromCanvas(canvas, i);
+    // Run multimodal OCR via the provided engine, or the built-in Gemma 3n
+    const text = ocr ? await ocr(canvas.toDataURL("image/png"), i) : await extractTextFromCanvas(canvas, i);
     if (text.trim()) {
       pageTexts.push(`[Page ${i}] ${text}`);
     }

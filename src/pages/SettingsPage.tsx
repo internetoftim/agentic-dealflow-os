@@ -9,23 +9,15 @@ import { AIAgentsSection } from "@/components/AIAgentsSection";
 import { TeamSection } from "@/components/TeamSection";
 import { ReceiverInboxSection } from "@/components/ReceiverInboxSection";
 import { DataPrivacySection } from "@/components/DataPrivacySection";
+import { DEFAULT_MEMO_PROMPT } from "@/lib/memoPrompt";
+import { LocalModelSection } from "@/components/LocalModelSection";
+import { LOCAL_AI_MODEL, LEGACY_LOCAL_AI_MODEL } from "@/contexts/LocalLlmContext";
 
 const DEFAULT_PATTERN = "<WEBSITE> deck <MonthYYYY> p<pages>.pdf";
 const DEFAULT_RECAP_PATTERN = "<WEBSITE> recap <MonthYYYY> p<pages>";
 
-const DEFAULT_MEMO_PROMPT = `You are a VC analyst writing an internal investment memo. Given the extracted deck content and any deep research data, produce a structured memo with the following sections:
+// Shared with local (in-browser) memo generation.
 
-1. **Executive Summary** — One paragraph overview of the company, what they do, and why it matters.
-2. **Market Opportunity** — TAM/SAM/SOM if available, market trends, and timing thesis.
-3. **Product & Traction** — What the product does, key metrics (ARR, growth, NRR, users), and competitive moat.
-4. **Team** — Founders' backgrounds, relevant experience, and team composition.
-5. **Business Model** — How they make money, unit economics, and pricing strategy.
-6. **Competition** — Key competitors and differentiation.
-7. **Risks & Concerns** — Red flags, market risks, execution risks.
-8. **Investment Thesis** — Bull case and bear case for investing.
-9. **Recommendation** — Pass / Follow-up / Invest, with reasoning.
-
-Be concise, data-driven, and flag any missing information. Use bullet points where appropriate.`;
 
 const AI_MODELS = [
   { value: "gpt-5.4", label: "GPT-5.4", description: "Latest & most capable — default", disabled: false },
@@ -33,7 +25,7 @@ const AI_MODELS = [
   { value: "gpt-oss-202b", label: "GPT-OSS 202B", description: "SapinsapinAI Sovereign AI stack", disabled: true },
   { value: "gpt-4o", label: "GPT-4o", description: "Best multimodal, strong reasoning", disabled: true },
   { value: "gpt-5", label: "GPT-5", description: "Most capable, complex tasks", disabled: true },
-  { value: "local-florence2", label: "Local — Gemma 3n E2B", description: "In-browser multimodal via MediaPipe WebGPU (~3.4GB)", disabled: true },
+  { value: "local-webgpu", label: "Local — WebGPU (Gemma 3 / Gemma 4)", description: "Runs in your browser via WebLLM or MediaPipe. Private, free, works offline once downloaded.", disabled: false },
 ] as const;
 
 function Toggle({ checked, onChange }: { checked: boolean; onChange: (v: boolean) => void }) {
@@ -55,6 +47,7 @@ export default function SettingsPage() {
   const { user , requestGmailAccess } = useAuth();
   const [gmailLabel, setGmailLabel] = useState(true);
   const [googleScopes, setGoogleScopes] = useState<string | null>(null);
+  const [localModelId, setLocalModelId] = useState<string | null>(null);
   const hasGmailScope = !!googleScopes && googleScopes.includes("gmail.modify");
   const [driveSync, setDriveSync] = useState(true);
   const [spamFilter, setSpamFilter] = useState(true);
@@ -77,14 +70,15 @@ export default function SettingsPage() {
     if (!user) return;
     supabase
       .from("user_settings")
-      .select("ai_model, gmail_label_enabled, drive_sync_enabled, spam_filter_enabled, deep_research_provider, naming_pattern, naming_mode, drive_folder, memo_prompt, recap_naming_pattern, intake_slug, google_scopes")
+      .select("ai_model, gmail_label_enabled, drive_sync_enabled, spam_filter_enabled, deep_research_provider, naming_pattern, naming_mode, drive_folder, memo_prompt, recap_naming_pattern, intake_slug, google_scopes, local_model_id")
       .eq("user_id", user.id)
       .single()
       .then(({ data }) => {
         if (data) {
-          setAiModel(data.ai_model ?? "gpt-5.4");
+          setAiModel(data.ai_model === LEGACY_LOCAL_AI_MODEL ? LOCAL_AI_MODEL : (data.ai_model ?? "gpt-5.4"));
           setGmailLabel(data.gmail_label_enabled ?? true);
           setGoogleScopes((data as any).google_scopes ?? null);
+          setLocalModelId((data as any).local_model_id ?? null);
           setDriveSync(data.drive_sync_enabled ?? true);
           setSpamFilter(data.spam_filter_enabled ?? true);
           setDeepResearchProvider((data as any).deep_research_provider ?? "tavily");
@@ -214,6 +208,11 @@ export default function SettingsPage() {
               </button>
             ))}
           </div>
+          {aiModel === LOCAL_AI_MODEL && (
+            <div className="mt-4">
+              <LocalModelSection selectedId={localModelId} onSelect={setLocalModelId} />
+            </div>
+          )}
         </div>
       </section>
 

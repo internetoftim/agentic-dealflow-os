@@ -21,6 +21,7 @@ export function makeSupabaseMock(opts: {
     for (const m of ["select", "eq", "is", "order", "limit", "in", "not", "ilike", "or"]) b[m] = vi.fn(chain);
     b.insert = vi.fn((row: unknown) => { (inserts[table] ??= []).push(row); return b; });
     b.update = vi.fn((row: unknown) => { (updates[table] ??= []).push(row); return b; });
+    b.upsert = vi.fn((row: unknown) => { (inserts[table] ??= []).push(row); return b; });
     b.delete = vi.fn(chain);
     b.maybeSingle = vi.fn(async () => result);
     b.single = vi.fn(async () => result);

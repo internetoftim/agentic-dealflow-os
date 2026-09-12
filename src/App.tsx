@@ -5,6 +5,7 @@ import { Toaster as Sonner } from "@/components/ui/sonner";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { AuthProvider } from "@/contexts/AuthContext";
+import { LocalLlmProvider } from "@/contexts/LocalLlmContext";
 import { AppLayout } from "@/components/AppLayout";
 import { ProtectedRoute } from "@/components/ProtectedRoute";
 import KanbanPipeline from "@/pages/KanbanPipeline";
@@ -47,6 +48,7 @@ const App = () => (
       <Sonner />
       <BrowserRouter>
         <AuthProvider>
+          <LocalLlmProvider>
           <Routes>
             <Route path="/login" element={<LoginPage />} />
             <Route path="/privacy" element={<PrivacyPolicy />} />
@@ -77,6 +79,7 @@ const App = () => (
               }
             />
           </Routes>
+          </LocalLlmProvider>
         </AuthProvider>
       </BrowserRouter>
     </TooltipProvider>

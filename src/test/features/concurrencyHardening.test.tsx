@@ -14,6 +14,14 @@ vi.mock("@/contexts/AuthContext", async () => {
   return { ...actual, useAuth: () => authState };
 });
 let mock = makeSupabaseMock({});
+// The local (in-browser) model path is exercised in localLlm.test.tsx; here the cloud path stays the default.
+vi.mock("@/contexts/LocalLlmContext", () => ({
+  useAiModelSetting: () => ({ aiModel: "gpt-5.4", isLocal: false, localModelId: null, memoPrompt: null, isLoading: false, resolve: async () => ({ aiModel: "gpt-5.4", isLocal: false, localModelId: null, memoPrompt: null }) }),
+  useLocalLlm: () => ({ ensureLoaded: vi.fn(), chat: vi.fn(), generate: vi.fn(), interrupt: vi.fn(), status: "idle" }),
+  LOCAL_AI_MODEL: "local-webgpu",
+  LEGACY_LOCAL_AI_MODEL: "local-florence2",
+}));
+
 vi.mock("@/integrations/supabase/client", () => ({ get supabase() { return mock.supabase; } }));
 
 import { ProtectedRoute } from "@/components/ProtectedRoute";

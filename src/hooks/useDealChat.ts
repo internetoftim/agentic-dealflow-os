@@ -1,5 +1,8 @@
 import { useState, useCallback, useRef } from "react";
 import { supabase } from "@/integrations/supabase/client";
+import { useAiModelSetting, useLocalLlm } from "@/contexts/LocalLlmContext";
+import { buildDealContext, toTurns } from "@/lib/localContext";
+import { DEFAULT_LOCAL_MODEL_ID } from "@/lib/localModels";
 
 export type ChatMessage = { role: "user" | "assistant"; content: string };
 
@@ -9,6 +12,8 @@ export function useDealChat(dealId?: string, sourceIds?: string[]) {
   ]);
   const [isStreaming, setIsStreaming] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
+  const { resolve: resolveAiModel } = useAiModelSetting();
+  const localLlm = useLocalLlm();
 
   const send = useCallback(async (input: string) => {
     if (!input.trim() || isStreaming) return;
@@ -19,6 +24,34 @@ export function useDealChat(dealId?: string, sourceIds?: string[]) {
     setIsStreaming(true);
 
     let assistantSoFar = "";
+
+    // Local (in-browser) path: same grounding, no network round-trip.
+    const { isLocal, localModelId } = await resolveAiModel();
+    if (isLocal) {
+      try {
+        await localLlm.ensureLoaded(localModelId ?? DEFAULT_LOCAL_MODEL_ID);
+        const { system } = dealId ? await buildDealContext(dealId, sourceIds) : { system: "You are an investment analyst assistant." };
+        const history = updatedMessages.filter((m, i) => !(i === 0 && m.role === "assistant"));
+        await localLlm.chat(toTurns(system, history), {
+          onToken: (token) => {
+            assistantSoFar += token;
+            setMessages((prev) => {
+              const last = prev[prev.length - 1];
+              if (last?.role === "assistant" && prev[prev.length - 2]?.role === "user") {
+                return prev.map((m, i) => (i === prev.length - 1 ? { ...m, content: assistantSoFar } : m));
+              }
+              return [...prev, { role: "assistant", content: assistantSoFar }];
+            });
+          },
+          onComplete: () => {},
+        });
+      } catch (e: any) {
+        setMessages((prev) => [...prev, { role: "assistant", content: `Local model error: ${e.message}` }]);
+      } finally {
+        setIsStreaming(false);
+      }
+      return;
+    }
 
     try {
       abortRef.current = new AbortController();
@@ -102,11 +135,12 @@ export function useDealChat(dealId?: string, sourceIds?: string[]) {
       setIsStreaming(false);
       abortRef.current = null;
     }
-  }, [messages, isStreaming, dealId, sourceIds]);
+  }, [messages, isStreaming, dealId, sourceIds, resolveAiModel, localLlm]);
 
   const stop = useCallback(() => {
     abortRef.current?.abort();
-  }, []);
+    localLlm.interrupt();
+  }, [localLlm]);
 
   return { messages, isStreaming, send, stop };
 }

@@ -18,4 +18,8 @@ export default defineConfig(({ mode }) => ({
       "@": path.resolve(__dirname, "./src"),
     },
   },
+  optimizeDeps: {
+    exclude: ["@huggingface/transformers", "@mlc-ai/web-llm", "@mediapipe/tasks-genai"],
+  },
+  worker: { format: "es" },
 }));
