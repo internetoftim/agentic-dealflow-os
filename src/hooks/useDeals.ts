@@ -85,6 +85,9 @@ export function useDeals() {
 
   useEffect(() => {
     if (!user) return;
+    // A busy pipeline emits a burst of row updates; coalesce them into one
+    // refetch per second instead of one per event.
+    let timer: ReturnType<typeof setTimeout> | null = null;
     const channel = supabase
       .channel("deals-realtime")
       .on(
@@ -92,12 +95,16 @@ export function useDeals() {
         // No user filter: team deals change under other user_ids; RLS still
         // gates what this client can actually read.
         { event: "*", schema: "public", table: "deals" },
-        (_payload) => {
-          queryClient.invalidateQueries({ queryKey: ["deals", user.id] });
+        () => {
+          if (timer) return;
+          timer = setTimeout(() => {
+            timer = null;
+            queryClient.invalidateQueries({ queryKey: ["deals", user.id] });
+          }, REALTIME_DEBOUNCE_MS);
         }
       )
       .subscribe();
-    return () => { supabase.removeChannel(channel); };
+    return () => { if (timer) clearTimeout(timer); supabase.removeChannel(channel); };
   }, [user, queryClient]);
 
   const query = useQuery({
@@ -111,24 +118,28 @@ export function useDeals() {
       return data as unknown as Deal[];
     },
     enabled: !!user,
+    // Poll only while something is in flight, and only in the visible tab
+    // (react-query pauses intervals in background tabs) — background tabs
+    // used to poll every 3s each, multiplying load exactly when the backend
+    // was busiest.
+    refetchInterval: (q) => (hasInFlight(q.state.data) ? PROCESSING_POLL_MS : false),
   });
 
-  // Poll every 3s when any deal is actively processing (realtime can be unreliable)
-  const hasProcessing = query.data?.some(
+  return query;
+}
+
+/** Realtime bursts are coalesced into at most one refetch per this window. */
+export const REALTIME_DEBOUNCE_MS = 1_000;
+/** Poll cadence while a deal is processing (visible tab only). */
+export const PROCESSING_POLL_MS = 5_000;
+
+export function hasInFlight(deals?: Deal[]): boolean {
+  return !!deals?.some(
     (d) =>
       PROCESSING_STATUSES.includes(d.status) ||
       d.status === "queued" ||
-      d.deep_research_status === "researching"
+      d.deep_research_status === "researching",
   );
-  useEffect(() => {
-    if (!hasProcessing) return;
-    const interval = setInterval(() => {
-      queryClient.invalidateQueries({ queryKey: ["deals", user?.id] });
-    }, 3000);
-    return () => clearInterval(interval);
-  }, [hasProcessing, queryClient, user?.id]);
-
-  return query;
 }
 
 export function useSources(dealId?: string) {
@@ -136,9 +147,12 @@ export function useSources(dealId?: string) {
   return useQuery({
     queryKey: ["sources", dealId],
     queryFn: async () => {
+      // preview_images (base64) and extracted_text make a single deal's
+      // sources megabytes; the UI needs neither — chat grounding happens
+      // server-side and previews are fetched on demand.
       const { data, error } = await supabase
         .from("sources")
-        .select("*")
+        .select(SOURCE_LIST_COLUMNS)
         .eq("deal_id", dealId!)
         .order("created_at", { ascending: false });
       if (error) throw error;
@@ -147,6 +161,9 @@ export function useSources(dealId?: string) {
     enabled: !!user && !!dealId,
   });
 }
+
+export const SOURCE_LIST_COLUMNS =
+  "id, deal_id, user_id, file_name, original_size, compressed_size, storage_path, source_type, processing_status, gmail_message_id, content_hash, created_at";
 
 export function useLatestCaptureJob(dealId?: string, source?: string) {
   const { user } = useAuth();

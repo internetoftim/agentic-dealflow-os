@@ -1,11 +1,12 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { BrowserRouter, Route, Routes, Navigate } from "react-router-dom";
+import { BrowserRouter, Route, Routes } from "react-router-dom";
 import { ThemeProvider } from "next-themes";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
-import { AuthProvider, useAuth } from "@/contexts/AuthContext";
+import { AuthProvider } from "@/contexts/AuthContext";
 import { AppLayout } from "@/components/AppLayout";
+import { ProtectedRoute } from "@/components/ProtectedRoute";
 import KanbanPipeline from "@/pages/KanbanPipeline";
 import DealWorkspace from "@/pages/DealWorkspace";
 import DataRoom from "@/pages/DataRoom";
@@ -22,20 +23,20 @@ import ConversionDashboard from "@/pages/ConversionDashboard";
 import MyConversions from "@/pages/MyConversions";
 
 
-const queryClient = new QueryClient();
-
-function ProtectedRoute({ children }: { children: React.ReactNode }) {
-  const { user, loading } = useAuth();
-  if (loading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-background">
-        <div className="animate-spin-slow h-8 w-8 border-2 border-primary border-t-transparent rounded-full" />
-      </div>
-    );
-  }
-  if (!user) return <Navigate to="/login" replace />;
-  return <>{children}</>;
-}
+// Shared across every tab: keep data fresh via realtime + targeted polling,
+// not via refetch-on-focus stampedes; back off instead of hammering a busy backend.
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      staleTime: 10_000,
+      gcTime: 5 * 60_000,
+      refetchOnWindowFocus: false,
+      refetchIntervalInBackground: false,
+      retry: 2,
+      retryDelay: (attempt) => Math.min(1_000 * 2 ** attempt, 8_000),
+    },
+  },
+});
 
 const App = () => (
   <QueryClientProvider client={queryClient}>
