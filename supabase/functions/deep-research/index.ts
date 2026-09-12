@@ -1,5 +1,5 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { createWebResearch, type SearchResult } from "../_shared/web-research.ts";
+import { createWebResearch, findCompanyUrls, type SearchResult } from "../_shared/web-research.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -107,12 +107,13 @@ function buildVerificationSummary(deal: Record<string, unknown>, extractedText: 
     });
 }
 
-function resolveDeepResearchProvider(rawProvider: unknown): "firecrawl" | "custom" {
-  if (typeof rawProvider !== "string") return "custom";
-  const normalized = rawProvider.trim().toLowerCase();
+type ResearchProvider = "tavily" | "firecrawl" | "custom";
+function resolveDeepResearchProvider(rawProvider: unknown, tavilyAvailable: boolean): ResearchProvider {
+  const normalized = typeof rawProvider === "string" ? rawProvider.trim().toLowerCase() : "";
   if (normalized === "firecrawl") return "firecrawl";
   if (normalized === "custom-agent" || normalized === "custom") return "custom";
-  return "custom";
+  // "tavily" or unset: search-driven extraction, no LLM spend for URL discovery.
+  return tavilyAvailable ? "tavily" : "custom";
 }
 
 async function fetchWithTimeout(url: string, init: RequestInit, timeoutMs = DEFAULT_TIMEOUT_MS): Promise<Response> {
@@ -235,7 +236,7 @@ Deno.serve(async (req) => {
     const deckPreview = buildDeckPreview(extractedDeckText, previewImages);
     const verification = buildVerificationSummary(deal as unknown as Record<string, unknown>, extractedDeckText);
 
-    const provider = resolveDeepResearchProvider(settings?.deep_research_provider);
+    const provider = resolveDeepResearchProvider(settings?.deep_research_provider, !!tavilyApiKey);
     const aiModel = settings?.ai_model ?? "gpt-5.4";
     const deckTextContext = (latestSource?.extracted_text || "").slice(0, 12_000);
     // Tavily is primary when configured; Firecrawl is the fallback provider.
@@ -378,6 +379,11 @@ Deno.serve(async (req) => {
         linkedin_url: linkedinResult?.url || null,
       };
       console.log("Firecrawl-only extraction:", JSON.stringify(research));
+    } else if (provider === "tavily") {
+      // Search-driven extraction: official site from a domain-filtered search
+      // (aggregators excluded), LinkedIn from a scoped search. No LLM involved.
+      research = await findCompanyUrls(web, { name: deal.name, sector: deal.sector, knownWebsite: candidateWebsite ?? null, seed: searchResults });
+      console.log("Tavily extraction:", JSON.stringify(research));
     } else {
       // Custom agent mode: use selected LLM for structured extraction
       const config = getAiConfig(aiModel);
@@ -686,7 +692,7 @@ Extract the company's official website URL and LinkedIn company page URL using t
 
     const openaiKey = Deno.env.get("OPENAI_API_KEY")?.trim().replace(/[\r\n]/g, "");
 
-    if (openaiKey) {
+    if (openaiKey && provider !== "tavily") {
       // GPT primary: use web_search tool to find key people
       try {
         console.log("Extracting key people via GPT web search…");
@@ -756,7 +762,7 @@ Use web_search to find their names, titles, and LinkedIn profile URLs. Then call
       }
     }
 
-    // Firecrawl fallback if GPT returned no people
+    // Search-driven people lookup (primary under Tavily, fallback otherwise)
     if (people.length === 0) {
       try {
         console.log(`Falling back to ${web.provider} for key people search…`);

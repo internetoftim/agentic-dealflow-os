@@ -767,8 +767,9 @@ Deno.serve(async (req) => {
         let verifiedWebsite: string | null = null;
         let linkedinUrl: string | null = null;
 
-        // --- PRIMARY: GPT-5 web search ---
-        if (openaiApiKey) {
+        // --- PRIMARY: GPT-5 web search (only when Tavily isn't configured;
+        //     with Tavily, the search-driven step below is the primary) ---
+        if (openaiApiKey && !tavilyApiKey) {
           try {
             console.log(`GPT-5 web search for: ${companyName}`);
             const searchPrompt = `Find the official company website and LinkedIn company page for "${companyName}"${sectorHint ? ` (${sectorHint} sector)` : ""}. This is a startup. Search the web and return the verified URLs. Do NOT guess — only return URLs you find in search results. Exclude aggregator sites like Crunchbase, PitchBook, etc.`;

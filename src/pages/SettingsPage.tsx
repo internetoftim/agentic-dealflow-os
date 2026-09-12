@@ -64,7 +64,7 @@ export default function SettingsPage() {
   const [detectingPattern, setDetectingPattern] = useState(false);
   const [patternDetected, setPatternDetected] = useState(false);
   const [aiModel, setAiModel] = useState("gpt-5.4");
-  const [deepResearchProvider, setDeepResearchProvider] = useState<"custom" | "firecrawl">("custom");
+  const [deepResearchProvider, setDeepResearchProvider] = useState<"tavily" | "custom" | "firecrawl">("tavily");
   const [driveFolder, setDriveFolder] = useState("My Drive/WAIT ROOM");
   const [memoPrompt, setMemoPrompt] = useState(DEFAULT_MEMO_PROMPT);
   const [recapPattern, setRecapPattern] = useState(DEFAULT_RECAP_PATTERN);
@@ -87,7 +87,7 @@ export default function SettingsPage() {
           setGoogleScopes((data as any).google_scopes ?? null);
           setDriveSync(data.drive_sync_enabled ?? true);
           setSpamFilter(data.spam_filter_enabled ?? true);
-          setDeepResearchProvider((data as any).deep_research_provider ?? "custom");
+          setDeepResearchProvider((data as any).deep_research_provider ?? "tavily");
           setDriveFolder((data as any).drive_folder ?? "My Drive/WAIT ROOM");
           if ((data as any).memo_prompt) setMemoPrompt((data as any).memo_prompt);
           if (data.naming_pattern) {
@@ -588,7 +588,8 @@ export default function SettingsPage() {
           <p className="text-xs text-muted-foreground mb-3">Choose which engine powers company deep research after deck extraction.</p>
           <div className="grid grid-cols-2 gap-2">
             {([
-              { value: "custom" as const, label: "Custom Agent", description: "Uses your selected AI model + Firecrawl search", disabled: false },
+              { value: "tavily" as const, label: "Tavily", description: "Search-driven research — website, LinkedIn, Crunchbase, news, key people — with no LLM calls (default)", disabled: false },
+              { value: "custom" as const, label: "Custom Agent", description: "Your selected AI model extracts from Tavily search results (uses OpenAI)", disabled: false },
               { value: "firecrawl" as const, label: "Firecrawl Only", description: "Firecrawl search + scrape, no LLM extraction", disabled: true },
             ]).map((opt) => (
               <button
