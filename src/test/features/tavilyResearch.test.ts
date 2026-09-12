@@ -16,7 +16,7 @@ describe("Tavily is the research engine wherever OpenAI was doing web search", (
 
   it("company URLs and key people come from search under tavily, not the OpenAI Responses API", () => {
     expect(dr).toMatch(/provider === "tavily"\) \{[\s\S]*?findCompanyUrls\(web/);
-    expect(dr).toMatch(/if \(openaiKey && provider !== "tavily"\)/);
+    expect(dr).toMatch(/if \(people\.length === 0 && openaiKey && provider !== "tavily"\)/);
   });
 
   it("process-deck skips the GPT-5 web search when Tavily is available", () => {
@@ -42,5 +42,52 @@ describe("Tavily is the research engine wherever OpenAI was doing web search", (
     const st = read("src/pages/SettingsPage.tsx");
     expect(st).toMatch(/value: "tavily" as const/);
     expect(st).toMatch(/deep_research_provider \?\? "tavily"/);
+  });
+
+  describe("Tavily Research API is the primary source of the company profile", () => {
+    it("deep-research starts the research call up front and prefers its fields over scraping", () => {
+      expect(dr).toMatch(/const profilePromise: Promise<CompanyProfile \| null> = provider === "tavily" && tavilyApiKey/);
+      expect(dr).toMatch(/fundingTotal = profile\.funding_total;/);
+      expect(dr).toMatch(/if \(crunchbaseUrl && !\(profile && \(fundingTotal \|\| investors\)\)\)/);
+      expect(dr).toMatch(/if \(profile\?\.latest_articles\.length\) \{/);
+      expect(dr).toMatch(/if \(profile\?\.key_people\.length\) \{/);
+      expect(dr).toMatch(/if \(people\.length === 0 && openaiKey && provider !== "tavily"\)/);
+    });
+
+    it("the output schema satisfies Tavily's validator (no top-level type, descriptions everywhere)", () => {
+      const schema = wr.slice(wr.indexOf("const COMPANY_PROFILE_SCHEMA"), wr.indexOf("const cleanUrl"));
+      expect(schema).not.toMatch(/^\s*type: "object",\s*$/m); // top level has only properties/required
+      // Every typed node (properties and array items, nested included) carries a description.
+      const typed = (schema.match(/type: "/g) ?? []).length;
+      const described = (schema.match(/description: "/g) ?? []).length;
+      expect(typed).toBeGreaterThanOrEqual(12);
+      expect(described).toBeGreaterThanOrEqual(typed);
+      expect(schema).toMatch(/required: \["website", "linkedin_url", "investors", "latest_articles", "key_people"\]/);
+    });
+
+    it("polls GET /research/{id} and fails soft (null) on timeout or error", () => {
+      expect(wr).toMatch(/`\$\{TAVILY_BASE\}\/research\/\$\{request_id\}`/);
+      expect(wr).toMatch(/timed out for/);
+      expect((wr.match(/return null;/g) ?? []).length).toBeGreaterThanOrEqual(5);
+    });
+
+    it("normalizes N/A-style placeholders and non-URLs out of the profile", () => {
+      expect(wr).toMatch(/n\\\/a\|unknown\|none\|null\|not \(available\|found\|disclosed\)/);
+      expect(wr).toMatch(/\^https\?:\\\/\\\//);
+    });
+  });
+
+  describe("investor list sanity", () => {
+    it("the research prompt excludes investor directories the company itself publishes", () => {
+      expect(wr).toMatch(/Do NOT list investors merely mentioned, featured, or catalogued on the company's website/);
+    });
+    it("plausibleInvestors drops alphabetized directory dumps and keeps real cap tables", async () => {
+      const src = wr.slice(wr.indexOf("export function plausibleInvestors"), wr.indexOf("/**", wr.indexOf("export function plausibleInvestors")));
+      const fn = new Function(`${src.replace("export function", "function")}; return plausibleInvestors;`)() as (n: string[]) => string[];
+      expect(fn(["11.2 Capital", "11 Tribes Ventures", "1776 Ventures", "1843 Capital", "1855 Capital Partners", "1955 Capital", "1Confirmation"])).toEqual([]);
+      expect(fn(["GIC", "Accel", "Y Combinator", "Craft Ventures", "Felicis Ventures", "Peak XV Partners", "Coatue"])).toHaveLength(7);
+      expect(fn(["Accel", "Sequoia"])).toEqual(["Accel", "Sequoia"]); // short sorted lists are fine
+      expect(fn(["Accel", "Accel", " Sequoia "])).toEqual(["Accel", "Sequoia"]);
+    });
   });
 });

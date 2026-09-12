@@ -75,7 +75,11 @@ describe("agent surface stays in sync", () => {
   });
 
   it("every tool the skill tells the agent to call actually exists on the server", () => {
-    const referenced = [...skill.matchAll(/`([a-z_]+)`/g)].map((m) => m[1]).filter((n) => n.includes("_") && !n.startsWith("since") && !n.startsWith("message") && !n.startsWith("receiver_email") && !n.startsWith("thread") && !n.startsWith("deep_research"));
+    // Backticked snake_case names in the skill are tool calls, except the paired
+    // Tavily connector's tools (tavily_*) and a few field/argument names.
+    const referenced = [...skill.matchAll(/`([a-z_]+)`/g)].map((m) => m[1]).filter((n) =>
+      n.includes("_") && !n.startsWith("tavily_") && !n.startsWith("since") && !n.startsWith("message")
+      && !n.startsWith("receiver_email") && !n.startsWith("thread") && !n.startsWith("deep_research"));
     for (const t of new Set(referenced)) expect(toolNames, t).toContain(t);
   });
 });

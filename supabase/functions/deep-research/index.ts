@@ -1,5 +1,5 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { createWebResearch, findCompanyUrls, type SearchResult } from "../_shared/web-research.ts";
+import { createWebResearch, findCompanyUrls, tavilyResearchCompany, type CompanyProfile, type SearchResult } from "../_shared/web-research.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -250,6 +250,15 @@ Deno.serve(async (req) => {
 
     console.log(`Deep research for "${deal.name}" — provider: ${provider}, model: ${aiModel}`);
 
+    // Tavily Research API: one cited, structured profile (funding, investors,
+    // headcount, news, key people). Started now so it overlaps the search
+    // steps; awaited where its fields are first needed. Null ⇒ fall back to
+    // the search-based path for each field.
+    const profilePromise: Promise<CompanyProfile | null> = provider === "tavily" && tavilyApiKey
+      ? tavilyResearchCompany(tavilyApiKey, { name: deal.name, sector: deal.sector, stage: deal.stage, website: deal.website },
+          { model: (Deno.env.get("TAVILY_RESEARCH_MODEL") as "mini" | "pro" | "auto") || "mini", timeoutMs: 110_000 })
+      : Promise.resolve(null);
+
     // Step 1: web search (Tavily primary, Firecrawl fallback)
     const searchQuery = `${deal.name} company ${deal.sector ? deal.sector : ""} official website LinkedIn`;
     console.log(`Search query (${web.provider}):`, searchQuery);
@@ -305,8 +314,18 @@ Deno.serve(async (req) => {
       }
     }
 
-    // Scrape the Crunchbase page for structured data
-    if (crunchbaseUrl) {
+    const profile = await profilePromise;
+    if (profile) {
+      console.log(`Tavily research profile in ${profile.response_time ?? "?"}s: ${profile.investors.length} investors, ${profile.latest_articles.length} articles, ${profile.key_people.length} people, ${profile.sources.length} sources`);
+      fundingTotal = profile.funding_total;
+      lastFundingRound = profile.last_funding_round;
+      numEmployees = profile.num_employees;
+      investors = profile.investors.length ? profile.investors.join(", ") : null;
+      if (!crunchbaseUrl) crunchbaseUrl = profile.sources.find((x) => /crunchbase\.com\/organization\//.test(x.url))?.url ?? null;
+    }
+
+    // Scrape the Crunchbase page for structured data (only if research left gaps)
+    if (crunchbaseUrl && !(profile && (fundingTotal || investors))) {
       try {
         console.log("Scraping Crunchbase:", crunchbaseUrl);
         {
@@ -382,7 +401,11 @@ Deno.serve(async (req) => {
     } else if (provider === "tavily") {
       // Search-driven extraction: official site from a domain-filtered search
       // (aggregators excluded), LinkedIn from a scoped search. No LLM involved.
-      research = await findCompanyUrls(web, { name: deal.name, sector: deal.sector, knownWebsite: candidateWebsite ?? null, seed: searchResults });
+      research = { website: profile?.website ?? null, linkedin_url: profile?.linkedin_url ?? null };
+      if (!research.website || !research.linkedin_url) {
+        const found = await findCompanyUrls(web, { name: deal.name, sector: deal.sector, knownWebsite: research.website ?? candidateWebsite ?? null, seed: searchResults });
+        research = { website: research.website ?? found.website, linkedin_url: research.linkedin_url ?? found.linkedin_url };
+      }
       console.log("Tavily extraction:", JSON.stringify(research));
     } else {
       // Custom agent mode: use selected LLM for structured extraction
@@ -601,8 +624,10 @@ Extract the company's official website URL and LinkedIn company page URL using t
       }
     }
 
-    // Step 3c: Last 3 articles with previews
-    try {
+    // Step 3c: Last 3 articles with previews — from the research profile when available
+    if (profile?.latest_articles.length) {
+      for (const a of profile.latest_articles) latestArticles.push({ title: a.title, url: a.url, source: a.source, preview: null });
+    } else try {
       const newsResults = await web.search(`"${deal.name}" company latest news article`, 10);
 
       {
@@ -689,10 +714,14 @@ Extract the company's official website URL and LinkedIn company page URL using t
 
     // Step 4: Extract key people (GPT web search primary, Firecrawl fallback)
     let people: { name: string; title: string | null; linkedin_url: string | null }[] = [];
+    if (profile?.key_people.length) {
+      people = profile.key_people.map((p) => ({ name: p.name, title: p.title, linkedin_url: p.linkedin_url }));
+      console.log(`Key people from research profile: ${people.length}`);
+    }
 
     const openaiKey = Deno.env.get("OPENAI_API_KEY")?.trim().replace(/[\r\n]/g, "");
 
-    if (openaiKey && provider !== "tavily") {
+    if (people.length === 0 && openaiKey && provider !== "tavily") {
       // GPT primary: use web_search tool to find key people
       try {
         console.log("Extracting key people via GPT web search…");

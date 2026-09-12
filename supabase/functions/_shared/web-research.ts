@@ -272,3 +272,140 @@ export async function findCompanyUrls(
   }
   return { website, linkedin_url: linkedin };
 }
+
+// ---------------------------------------------------------------- Tavily Research API
+
+export interface CompanyProfile {
+  website: string | null;
+  linkedin_url: string | null;
+  funding_total: string | null;
+  last_funding_round: string | null;
+  num_employees: string | null;
+  investors: string[];
+  latest_articles: Array<{ title: string; url: string; source: string | null }>;
+  key_people: Array<{ name: string; title: string | null; linkedin_url: string | null }>;
+  sources: Array<{ title: string; url: string }>;
+  response_time: number | null;
+}
+
+// The API validates the schema strictly: no top-level `type`, and a
+// `description` on every property (nested ones included).
+const COMPANY_PROFILE_SCHEMA = {
+  properties: {
+    website: { type: "string", description: "Official company website URL" },
+    linkedin_url: { type: "string", description: "LinkedIn company page URL" },
+    funding_total: { type: "string", description: "Total funding raised to date, e.g. $42M; empty if unknown" },
+    last_funding_round: { type: "string", description: "Most recent funding round and size, e.g. Series B – $30M; empty if unknown" },
+    num_employees: { type: "string", description: "Current headcount or range; empty if unknown" },
+    investors: { type: "array", description: "Notable investors and funds", items: { type: "string", description: "Investor name" } },
+    latest_articles: {
+      type: "array", description: "The three most recent, most relevant news articles about the company",
+      items: { type: "object", description: "Article", properties: {
+        title: { type: "string", description: "Headline" },
+        url: { type: "string", description: "Article URL" },
+        source: { type: "string", description: "Publication name" },
+      } },
+    },
+    key_people: {
+      type: "array", description: "Founders and C-level executives",
+      items: { type: "object", description: "Person", properties: {
+        name: { type: "string", description: "Full name" },
+        title: { type: "string", description: "Role at the company" },
+        linkedin_url: { type: "string", description: "LinkedIn profile URL; empty if unknown" },
+      } },
+    },
+  },
+  required: ["website", "linkedin_url", "investors", "latest_articles", "key_people"],
+};
+
+const cleanUrl = (v: unknown): string | null => {
+  if (typeof v !== "string") return null;
+  const t = v.trim();
+  return /^https?:\/\//i.test(t) ? t.split("#")[0] : null;
+};
+const cleanStr = (v: unknown): string | null => {
+  if (typeof v !== "string") return null;
+  const t = v.trim();
+  return t && !/^(n\/a|unknown|none|null|not (available|found|disclosed))$/i.test(t) ? t : null;
+};
+
+/**
+ * A genuine cap-table list is short and unordered; an alphabetized run of
+ * many names is a directory scrape (a company that *lists* investors, e.g.
+ * as a product) and would poison the deal record. Drop those wholesale.
+ */
+export function plausibleInvestors(names: string[]): string[] {
+  const list = [...new Set(names.map((n) => n.trim()).filter(Boolean))].slice(0, 20);
+  if (list.length >= 6) {
+    // Compare on alphanumerics only: directory sort orders vary in how they
+    // treat spaces and punctuation, and locale collation would miss them.
+    const keys = list.map((n) => n.toLowerCase().replace(/[^a-z0-9]/g, ""));
+    const sorted = keys.every((k, i) => i === 0 || keys[i - 1] <= k);
+    if (sorted) return [];
+  }
+  return list.slice(0, 12);
+}
+
+/**
+ * One Tavily Research call → a cited, structured company profile. Async on
+ * the API side (poll GET /research/{id}); typically 30–90s with model=mini.
+ * Returns null on any failure so callers fall back to search-based research.
+ */
+export async function tavilyResearchCompany(
+  apiKey: string,
+  company: { name: string; sector?: string | null; stage?: string | null; website?: string | null },
+  opts: { model?: "mini" | "pro" | "auto"; timeoutMs?: number; pollMs?: number } = {},
+): Promise<CompanyProfile | null> {
+  const model = opts.model ?? "mini";
+  const deadline = Date.now() + (opts.timeoutMs ?? 120_000);
+  const pollMs = opts.pollMs ?? 5_000;
+  const headers = { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" };
+  const input = [
+    `Company profile for "${company.name}"`,
+    company.sector ? `(${company.sector}${company.stage ? `, ${company.stage} stage` : ""})` : company.stage ? `(${company.stage} stage)` : "",
+    company.website ? `whose website is ${company.website}` : "",
+    ": official website, LinkedIn company page, total funding raised, most recent funding round, headcount, the investors that have invested IN this company (its own funding rounds / cap table), the three most recent news articles, and the founders/CEO/CTO with titles and LinkedIn profiles. Prefer primary sources (press releases about its funding, LinkedIn, Crunchbase/PitchBook). Do NOT list investors merely mentioned, featured, or catalogued on the company's website or product (e.g. an investor directory it publishes); if no funding is publicly known, return empty investors and funding fields rather than guessing.",
+  ].filter(Boolean).join(" ");
+
+  try {
+    const post = await fetchWithTimeout(`${TAVILY_BASE}/research`, {
+      method: "POST", headers,
+      body: JSON.stringify({ input, model, output_length: "short", citation_format: "numbered", output_schema: COMPANY_PROFILE_SCHEMA }),
+    }, 30_000);
+    if (!post.ok) { console.warn(`Tavily research submit failed [${post.status}]: ${(await post.text()).slice(0, 200)}`); return null; }
+    const { request_id } = await post.json();
+    if (!request_id) return null;
+
+    let result: any = null;
+    while (Date.now() < deadline) {
+      const res = await fetchWithTimeout(`${TAVILY_BASE}/research/${request_id}`, { headers }, 30_000);
+      if (!res.ok) { console.warn(`Tavily research poll failed [${res.status}]`); return null; }
+      const data = await res.json();
+      if (data.status === "completed") { result = data; break; }
+      if (data.status === "failed") { console.warn("Tavily research failed:", data.error ?? ""); return null; }
+      await new Promise((r) => setTimeout(r, pollMs));
+    }
+    if (!result) { console.warn(`Tavily research timed out for "${company.name}"`); return null; }
+
+    const raw = typeof result.content === "string" ? JSON.parse(result.content) : (result.content ?? {});
+    return {
+      website: cleanUrl(raw.website),
+      linkedin_url: cleanUrl(raw.linkedin_url)?.replace(/\/+$/, "") ?? null,
+      funding_total: cleanStr(raw.funding_total),
+      last_funding_round: cleanStr(raw.last_funding_round),
+      num_employees: cleanStr(raw.num_employees),
+      investors: plausibleInvestors(Array.isArray(raw.investors) ? raw.investors.map(cleanStr).filter((x: string | null): x is string => !!x) : []),
+      latest_articles: (Array.isArray(raw.latest_articles) ? raw.latest_articles : [])
+        .map((a: any) => ({ title: cleanStr(a?.title) ?? "", url: cleanUrl(a?.url) ?? "", source: cleanStr(a?.source) }))
+        .filter((a: any) => a.title && a.url).slice(0, 3),
+      key_people: (Array.isArray(raw.key_people) ? raw.key_people : [])
+        .map((p: any) => ({ name: cleanStr(p?.name) ?? "", title: cleanStr(p?.title), linkedin_url: cleanUrl(p?.linkedin_url) }))
+        .filter((p: any) => p.name).slice(0, 8),
+      sources: (Array.isArray(result.sources) ? result.sources : []).map((x: any) => ({ title: String(x.title ?? ""), url: String(x.url ?? "") })).filter((x: any) => x.url),
+      response_time: typeof result.response_time === "number" ? result.response_time : null,
+    };
+  } catch (e) {
+    console.warn("Tavily research error:", e);
+    return null;
+  }
+}
