@@ -10,7 +10,7 @@ export type Database = {
   // Allows to automatically instantiate createClient with right options
   // instead of createClient<Database, { PostgrestVersion: 'XX' }>(URL, KEY)
   __InternalSupabase: {
-    PostgrestVersion: "14.4"
+    PostgrestVersion: "14.5"
   }
   public: {
     Tables: {
@@ -143,7 +143,15 @@ export type Database = {
           updated_at?: string
           user_id?: string
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "deal_notes_deal_id_fkey"
+            columns: ["deal_id"]
+            isOneToOne: false
+            referencedRelation: "deals"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       deal_people: {
         Row: {
@@ -253,14 +261,17 @@ export type Database = {
           compressed_size: string | null
           created_at: string
           crunchbase_url: string | null
+          deck_preview: Json | null
           deck_size: string | null
           deep_research_status: string
           funding_total: string | null
           gdrive_file_id: string | null
           growth: string | null
           id: string
+          investor_research: Json | null
           investors: string | null
           last_funding_round: string | null
+          latest_articles: Json | null
           linkedin_url: string | null
           memo_draft: string | null
           name: string
@@ -268,6 +279,7 @@ export type Database = {
           num_employees: string | null
           pages: number | null
           paused_at_step: string | null
+          research_verification: Json | null
           revenue: string | null
           sector: string
           source: string
@@ -287,14 +299,17 @@ export type Database = {
           compressed_size?: string | null
           created_at?: string
           crunchbase_url?: string | null
+          deck_preview?: Json | null
           deck_size?: string | null
           deep_research_status?: string
           funding_total?: string | null
           gdrive_file_id?: string | null
           growth?: string | null
           id?: string
+          investor_research?: Json | null
           investors?: string | null
           last_funding_round?: string | null
+          latest_articles?: Json | null
           linkedin_url?: string | null
           memo_draft?: string | null
           name: string
@@ -302,6 +317,7 @@ export type Database = {
           num_employees?: string | null
           pages?: number | null
           paused_at_step?: string | null
+          research_verification?: Json | null
           revenue?: string | null
           sector?: string
           source?: string
@@ -321,14 +337,17 @@ export type Database = {
           compressed_size?: string | null
           created_at?: string
           crunchbase_url?: string | null
+          deck_preview?: Json | null
           deck_size?: string | null
           deep_research_status?: string
           funding_total?: string | null
           gdrive_file_id?: string | null
           growth?: string | null
           id?: string
+          investor_research?: Json | null
           investors?: string | null
           last_funding_round?: string | null
+          latest_articles?: Json | null
           linkedin_url?: string | null
           memo_draft?: string | null
           name?: string
@@ -336,6 +355,7 @@ export type Database = {
           num_employees?: string | null
           pages?: number | null
           paused_at_step?: string | null
+          research_verification?: Json | null
           revenue?: string | null
           sector?: string
           source?: string
@@ -349,7 +369,15 @@ export type Database = {
           website?: string | null
           website_searching?: boolean | null
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "deals_team_id_fkey"
+            columns: ["team_id"]
+            isOneToOne: false
+            referencedRelation: "teams"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       ingest_events: {
         Row: {
@@ -409,7 +437,22 @@ export type Database = {
           subject?: string | null
           user_id?: string
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "ingest_events_deal_id_fkey"
+            columns: ["deal_id"]
+            isOneToOne: false
+            referencedRelation: "deals"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "ingest_events_receiver_account_id_fkey"
+            columns: ["receiver_account_id"]
+            isOneToOne: false
+            referencedRelation: "receiver_accounts"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       mcp_access_tokens: {
         Row: {
@@ -792,7 +835,15 @@ export type Database = {
           team_id?: string
           user_id?: string
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "team_members_team_id_fkey"
+            columns: ["team_id"]
+            isOneToOne: false
+            referencedRelation: "teams"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       teams: {
         Row: {
@@ -848,10 +899,10 @@ export type Database = {
           drive_folder: string | null
           drive_sync_enabled: boolean | null
           gmail_history_id: string | null
-          google_scopes: string | null
           gmail_label_enabled: boolean | null
           google_provider_refresh_token: string | null
           google_provider_token: string | null
+          google_scopes: string | null
           id: string
           intake_slug: string | null
           memo_prompt: string | null
@@ -871,10 +922,10 @@ export type Database = {
           drive_folder?: string | null
           drive_sync_enabled?: boolean | null
           gmail_history_id?: string | null
-          google_scopes?: string | null
           gmail_label_enabled?: boolean | null
           google_provider_refresh_token?: string | null
           google_provider_token?: string | null
+          google_scopes?: string | null
           id?: string
           intake_slug?: string | null
           memo_prompt?: string | null
@@ -894,10 +945,10 @@ export type Database = {
           drive_folder?: string | null
           drive_sync_enabled?: boolean | null
           gmail_history_id?: string | null
-          google_scopes?: string | null
           gmail_label_enabled?: boolean | null
           google_provider_refresh_token?: string | null
           google_provider_token?: string | null
+          google_scopes?: string | null
           id?: string
           intake_slug?: string | null
           memo_prompt?: string | null
@@ -923,30 +974,19 @@ export type Database = {
       }
       create_team: {
         Args: { _name: string }
-        Returns: Database["public"]["Tables"]["teams"]["Row"]
-      }
-      is_team_member: {
-        Args: { _team_id: string; _user_id: string }
-        Returns: boolean
-      }
-      join_team: {
-        Args: { _invite_code: string }
-        Returns: Database["public"]["Tables"]["teams"]["Row"]
-      }
-      leave_team: { Args: Record<PropertyKey, never>; Returns: undefined }
-      remove_team_member: {
-        Args: { _member_user_id: string }
-        Returns: undefined
-      }
-      get_team_roster: {
-        Args: Record<PropertyKey, never>
         Returns: {
-          display_name: string | null
-          email: string | null
-          joined_at: string
-          role: string
-          user_id: string
-        }[]
+          created_at: string
+          id: string
+          invite_code: string
+          name: string
+          owner_id: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "teams"
+          isOneToOne: true
+          isSetofReturn: false
+        }
       }
       get_conversion_job: {
         Args: { _email: string; _token: string }
@@ -968,6 +1008,16 @@ export type Database = {
           website: string
         }[]
       }
+      get_team_roster: {
+        Args: never
+        Returns: {
+          display_name: string
+          email: string
+          joined_at: string
+          role: string
+          user_id: string
+        }[]
+      }
       has_role: {
         Args: {
           _role: Database["public"]["Enums"]["app_role"]
@@ -975,7 +1025,28 @@ export type Database = {
         }
         Returns: boolean
       }
+      is_team_member: {
+        Args: { _team_id: string; _user_id: string }
+        Returns: boolean
+      }
       is_user_approved: { Args: { _user_id: string }; Returns: boolean }
+      join_team: {
+        Args: { _invite_code: string }
+        Returns: {
+          created_at: string
+          id: string
+          invite_code: string
+          name: string
+          owner_id: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "teams"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      leave_team: { Args: never; Returns: undefined }
       lookup_share_token: {
         Args: { _token: string }
         Returns: {
@@ -984,6 +1055,10 @@ export type Database = {
           owner_display_name: string
           revoked: boolean
         }[]
+      }
+      remove_team_member: {
+        Args: { _member_user_id: string }
+        Returns: undefined
       }
       sync_my_profile: {
         Args: { _avatar_url: string; _display_name: string; _email: string }
@@ -1031,12 +1106,12 @@ export type Tables<
   DefaultSchemaTableNameOrOptions extends
     | keyof (DefaultSchema["Tables"] & DefaultSchema["Views"])
     | { schema: keyof DatabaseWithoutInternals },
-  TableName extends DefaultSchemaTableNameOrOptions extends {
+  TableName extends (DefaultSchemaTableNameOrOptions extends {
     schema: keyof DatabaseWithoutInternals
   }
     ? keyof (DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"] &
         DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Views"])
-    : never = never,
+    : never) = never,
 > = DefaultSchemaTableNameOrOptions extends {
   schema: keyof DatabaseWithoutInternals
 }
@@ -1060,11 +1135,11 @@ export type TablesInsert<
   DefaultSchemaTableNameOrOptions extends
     | keyof DefaultSchema["Tables"]
     | { schema: keyof DatabaseWithoutInternals },
-  TableName extends DefaultSchemaTableNameOrOptions extends {
+  TableName extends (DefaultSchemaTableNameOrOptions extends {
     schema: keyof DatabaseWithoutInternals
   }
     ? keyof DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"]
-    : never = never,
+    : never) = never,
 > = DefaultSchemaTableNameOrOptions extends {
   schema: keyof DatabaseWithoutInternals
 }
@@ -1085,11 +1160,11 @@ export type TablesUpdate<
   DefaultSchemaTableNameOrOptions extends
     | keyof DefaultSchema["Tables"]
     | { schema: keyof DatabaseWithoutInternals },
-  TableName extends DefaultSchemaTableNameOrOptions extends {
+  TableName extends (DefaultSchemaTableNameOrOptions extends {
     schema: keyof DatabaseWithoutInternals
   }
     ? keyof DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"]
-    : never = never,
+    : never) = never,
 > = DefaultSchemaTableNameOrOptions extends {
   schema: keyof DatabaseWithoutInternals
 }
@@ -1110,11 +1185,11 @@ export type Enums<
   DefaultSchemaEnumNameOrOptions extends
     | keyof DefaultSchema["Enums"]
     | { schema: keyof DatabaseWithoutInternals },
-  EnumName extends DefaultSchemaEnumNameOrOptions extends {
+  EnumName extends (DefaultSchemaEnumNameOrOptions extends {
     schema: keyof DatabaseWithoutInternals
   }
     ? keyof DatabaseWithoutInternals[DefaultSchemaEnumNameOrOptions["schema"]]["Enums"]
-    : never = never,
+    : never) = never,
 > = DefaultSchemaEnumNameOrOptions extends {
   schema: keyof DatabaseWithoutInternals
 }
@@ -1127,11 +1202,11 @@ export type CompositeTypes<
   PublicCompositeTypeNameOrOptions extends
     | keyof DefaultSchema["CompositeTypes"]
     | { schema: keyof DatabaseWithoutInternals },
-  CompositeTypeName extends PublicCompositeTypeNameOrOptions extends {
+  CompositeTypeName extends (PublicCompositeTypeNameOrOptions extends {
     schema: keyof DatabaseWithoutInternals
   }
     ? keyof DatabaseWithoutInternals[PublicCompositeTypeNameOrOptions["schema"]]["CompositeTypes"]
-    : never = never,
+    : never) = never,
 > = PublicCompositeTypeNameOrOptions extends {
   schema: keyof DatabaseWithoutInternals
 }
