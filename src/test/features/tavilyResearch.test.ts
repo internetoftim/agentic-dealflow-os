@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
@@ -82,12 +82,64 @@ describe("Tavily is the research engine wherever OpenAI was doing web search", (
       expect(wr).toMatch(/Do NOT list investors merely mentioned, featured, or catalogued on the company's website/);
     });
     it("plausibleInvestors drops alphabetized directory dumps and keeps real cap tables", async () => {
-      const src = wr.slice(wr.indexOf("export function plausibleInvestors"), wr.indexOf("/**", wr.indexOf("export function plausibleInvestors")));
-      const fn = new Function(`${src.replace("export function", "function")}; return plausibleInvestors;`)() as (n: string[]) => string[];
-      expect(fn(["11.2 Capital", "11 Tribes Ventures", "1776 Ventures", "1843 Capital", "1855 Capital Partners", "1955 Capital", "1Confirmation"])).toEqual([]);
-      expect(fn(["GIC", "Accel", "Y Combinator", "Craft Ventures", "Felicis Ventures", "Peak XV Partners", "Coatue"])).toHaveLength(7);
-      expect(fn(["Accel", "Sequoia"])).toEqual(["Accel", "Sequoia"]); // short sorted lists are fine
-      expect(fn(["Accel", "Accel", " Sequoia "])).toEqual(["Accel", "Sequoia"]);
+      const { plausibleInvestors } = await import("../../../supabase/functions/_shared/web-research.ts");
+      expect(plausibleInvestors(["11.2 Capital", "11 Tribes Ventures", "1776 Ventures", "1843 Capital", "1855 Capital Partners", "1955 Capital", "1Confirmation"])).toEqual([]);
+      expect(plausibleInvestors(["GIC", "Accel", "Y Combinator", "Craft Ventures", "Felicis Ventures", "Peak XV Partners", "Coatue"])).toHaveLength(7);
+      expect(plausibleInvestors(["Accel", "Sequoia"])).toEqual(["Accel", "Sequoia"]); // short sorted lists are fine
+      expect(plausibleInvestors(["Accel", "Accel", " Sequoia "])).toEqual(["Accel", "Sequoia"]);
+    });
+  });
+
+  describe("web-research behaviour (module imported, fetch mocked)", () => {
+    async function client(responder: (url: string, init?: RequestInit) => unknown) {
+      (globalThis as any).Deno = { env: { get: () => undefined } };
+      vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => {
+        const body = responder(String(url), init);
+        return body instanceof Response ? body : new Response(JSON.stringify(body), { status: 200 });
+      }));
+      const { createWebResearch } = await import("../../../supabase/functions/_shared/web-research.ts");
+      return createWebResearch({ tavilyApiKey: "tvly-test", firecrawlApiKey: "fc-test" });
+    }
+
+    it("translates site:domain/path into include_domains plus a path post-filter", async () => {
+      const seen: any[] = [];
+      const web = await client((url, init) => {
+        if (url.endsWith("/search")) {
+          seen.push(JSON.parse(String(init?.body)));
+          return { results: [
+            { url: "https://www.linkedin.com/posts/someone_supabase-activity-123", title: "post", content: "" },
+            { url: "https://www.linkedin.com/company/supabase", title: "Supabase - LinkedIn", content: "" },
+            { url: "https://www.linkedin.com/in/paulcopplestone", title: "Paul", content: "" },
+          ] };
+        }
+        return {};
+      });
+      const hits = await web.search("site:linkedin.com/company Supabase", 3);
+      expect(seen[0].include_domains).toEqual(["linkedin.com"]);
+      expect(seen[0].query).toBe("Supabase");
+      expect(seen[0].max_results).toBeGreaterThan(3); // over-fetch when a path filter will discard results
+      expect(hits.map((h) => h.url)).toEqual(["https://www.linkedin.com/company/supabase"]);
+    });
+
+    it("falls back to Firecrawl when Tavily extract reports the page in failed_results", async () => {
+      const calls: string[] = [];
+      const web = await client((url) => {
+        calls.push(url);
+        if (url.endsWith("/extract")) return { results: [], failed_results: [{ url: "https://x.test/p", error: "404 page not found" }] };
+        if (url.includes("firecrawl")) return { data: { markdown: "# from firecrawl" } };
+        return {};
+      });
+      expect(await web.scrape("https://x.test/p")).toBe("# from firecrawl");
+      expect(calls.some((c) => c.includes("api.tavily.com/extract"))).toBe(true);
+      expect(calls.some((c) => c.includes("api.firecrawl.dev/v1/scrape"))).toBe(true);
+    });
+
+    it("surfaces the extract failure when no fallback provider exists", async () => {
+      (globalThis as any).Deno = { env: { get: () => undefined } };
+      vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ results: [], failed_results: [{ url: "u", error: "404 page not found" }] }), { status: 200 })));
+      const { createWebResearch } = await import("../../../supabase/functions/_shared/web-research.ts");
+      const web = createWebResearch({ tavilyApiKey: "tvly-test", firecrawlApiKey: null });
+      await expect(web.scrape("https://x.test/p")).rejects.toThrow(/404 page not found/);
     });
   });
 });
