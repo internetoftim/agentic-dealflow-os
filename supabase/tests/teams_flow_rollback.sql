@@ -4,7 +4,8 @@
 --
 --   supabase db query --linked --file supabase/tests/teams_flow_rollback.sql
 --
--- Expect: ROLLBACK_TEST_OK inherit=true access_before=f access_after=t roster=2 dup_guard=enforced members_after_leave=1DO $$
+-- Expect: ROLLBACK_TEST_OK inherit=true access_before=f access_after=t roster=2 dup_guard=enforced members_after_leave=1
+DO $$
 DECLARE
   a uuid; b uuid;
   t public.teams; d_id uuid; d_team uuid;
