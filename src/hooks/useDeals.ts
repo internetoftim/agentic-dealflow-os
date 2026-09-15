@@ -541,6 +541,72 @@ export function useProcessDocsend() {
   });
 }
 
+/**
+ * Re-run the whole ingestion/research workflow on an existing deal.
+ * Doc-viewer deals (DocSend/Papermark) go back through cloud capture;
+ * uploaded decks are re-fed to process-deck from their stored file.
+ */
+export function useRerunWorkflow() {
+  const queryClient = useQueryClient();
+  const { user } = useAuth();
+
+  return useMutation({
+    mutationFn: async ({ dealId, source }: { dealId: string; source?: string }) => {
+      if (!user) throw new Error("Not authenticated");
+
+      // Doc-viewer deals: re-capture from the original link.
+      if (isDocViewerSource(source)) {
+        const { data: job, error: jobError } = await supabase
+          .from("capture_jobs")
+          .select("url")
+          .eq("deal_id", dealId)
+          .order("created_at", { ascending: false })
+          .limit(1)
+          .maybeSingle();
+        if (jobError) throw jobError;
+        if (!job?.url) throw new Error("No original link found for this deal");
+
+        await supabase
+          .from("deals")
+          .update({ status: "scraping", paused_at_step: null, deep_research_status: "pending" })
+          .eq("id", dealId);
+
+        return await runDocsendCapture({ dealId, url: job.url });
+      }
+
+      // Uploaded decks: find the most recent stored file and re-process it.
+      const { data: src, error: srcError } = await supabase
+        .from("sources")
+        .select("storage_path")
+        .eq("deal_id", dealId)
+        .not("storage_path", "is", null)
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (srcError) throw srcError;
+      if (!src?.storage_path) throw new Error("No stored deck found for this deal");
+
+      const { error: updateError } = await supabase
+        .from("deals")
+        .update({ status: "extracting", paused_at_step: null, deep_research_status: "pending" })
+        .eq("id", dealId);
+      if (updateError) throw updateError;
+
+      const { data, error } = await supabase.functions.invoke("process-deck", {
+        body: { dealId, storagePath: src.storage_path, skipCompression: true },
+      });
+      if (error) throw error;
+      if (data?.error) throw new Error(data.error);
+      return data;
+    },
+    onSuccess: (_data, variables) => {
+      queryClient.invalidateQueries({ queryKey: ["deals"] });
+      queryClient.invalidateQueries({ queryKey: ["sources", variables.dealId] });
+      queryClient.invalidateQueries({ queryKey: ["latest-capture-job", variables.dealId] });
+    },
+  });
+}
+
 export function useRetryDocsendCapture() {
   const queryClient = useQueryClient();
   const { user } = useAuth();
