@@ -249,6 +249,26 @@ export default function DealWorkspace() {
                       )
                     )}
                   </button>
+                  {user && d.user_id === user.id && !PROCESSING_STATUSES.includes(d.status as any) && (
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        toast.promise(
+                          rerunWorkflow.mutateAsync({ dealId: d.id, source: d.source }),
+                          {
+                            loading: `Re-running ${d.name}…`,
+                            success: "Workflow re-started",
+                            error: (err: any) => `Re-run failed: ${err.message}`,
+                          },
+                        );
+                      }}
+                      aria-label={`Re-run workflow for ${d.name}`}
+                      disabled={rerunWorkflow.isPending}
+                      className="opacity-0 group-hover:opacity-100 focus:opacity-100 p-1.5 rounded text-muted-foreground hover:text-foreground transition-opacity"
+                    >
+                      <RotateCcw className="h-3 w-3" />
+                    </button>
+                  )}
                   {user && d.user_id === user.id && (
                     <button
                       onClick={(e) => {
