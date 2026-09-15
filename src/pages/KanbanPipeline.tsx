@@ -207,6 +207,19 @@ function DealCard({
           )}
         </div>
 
+        {canRerun && (
+          <Button
+            variant="ghost"
+            size="sm"
+            className="mt-2 h-6 text-[11px] gap-1 px-1.5 -ml-1.5 text-muted-foreground hover:text-foreground"
+            onClick={handleRerun}
+            disabled={rerunMutation.isPending}
+          >
+            {rerunMutation.isPending ? <Loader2 className="h-3 w-3 animate-spin" /> : <RotateCcw className="h-3 w-3" />}
+            Re-run
+          </Button>
+        )}
+
         {showWorkflow && (
           <WorkflowProgress
             deal={deal}
