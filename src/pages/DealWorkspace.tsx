@@ -1,7 +1,7 @@
 import { useState, useCallback, useRef, useEffect } from "react";
 import { useSearchParams } from "react-router-dom";
-import { Upload, Link, Cog, Check, Search, Send, FileText, Globe, Layers, Square, Linkedin, Loader2, FileUp, CircleDashed, CircleCheck, Circle, Pause, Clock, Download, Mail, ExternalLink, Users, Trash2, Share2 } from "lucide-react";
-import { useDeals, useSources, useLatestCaptureJob, useCreateDealWithUpload, useProcessDocsend, useRetryDocsendCapture, useCancelDeal, useDeleteDeal, WORKFLOW_STEPS, PROCESSING_STATUSES, DOC_VIEWER_SOURCES } from "@/hooks/useDeals";
+import { Upload, Link, Cog, Check, Search, Send, FileText, Globe, Layers, Square, Linkedin, Loader2, FileUp, CircleDashed, CircleCheck, Circle, Pause, Clock, Download, Mail, ExternalLink, Users, Trash2, Share2, RotateCcw } from "lucide-react";
+import { useDeals, useSources, useLatestCaptureJob, useCreateDealWithUpload, useProcessDocsend, useRetryDocsendCapture, useRerunWorkflow, useCancelDeal, useDeleteDeal, WORKFLOW_STEPS, PROCESSING_STATUSES, DOC_VIEWER_SOURCES } from "@/hooks/useDeals";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import { useDealChat } from "@/hooks/useDealChat";
@@ -40,6 +40,7 @@ export default function DealWorkspace() {
   const createDeal = useCreateDealWithUpload();
   const processDocsend = useProcessDocsend();
   const retryDocsendCapture = useRetryDocsendCapture();
+  const rerunWorkflow = useRerunWorkflow();
   const cancelDeal = useCancelDeal();
   const deleteDeal = useDeleteDeal();
   const generateMemo = useGenerateMemo();
@@ -158,6 +159,18 @@ export default function DealWorkspace() {
       }
     );
   }, [activeDeal?.id, latestCaptureJob?.url, retryDocsendCapture]);
+
+  const handleRerunWorkflow = useCallback(() => {
+    if (!activeDeal?.id) return;
+    toast.promise(
+      rerunWorkflow.mutateAsync({ dealId: activeDeal.id, source: activeDeal.source }),
+      {
+        loading: "Restarting the workflow…",
+        success: "Workflow restarted — progress will update automatically.",
+        error: (err) => `Re-run failed: ${err.message}`,
+      }
+    );
+  }, [activeDeal?.id, activeDeal?.source, rerunWorkflow]);
 
   const tabs = [
     { key: "chat" as const, label: "Data Room", icon: Layers },
@@ -330,9 +343,23 @@ export default function DealWorkspace() {
                   <span className="text-xs font-medium">Queued — waiting for active job</span>
                 </div>
               ) : activeDeal.status === "cancelled" ? (
-                <div className="flex items-center gap-2">
-                  <Pause className="h-3.5 w-3.5 text-destructive shrink-0" />
-                  <span className="text-xs font-medium text-destructive">Cancelled</span>
+                <div className="flex flex-col gap-2">
+                  <div className="flex items-center gap-2">
+                    <Pause className="h-3.5 w-3.5 text-destructive shrink-0" />
+                    <span className="text-xs font-medium text-destructive">Cancelled</span>
+                  </div>
+                  {isOwnerOfActive && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="h-7 text-[11px] gap-1 px-2 w-fit"
+                      onClick={handleRerunWorkflow}
+                      disabled={rerunWorkflow.isPending}
+                    >
+                      {rerunWorkflow.isPending ? <Loader2 className="h-3 w-3 animate-spin" /> : <RotateCcw className="h-3 w-3" />}
+                      Re-run Workflow
+                    </Button>
+                  )}
                 </div>
               ) : activeDeal.status === "error" ? (
                 <div className="flex flex-col gap-2">
@@ -357,6 +384,18 @@ export default function DealWorkspace() {
                     >
                       {retryDocsendCapture.isPending ? <Loader2 className="h-3 w-3 animate-spin" /> : <ExternalLink className="h-3 w-3" />}
                       Retry Cloud Capture
+                    </Button>
+                  )}
+                  {isOwnerOfActive && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="h-7 text-[11px] gap-1 px-2 w-fit"
+                      onClick={handleRerunWorkflow}
+                      disabled={rerunWorkflow.isPending}
+                    >
+                      {rerunWorkflow.isPending ? <Loader2 className="h-3 w-3 animate-spin" /> : <RotateCcw className="h-3 w-3" />}
+                      Re-run Workflow
                     </Button>
                   )}
                 </div>
