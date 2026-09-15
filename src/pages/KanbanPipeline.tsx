@@ -130,6 +130,16 @@ function DealCard({
   const showWorkflow = (isProcessing || isQueued || isCancelled) && !isShared;
 
   const cancelMutation = useCancelDeal();
+  const rerunMutation = useRerunWorkflow();
+  const canRerun = !isShared && !isProcessing && !isQueued;
+
+  const handleRerun = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    rerunMutation
+      .mutateAsync({ dealId: deal.id, source: deal.source })
+      .then(() => toast({ title: "Workflow restarted", description: `${deal.name} is processing again.` }))
+      .catch((err) => toast({ title: "Re-run failed", description: err.message, variant: "destructive" }));
+  };
 
   const handleCardClick = (e: React.MouseEvent) => {
     if (selectionActive && !isShared) {
