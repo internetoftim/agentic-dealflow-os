@@ -1,7 +1,7 @@
 import { useState } from "react";
-import { useDeals, useCancelDeal, useDeleteDeals, type Deal, WORKFLOW_STEPS, PROCESSING_STATUSES } from "@/hooks/useDeals";
+import { useDeals, useCancelDeal, useDeleteDeals, useRerunWorkflow, type Deal, WORKFLOW_STEPS, PROCESSING_STATUSES } from "@/hooks/useDeals";
 import { sourceConfig as mockSourceConfig } from "@/data/mockDeals";
-import { Loader2, Check, Globe, Upload, FileArchive, FileSearch, CloudUpload, ArrowRightLeft, Pause, Clock, Trash2, X, Share2 } from "lucide-react";
+import { Loader2, Check, Globe, Upload, FileArchive, FileSearch, CloudUpload, ArrowRightLeft, Pause, Clock, Trash2, X, Share2, RotateCcw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
@@ -130,6 +130,16 @@ function DealCard({
   const showWorkflow = (isProcessing || isQueued || isCancelled) && !isShared;
 
   const cancelMutation = useCancelDeal();
+  const rerunMutation = useRerunWorkflow();
+  const canRerun = !isShared && !isProcessing && !isQueued;
+
+  const handleRerun = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    rerunMutation
+      .mutateAsync({ dealId: deal.id, source: deal.source })
+      .then(() => toast({ title: "Workflow restarted", description: `${deal.name} is processing again.` }))
+      .catch((err) => toast({ title: "Re-run failed", description: err.message, variant: "destructive" }));
+  };
 
   const handleCardClick = (e: React.MouseEvent) => {
     if (selectionActive && !isShared) {
@@ -196,6 +206,19 @@ function DealCard({
             </span>
           )}
         </div>
+
+        {canRerun && (
+          <Button
+            variant="ghost"
+            size="sm"
+            className="mt-2 h-6 text-[11px] gap-1 px-1.5 -ml-1.5 text-muted-foreground hover:text-foreground"
+            onClick={handleRerun}
+            disabled={rerunMutation.isPending}
+          >
+            {rerunMutation.isPending ? <Loader2 className="h-3 w-3 animate-spin" /> : <RotateCcw className="h-3 w-3" />}
+            Re-run
+          </Button>
+        )}
 
         {showWorkflow && (
           <WorkflowProgress
