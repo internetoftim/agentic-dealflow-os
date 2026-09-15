@@ -440,7 +440,7 @@ export default function DealWorkspace() {
 
                     return content;
                   })}
-                  {PROCESSING_STATUSES.includes(activeDeal.status) && (
+                  {PROCESSING_STATUSES.includes(activeDeal.status) ? (
                     <Button
                       variant="outline"
                       size="sm"
@@ -451,6 +451,19 @@ export default function DealWorkspace() {
                       {cancelDeal.isPending ? <Loader2 className="h-3 w-3 animate-spin" /> : <Pause className="h-3 w-3" />}
                       Stop
                     </Button>
+                  ) : (
+                    isOwnerOfActive && (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="mt-2 h-7 text-[11px] gap-1 px-2 w-fit"
+                        onClick={handleRerunWorkflow}
+                        disabled={rerunWorkflow.isPending}
+                      >
+                        {rerunWorkflow.isPending ? <Loader2 className="h-3 w-3 animate-spin" /> : <RotateCcw className="h-3 w-3" />}
+                        Re-run Workflow
+                      </Button>
+                    )
                   )}
                 </>
               )}
