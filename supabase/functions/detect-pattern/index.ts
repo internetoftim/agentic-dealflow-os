@@ -1,4 +1,5 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { resolveChatProvider } from "../_shared/ai-provider.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -49,25 +50,10 @@ Deno.serve(async (req) => {
       .eq("user_id", user.id)
       .single();
 
-    const aiModel = settings?.ai_model || "gpt-oss-202b";
-
-    // Map model to provider
-    let apiUrl: string;
-    let apiKey: string;
-    let modelId: string;
-    const headers: Record<string, string> = { "Content-Type": "application/json" };
-
-    if (aiModel === "gpt-oss-202b") {
-      apiUrl = "https://api.sapinsapin.com/v1/chat/completions";
-      apiKey = Deno.env.get("APOLLO_API_KEY") || "";
-      modelId = "/models/gpt-oss-20b-balitanlp-cpt";
-      headers["Authorization"] = `Bearer ${apiKey}`;
-    } else {
-      apiUrl = "https://api.openai.com/v1/chat/completions";
-      apiKey = Deno.env.get("OPENAI_API_KEY") || "";
-      modelId = aiModel;
-      headers["Authorization"] = `Bearer ${apiKey}`;
-    }
+    const provider = resolveChatProvider(settings?.ai_model, (k) => Deno.env.get(k));
+    const apiUrl = `${provider.baseUrl}/chat/completions`;
+    const headers = provider.headers;
+    const modelId = provider.model;
 
     const systemPrompt = `You are a filename pattern analyzer. Given a sample filename, deduce the naming pattern using these tokens:
 - <WEBSITE> — the company website/domain

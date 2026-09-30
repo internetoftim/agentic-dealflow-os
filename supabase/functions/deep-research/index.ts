@@ -1,5 +1,6 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { createWebResearch, findCompanyUrls, tavilyResearchCompany, type CompanyProfile, type SearchResult } from "../_shared/web-research.ts";
+import { resolveChatProvider, effectiveCloudModel } from "../_shared/ai-provider.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -7,8 +8,7 @@ const corsHeaders = {
     "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
 
-const SAPINSAPIN_BASE = "https://apollo-inference-bridge.am1-aks.apolloglobal.net";
-const SAPINSAPIN_MODEL = "/models/gpt-oss-20b-balitanlp-cpt";
+// OpenAI Responses API (web_search tool) is only used on the explicit GPT-5.4 path.
 const OPENAI_BASE = "https://api.openai.com";
 const DEFAULT_TIMEOUT_MS = 20_000;
 
@@ -25,15 +25,14 @@ type VerificationItem = {
   matched: boolean;
 };
 
-function getAiConfig(model: string) {
-  const isSapinsapin = model === "gpt-oss-202b";
-  const isComputerUse = model === "gpt-5.4";
+function getAiConfig(aiModel: string | null | undefined) {
+  const provider = resolveChatProvider(aiModel, (k) => Deno.env.get(k));
   return {
-    isSapinsapin,
-    isComputerUse,
-    baseUrl: isSapinsapin ? SAPINSAPIN_BASE : OPENAI_BASE,
-    modelName: isComputerUse ? "gpt-5.4" : isSapinsapin ? SAPINSAPIN_MODEL : model,
-    envKey: isSapinsapin ? "APOLLO_API_KEY" : "OPENAI_API_KEY",
+    provider,
+    // GPT-5.4 gets OpenAI's Responses API with the web_search tool; every other
+    // model (GLM via NYO by default) uses plain chat completions over the
+    // search summary.
+    isComputerUse: provider.id === "openai" && provider.model === "gpt-5.4",
   };
 }
 
@@ -237,7 +236,7 @@ Deno.serve(async (req) => {
     const verification = buildVerificationSummary(deal as unknown as Record<string, unknown>, extractedDeckText);
 
     const provider = resolveDeepResearchProvider(settings?.deep_research_provider, !!tavilyApiKey);
-    const aiModel = settings?.ai_model ?? "gpt-5.4";
+    const aiModel = effectiveCloudModel(settings?.ai_model);
     const deckTextContext = (latestSource?.extracted_text || "").slice(0, 12_000);
     // Tavily is primary when configured; Firecrawl is the fallback provider.
     const web = createWebResearch({ tavilyApiKey, firecrawlApiKey });
@@ -410,10 +409,7 @@ Deno.serve(async (req) => {
     } else {
       // Custom agent mode: use selected LLM for structured extraction
       const config = getAiConfig(aiModel);
-      const rawApiKey = Deno.env.get(config.envKey)?.trim().replace(/[\r\n]/g, "");
-      if (!rawApiKey) {
-        throw new Error(`${config.envKey} is not configured`);
-      }
+      const rawApiKey = config.provider.headers.Authorization?.replace(/^Bearer /, "") ?? "";
 
       const searchSummary = searchResults
         .map((r: any, i: number) => `[${i + 1}] ${r.title || ""} - ${r.url || ""}\n${r.description || ""}`)
@@ -517,25 +513,18 @@ ${deckTextContext ? `\nDECK CONTEXT:\n${deckTextContext}` : ""}
 
 Extract the company's official website URL and LinkedIn company page URL using the extract_company_research tool. Only return URLs you are confident about. Return null for any field you cannot verify.`;
 
-        const aiHeaders: Record<string, string> = { "Content-Type": "application/json" };
-        if (config.isSapinsapin) {
-          aiHeaders["X-API-Key"] = rawApiKey;
-        } else {
-          aiHeaders["Authorization"] = `Bearer ${rawApiKey}`;
-        }
-
         const userContent: Array<Record<string, unknown>> = [{ type: "text", text: researchPrompt }];
-        if (!config.isSapinsapin) {
+        if (config.provider.supportsVision) {
           for (const url of previewImages.slice(0, 6)) {
             userContent.push({ type: "image_url", image_url: { url, detail: "low" } });
           }
         }
 
-        const aiResponse = await fetch(`${config.baseUrl}/v1/chat/completions`, {
+        const aiResponse = await fetch(`${config.provider.baseUrl}/chat/completions`, {
           method: "POST",
-          headers: aiHeaders,
+          headers: config.provider.headers,
           body: JSON.stringify({
-            model: config.modelName,
+            model: config.provider.model,
             messages: [
               { role: "system", content: "You are a precise research analyst. Only return verified information." },
               { role: "user", content: userContent },

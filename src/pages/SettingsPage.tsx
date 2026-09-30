@@ -11,7 +11,7 @@ import { ReceiverInboxSection } from "@/components/ReceiverInboxSection";
 import { DataPrivacySection } from "@/components/DataPrivacySection";
 import { DEFAULT_MEMO_PROMPT } from "@/lib/memoPrompt";
 import { LocalModelSection } from "@/components/LocalModelSection";
-import { LOCAL_AI_MODEL, LEGACY_LOCAL_AI_MODEL } from "@/contexts/LocalLlmContext";
+import { LOCAL_AI_MODEL, LEGACY_LOCAL_AI_MODEL, DEFAULT_AI_MODEL } from "@/contexts/LocalLlmContext";
 
 const DEFAULT_PATTERN = "<WEBSITE> deck <MonthYYYY> p<pages>.pdf";
 const DEFAULT_RECAP_PATTERN = "<WEBSITE> recap <MonthYYYY> p<pages>";
@@ -20,8 +20,11 @@ const DEFAULT_RECAP_PATTERN = "<WEBSITE> recap <MonthYYYY> p<pages>";
 
 
 const AI_MODELS = [
-  { value: "gpt-5.4", label: "GPT-5.4", description: "Latest & most capable — default", disabled: false },
-  { value: "gpt-5-mini", label: "GPT-5 Mini", description: "Fast & cost-effective", disabled: false },
+  { value: "nyo-glm-5.3", label: "GLM-5.3 (NYO)", description: "Fast all-rounder via the NYO API — default", disabled: false },
+  { value: "nyo-glm-5.3-flash", label: "GLM-5.3 Flash (NYO)", description: "Cheapest for bulk work and summaries", disabled: false },
+  { value: "nyo-deepseek-v4-pro", label: "DeepSeek V4 Pro (NYO)", description: "Careful reasoning and analysis", disabled: false },
+  { value: "gpt-5.4", label: "GPT-5.4", description: "OpenAI — needed for deck-image reading and web-search research", disabled: false },
+  { value: "gpt-5-mini", label: "GPT-5 Mini", description: "OpenAI — fast & cost-effective", disabled: false },
   { value: "gpt-oss-202b", label: "GPT-OSS 202B", description: "SapinsapinAI Sovereign AI stack", disabled: true },
   { value: "gpt-4o", label: "GPT-4o", description: "Best multimodal, strong reasoning", disabled: true },
   { value: "gpt-5", label: "GPT-5", description: "Most capable, complex tasks", disabled: true },
@@ -56,7 +59,7 @@ export default function SettingsPage() {
   const [sampleFilename, setSampleFilename] = useState("novastar.ai deck Mar2026 p24.pdf");
   const [detectingPattern, setDetectingPattern] = useState(false);
   const [patternDetected, setPatternDetected] = useState(false);
-  const [aiModel, setAiModel] = useState("gpt-5.4");
+  const [aiModel, setAiModel] = useState(DEFAULT_AI_MODEL);
   const [deepResearchProvider, setDeepResearchProvider] = useState<"tavily" | "custom" | "firecrawl">("tavily");
   const [driveFolder, setDriveFolder] = useState("My Drive/WAIT ROOM");
   const [memoPrompt, setMemoPrompt] = useState(DEFAULT_MEMO_PROMPT);
@@ -75,7 +78,7 @@ export default function SettingsPage() {
       .single()
       .then(({ data }) => {
         if (data) {
-          setAiModel(data.ai_model === LEGACY_LOCAL_AI_MODEL ? LOCAL_AI_MODEL : (data.ai_model ?? "gpt-5.4"));
+          setAiModel(data.ai_model === LEGACY_LOCAL_AI_MODEL ? LOCAL_AI_MODEL : (data.ai_model ?? DEFAULT_AI_MODEL));
           setGmailLabel(data.gmail_label_enabled ?? true);
           setGoogleScopes((data as any).google_scopes ?? null);
           setLocalModelId((data as any).local_model_id ?? null);

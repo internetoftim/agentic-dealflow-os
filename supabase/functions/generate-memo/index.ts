@@ -1,16 +1,13 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { getUserGoogleAccessToken } from "../_shared/google-tokens.ts";
 import { marked } from "https://esm.sh/marked@15.0.4";
+import { resolveChatProvider, maxTokensParam } from "../_shared/ai-provider.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers":
     "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
-
-const SAPINSAPIN_BASE = "https://apollo-inference-bridge.am1-aks.apolloglobal.net";
-const SAPINSAPIN_MODEL = "/models/gpt-oss-20b-balitanlp-cpt";
-const OPENAI_BASE = "https://api.openai.com";
 
 const DEFAULT_MEMO_PROMPT = `You are a VC analyst writing an internal investment memo. Given the extracted deck content and any deep research data, produce a structured memo with the following sections:
 
@@ -167,29 +164,15 @@ DEAL CONTEXT:
 `;
 
     // Step 3: Generate memo via AI
-    const aiModel = settings?.ai_model ?? "gpt-5.4";
-    const effectiveModel = aiModel === "local-florence2" ? "gpt-5.4" : aiModel;
-    const isSapinsapin = effectiveModel === "gpt-oss-202b";
-    const baseUrl = isSapinsapin ? SAPINSAPIN_BASE : OPENAI_BASE;
-    const envKey = isSapinsapin ? "APOLLO_API_KEY" : "OPENAI_API_KEY";
-    const rawApiKey = Deno.env.get(envKey)?.trim().replace(/[\r\n]/g, "");
+    const provider = resolveChatProvider(settings?.ai_model, (k) => Deno.env.get(k));
 
-    if (!rawApiKey) throw new Error(`${envKey} is not configured`);
+    console.log(`Generating memo for "${deal.name}" using model: ${provider.model} via ${provider.id}`);
 
-    const aiHeaders: Record<string, string> = { "Content-Type": "application/json" };
-    if (isSapinsapin) {
-      aiHeaders["X-API-Key"] = rawApiKey;
-    } else {
-      aiHeaders["Authorization"] = `Bearer ${rawApiKey}`;
-    }
-
-    console.log(`Generating memo for "${deal.name}" using model: ${effectiveModel}`);
-
-    const aiResponse = await fetch(`${baseUrl}/v1/chat/completions`, {
+    const aiResponse = await fetch(`${provider.baseUrl}/chat/completions`, {
       method: "POST",
-      headers: aiHeaders,
+      headers: provider.headers,
       body: JSON.stringify({
-        model: isSapinsapin ? SAPINSAPIN_MODEL : effectiveModel,
+        model: provider.model,
         messages: [
           { role: "system", content: memoPrompt },
           {
@@ -197,7 +180,7 @@ DEAL CONTEXT:
             content: `Generate an investment memo for the following deal.\n\n${dealContext}\n\nDECK CONTENT:\n${deckContent || "No deck content available."}`,
           },
         ],
-        max_completion_tokens: 4096,
+        ...maxTokensParam(provider, 4096),
       }),
     });
 

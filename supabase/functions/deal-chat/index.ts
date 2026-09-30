@@ -1,4 +1,5 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { resolveChatProvider } from "../_shared/ai-provider.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -23,11 +24,6 @@ Deno.serve(async (req) => {
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const supabaseAnonKey = Deno.env.get("SUPABASE_ANON_KEY")!;
     const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-    const openaiApiKey = Deno.env.get("OPENAI_API_KEY");
-    const sapinsapinApiKey = Deno.env.get("APOLLO_API_KEY");
-
-    const SAPINSAPIN_BASE = "https://apollo-inference-bridge.am1-aks.apolloglobal.net";
-    const OPENAI_BASE = "https://api.openai.com";
 
     // Authenticate user
     const userClient = createClient(supabaseUrl, supabaseAnonKey, {
@@ -57,8 +53,8 @@ Deno.serve(async (req) => {
       .select("ai_model")
       .eq("user_id", user.id)
       .single();
-    // If local model selected, fall back to Sapinsapin for chat (chat requires a cloud model)
-    const model = (settings?.ai_model === "local-florence2") ? "gpt-5.4" : (settings?.ai_model ?? "gpt-5.4");
+    // Chat needs a cloud model: local/browser selections fall back to the default (GLM via NYO).
+    const provider = resolveChatProvider(settings?.ai_model, (k) => Deno.env.get(k));
 
     // Fetch deal context if dealId provided.
     // Access = owner, explicit share, or same team (can_access_deal covers all three).
@@ -130,31 +126,13 @@ Be concise, data-driven, and opinionated when asked for your take. Use markdown 
 
 ${dealContext}${deckContent}`;
 
-    // Route to correct endpoint based on model
-    const isSapinsapin = model === "gpt-oss-202b";
-    const sapinsapinModel = "/models/gpt-oss-20b-balitanlp-cpt";
-    const baseUrl = isSapinsapin ? SAPINSAPIN_BASE : OPENAI_BASE;
-    const rawApiKey = isSapinsapin ? sapinsapinApiKey : openaiApiKey;
-    const apiKey = rawApiKey?.trim().replace(/[\r\n]/g, "");
+    console.log("Using model:", provider.model, "via", provider.id);
 
-    if (!apiKey) {
-      throw new Error(isSapinsapin ? "APOLLO_API_KEY is not configured" : "OPENAI_API_KEY is not configured");
-    }
-
-    console.log("Using model:", isSapinsapin ? sapinsapinModel : model, "API key length:", apiKey.length, "has non-ascii:", /[^\x20-\x7E]/.test(apiKey));
-
-    const aiHeaders: Record<string, string> = { "Content-Type": "application/json" };
-    if (isSapinsapin) {
-      aiHeaders["X-API-Key"] = apiKey;
-    } else {
-      aiHeaders["Authorization"] = `Bearer ${apiKey}`;
-    }
-
-    const aiResponse = await fetch(`${baseUrl}/v1/chat/completions`, {
+    const aiResponse = await fetch(`${provider.baseUrl}/chat/completions`, {
       method: "POST",
-      headers: aiHeaders,
+      headers: provider.headers,
       body: JSON.stringify({
-        model: isSapinsapin ? sapinsapinModel : model,
+        model: provider.model,
         messages: [
           { role: "system", content: systemPrompt },
           ...messages,
@@ -165,8 +143,8 @@ ${dealContext}${deckContent}`;
 
     if (!aiResponse.ok) {
       const errText = await aiResponse.text();
-      console.error("OpenAI API error:", aiResponse.status, errText);
-      return new Response(JSON.stringify({ error: `OpenAI error [${aiResponse.status}]` }), {
+      console.error("LLM API error:", provider.id, aiResponse.status, errText);
+      return new Response(JSON.stringify({ error: `${provider.id} error [${aiResponse.status}]` }), {
         status: aiResponse.status,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });

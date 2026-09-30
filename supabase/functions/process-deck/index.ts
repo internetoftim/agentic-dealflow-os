@@ -1,6 +1,7 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { createWebResearch } from "../_shared/web-research.ts";
 import { getUserGoogleAccessToken } from "../_shared/google-tokens.ts";
+import { resolveChatProvider } from "../_shared/ai-provider.ts";
 import { BlobReader, ZipReader, TextWriter } from "https://esm.sh/@zip.js/zip.js@2.7.34";
 import { PDFDocument } from "https://esm.sh/pdf-lib@1.17.1?bundle-deps";
 
@@ -361,12 +362,10 @@ Deno.serve(async (req) => {
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const supabaseAnonKey = Deno.env.get("SUPABASE_ANON_KEY")!;
+    // OPENAI_API_KEY is only used for the Responses-API web-search fallback below.
     const openaiApiKey = Deno.env.get("OPENAI_API_KEY");
-    const sapinsapinApiKey = Deno.env.get("APOLLO_API_KEY");
     const firecrawlApiKey = Deno.env.get("FIRECRAWL_API_KEY");
     const tavilyApiKey = Deno.env.get("TAVILY_API_KEY");
-
-    const SAPINSAPIN_BASE = "https://apollo-inference-bridge.am1-aks.apolloglobal.net";
     const OPENAI_BASE = "https://api.openai.com";
 
     const adminClient = createClient(supabaseUrl, supabaseServiceKey);
@@ -430,7 +429,7 @@ Deno.serve(async (req) => {
       .select("ai_model, drive_sync_enabled, naming_pattern, drive_folder")
       .eq("user_id", userId)
       .single();
-    const model = settings?.ai_model ?? "gpt-5.4";
+    const model = settings?.ai_model ?? null;
 
     // Download file from storage only when needed (PPTX conversion path).
     let arrayBuffer: ArrayBuffer | null = null;
@@ -497,6 +496,8 @@ Deno.serve(async (req) => {
     }
     // If text was extracted locally (e.g. Florence-2 in-browser), skip server-side extraction
     // but still run LLM metadata extraction if a cloud model is configured
+    // Legacy in-browser Florence-2 flow skips server-side metadata extraction entirely;
+    // the WebGPU flow still gets cloud metadata extraction via the default provider.
     const isLocalModel = model === "local-florence2";
 
     if (!shouldSkip("extracting")) {
@@ -596,26 +597,14 @@ Deno.serve(async (req) => {
         // Don't blindly set website from text — Step 4 will verify it via search
         await adminClient.from("deals").update(updatePayload).eq("id", dealId);
       } else {
-        // LLM metadata extraction (cloud models)
-        const isSapinsapin = model === "gpt-oss-202b";
-        const sapinsapinModel = "/models/gpt-oss-20b-balitanlp-cpt";
-        const baseUrl = isSapinsapin ? SAPINSAPIN_BASE : OPENAI_BASE;
-        const rawApiKey = (isSapinsapin ? sapinsapinApiKey : openaiApiKey)?.trim().replace(/[\r\n]/g, "");
-
-        if (!rawApiKey) {
-          throw new Error(isSapinsapin ? "APOLLO_API_KEY is not configured" : "OPENAI_API_KEY is not configured");
-        }
-
-        const aiHeaders: Record<string, string> = { "Content-Type": "application/json" };
-        if (isSapinsapin) {
-          aiHeaders["X-API-Key"] = rawApiKey;
-        } else {
-          aiHeaders["Authorization"] = `Bearer ${rawApiKey}`;
-        }
+        // LLM metadata extraction (cloud models; GLM via NYO by default)
+        const provider = resolveChatProvider(model, (k) => Deno.env.get(k));
+        const baseUrl = provider.baseUrl;
+        const aiHeaders = provider.headers;
 
         const userContent: unknown[] = [];
 
-        const supportsMultimodal = !isSapinsapin && (model === "gpt-4o" || model === "gpt-5" || model === "gpt-5-mini" || model === "gpt-5.4");
+        const supportsMultimodal = provider.supportsVision;
         const textToSend = extractedText.length > 0 ? extractedText.slice(0, 50_000) : "No text could be extracted from the deck file.";
         userContent.push({ type: "text", text: `Analyze this pitch deck and extract metadata using the extract_deck_metadata tool. Return null for fields you cannot determine.\n\nDeck text (if available):\n${textToSend}` });
         if (supportsMultimodal && previewImages.length > 0) {
@@ -625,7 +614,7 @@ Deno.serve(async (req) => {
         }
 
         const aiPayload = {
-          model: isSapinsapin ? sapinsapinModel : model,
+          model: provider.model,
           messages: [
             { role: "system", content: "You are the Deep Research & Identity Agent for a VC Deal OS. Your primary job is to accurately identify the startup's name, their core sector, and extract key deal metadata from a pitch deck. The Company Name is usually the most prominent proper noun on the first page. Be precise — return null for fields you cannot verify." },
             { role: "user", content: userContent },
@@ -658,7 +647,7 @@ Deno.serve(async (req) => {
           tool_choice: { type: "function", function: { name: "extract_deck_metadata" } },
         };
 
-        let aiResponse = await fetch(`${baseUrl}/v1/chat/completions`, {
+        let aiResponse = await fetch(`${baseUrl}/chat/completions`, {
           method: "POST",
           headers: aiHeaders,
           body: JSON.stringify(aiPayload),
@@ -672,7 +661,7 @@ Deno.serve(async (req) => {
             { role: "system", content: "You are a VC analyst assistant. Analyze startup pitch decks and extract structured metadata. Be precise. Return null for missing fields." },
             { role: "user", content: [{ type: "text", text: `Here is the full text content of the pitch deck:\n\n${extractedText.slice(0, 50_000)}\n\nAnalyze this pitch deck and extract metadata using the extract_deck_metadata tool. Return null for fields you cannot determine.` }] },
           ];
-          aiResponse = await fetch(`${baseUrl}/v1/chat/completions`, {
+          aiResponse = await fetch(`${baseUrl}/chat/completions`, {
             method: "POST",
             headers: aiHeaders,
             body: JSON.stringify(aiPayload),

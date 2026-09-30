@@ -147,7 +147,9 @@ export function useLocalLlm(): LocalLlmState {
 }
 
 type AiModelRow = { aiModel: string; localModelId: string | null; memoPrompt: string | null };
-const CLOUD_DEFAULT: AiModelRow = { aiModel: "gpt-5.4", localModelId: null, memoPrompt: null };
+/** Server-side default: GLM 5.3 through the NYO API (see supabase/functions/_shared/ai-provider.ts). */
+export const DEFAULT_AI_MODEL = "nyo-glm-5.3";
+const CLOUD_DEFAULT: AiModelRow = { aiModel: DEFAULT_AI_MODEL, localModelId: null, memoPrompt: null };
 
 async function fetchAiModelRow(userId: string): Promise<AiModelRow> {
   const { data } = await supabase.from("user_settings").select("ai_model, local_model_id, memo_prompt").eq("user_id", userId).maybeSingle();
