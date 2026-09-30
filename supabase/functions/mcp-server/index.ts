@@ -15,13 +15,18 @@ const SUPABASE_ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY")!;
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 
 const FUNCTION_BASE = `${SUPABASE_URL}/functions/v1/mcp-server`;
-const APP_ORIGIN = "https://onepointsix.ai";
+const APP_ORIGIN = "https://www.onepointsix.ai";
+// OAuth issuer lives at the app origin so RFC 8414 discovery works at
+// https://www.onepointsix.ai/.well-known/oauth-authorization-server (a static
+// file in public/.well-known). The Supabase gateway owns its own origin root and
+// answers 401/404 there, which broke discovery for Claude/Codex connector UIs.
+const OAUTH_ISSUER = APP_ORIGIN;
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers":
     "authorization, x-client-info, apikey, content-type, mcp-protocol-version",
-  "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+  "Access-Control-Allow-Methods": "GET, POST, DELETE, OPTIONS",
   "Access-Control-Expose-Headers": "WWW-Authenticate",
 };
 
@@ -1022,7 +1027,7 @@ async function handleMcp(req: Request): Promise<Response> {
           result: {
             protocolVersion: "2024-11-05",
             capabilities: { tools: {}, prompts: {} },
-            serverInfo: { name: "easyvc", version: "1.2.0" },
+            serverInfo: { name: "easyvc", version: "1.3.0" },
           },
         };
       }
@@ -1082,25 +1087,29 @@ function jsonRpcError(id: any, code: number, message: string) {
 
 // ---------------- OAuth 2.1 ----------------
 async function handleOAuthMetadata(): Promise<Response> {
+  // Keep this identical to public/.well-known/oauth-authorization-server in the app.
   return Response.json({
-    issuer: FUNCTION_BASE,
-    authorization_endpoint: `${FUNCTION_BASE}/authorize`,
+    issuer: OAUTH_ISSUER,
+    authorization_endpoint: `${APP_ORIGIN}/mcp/authorize`,
     token_endpoint: `${FUNCTION_BASE}/token`,
     registration_endpoint: `${FUNCTION_BASE}/register`,
     response_types_supported: ["code"],
+    response_modes_supported: ["query"],
     grant_types_supported: ["authorization_code", "refresh_token"],
     code_challenge_methods_supported: ["S256"],
     token_endpoint_auth_methods_supported: ["none"],
     scopes_supported: ["mcp"],
+    service_documentation: `${APP_ORIGIN}/llms.txt`,
   }, { headers: corsHeaders });
 }
 
 async function handleProtectedResourceMetadata(): Promise<Response> {
   return Response.json({
     resource: FUNCTION_BASE,
-    authorization_servers: [FUNCTION_BASE],
+    authorization_servers: [OAUTH_ISSUER],
     scopes_supported: ["mcp"],
     bearer_methods_supported: ["header"],
+    resource_name: "EasyVC",
   }, { headers: corsHeaders });
 }
 
@@ -1244,7 +1253,7 @@ Deno.serve(async (req) => {
   const path = url.pathname.replace(/^.*\/mcp-server/, "") || "/";
 
   try {
-    if (path === "/.well-known/oauth-authorization-server") return handleOAuthMetadata();
+    if (path === "/.well-known/oauth-authorization-server" || path === "/.well-known/openid-configuration") return handleOAuthMetadata();
     if (path === "/.well-known/oauth-protected-resource") return handleProtectedResourceMetadata();
     if (path === "/register" && req.method === "POST") return handleRegister(req);
     if (path === "/authorize" && req.method === "GET") return handleAuthorize(req);
@@ -1254,11 +1263,22 @@ Deno.serve(async (req) => {
     // MCP JSON-RPC at root
     if (req.method === "POST" && (path === "/" || path === "")) return handleMcp(req);
 
+    // Streamable HTTP clients may open a GET stream for server-initiated
+    // messages; we are stateless, so decline per spec (405) instead of
+    // handing them the info JSON.
+    if (req.method === "GET" && (path === "/" || path === "") &&
+        (req.headers.get("accept") ?? "").includes("text/event-stream")) {
+      return new Response(null, { status: 405, headers: { ...corsHeaders, Allow: "POST, OPTIONS" } });
+    }
+    if (req.method === "DELETE" && (path === "/" || path === "")) {
+      return new Response(null, { status: 405, headers: { ...corsHeaders, Allow: "POST, OPTIONS" } });
+    }
+
     // Helpful GET at root
     if (req.method === "GET" && (path === "/" || path === "")) {
       return Response.json({
         name: "easyvc-mcp",
-        version: "1.0.0",
+        version: "1.3.0",
         endpoints: {
           mcp: FUNCTION_BASE,
           oauth_metadata: `${FUNCTION_BASE}/.well-known/oauth-authorization-server`,

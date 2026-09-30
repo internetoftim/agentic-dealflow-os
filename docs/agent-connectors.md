@@ -8,13 +8,33 @@ Endpoint: `https://fbiigltzcxkqjjadqzgl.supabase.co/functions/v1/mcp-server`
 Auth: OAuth 2.1 (dynamic client registration, PKCE) or a Personal Access Token
 from EasyVC → Settings → AI Agents. Write tools require **Agent Mode** (same page).
 
+### How discovery works (and why the issuer is the app domain)
+The MCP endpoint answers 401 with `WWW-Authenticate: Bearer resource_metadata=…`, whose
+protected-resource document names `https://www.onepointsix.ai` as the authorization server.
+Clients then read `https://www.onepointsix.ai/.well-known/oauth-authorization-server`
+(a static file in `public/.well-known/`, mirrored by the function's own `/.well-known/…`),
+which points `authorize` at the in-app consent page and `token` / `register` at the function.
+The issuer cannot be the Supabase origin: its gateway owns `/.well-known/*` and `/register`
+at the root and answers 401/404, which made Claude and Codex fall back to
+`https://<supabase>/register` and fail with "Dynamic Client Registration rejected (HTTP 404)".
+Keep the static file and `handleOAuthMetadata()` in `supabase/functions/mcp-server/index.ts` in sync.
+
 ## Claude (claude.ai / Claude Code / Cowork)
-1. Settings → Connectors → *Add custom connector* → paste the endpoint → sign in with Google.
+1. claude.ai → Settings → Connectors → *Add custom connector* → name "EasyVC", paste the endpoint,
+   leave client id/secret empty (dynamic registration) → *Add* → *Connect* → approve on the EasyVC consent page.
+   Claude Code: `claude mcp add --transport http easyvc https://fbiigltzcxkqjjadqzgl.supabase.co/functions/v1/mcp-server`
+   then `/mcp` → easyvc → Authenticate (this repo's `.mcp.json` already registers it).
 2. Install the skill: copy `skills/deal-inbox-triage/` to `~/.claude/skills/` (Claude Code) or add it as a
    Cowork skill. Then say "triage the deal inbox".
 3. Cowork schedule (suggested): weekday 08:30 — *"Run /deal-inbox-triage for the last 7 days and post the report."*
    The server also exposes the `deal_inbox_triage` and `weekly_pipeline_digest` prompts, so even without the
    skill a Claude client can pick the workflow from the prompt menu.
+
+## Codex
+- Codex app / ChatGPT → Settings → Connectors (or Codex → MCP servers) → *Add* → URL = the endpoint,
+  auth = OAuth → sign in on the EasyVC consent page.
+- Codex CLI: `codex mcp add easyvc --url https://fbiigltzcxkqjjadqzgl.supabase.co/functions/v1/mcp-server`
+  then `codex mcp login easyvc`. Or with a PAT: `codex mcp add easyvc --url <endpoint> --bearer-token-env-var EASYVC_TOKEN`.
 
 ## ChatGPT
 Settings → Connectors → *Create* → MCP server URL = the endpoint, authentication OAuth. The server

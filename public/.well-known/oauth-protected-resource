@@ -1,0 +1,7 @@
+{
+  "resource": "https://fbiigltzcxkqjjadqzgl.supabase.co/functions/v1/mcp-server",
+  "authorization_servers": ["https://www.onepointsix.ai"],
+  "scopes_supported": ["mcp"],
+  "bearer_methods_supported": ["header"],
+  "resource_name": "EasyVC"
+}
