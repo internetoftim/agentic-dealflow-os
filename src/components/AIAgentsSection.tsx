@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Bot, Copy, Plus, Trash2, Loader2, Check, PenLine, History } from "lucide-react";
+import { Bot, Copy, Plus, Trash2, Loader2, Check, PenLine, History, ExternalLink, Plug, Unplug, Terminal } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 
@@ -22,6 +22,84 @@ type ToolCallRow = {
 };
 
 const MCP_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/mcp-server`;
+
+type Connection = {
+  client_id: string;
+  client_name: string;
+  redirect_host: string;
+  first_connected_at: string;
+  last_issued_at: string;
+};
+
+// One-click install links for clients that support them. The rest get a
+// copy-the-URL + open-the-settings-page flow; the OAuth consent then happens
+// on /mcp/authorize in this app.
+const CURSOR_DEEPLINK = `cursor://anysphere.cursor-deeplink/mcp/install?name=easyvc&config=${btoa(JSON.stringify({ url: MCP_URL }))}`;
+const VSCODE_DEEPLINK = `vscode:mcp/install?${encodeURIComponent(JSON.stringify({ name: "easyvc", type: "http", url: MCP_URL }))}`;
+const CLAUDE_CODE_CMD = `claude mcp add --transport http easyvc ${MCP_URL}`;
+const CODEX_CMD = `codex mcp add easyvc --url ${MCP_URL} && codex mcp login easyvc`;
+
+type AgentCard = {
+  id: string;
+  name: string;
+  tagline: string;
+  steps: string[];
+  action: { kind: "link"; label: string; href: string } | { kind: "command"; label: string; command: string };
+};
+
+const AGENT_CARDS: AgentCard[] = [
+  {
+    id: "claude",
+    name: "Claude",
+    tagline: "claude.ai, Claude Desktop, Cowork",
+    steps: [
+      "Copy the server URL above.",
+      "Open Claude → Settings → Connectors → Add custom connector.",
+      "Name it EasyVC, paste the URL, leave client id/secret empty, then Connect.",
+      "You'll land back here to approve access.",
+    ],
+    action: { kind: "link", label: "Open Claude connectors", href: "https://claude.ai/settings/connectors" },
+  },
+  {
+    id: "codex",
+    name: "Codex",
+    tagline: "Codex app and ChatGPT",
+    steps: [
+      "Copy the server URL above.",
+      "Open Settings → Connectors → Add / Create, paste the URL, choose OAuth.",
+      "Click Connect and approve access on the EasyVC page that opens.",
+    ],
+    action: { kind: "link", label: "Open ChatGPT connectors", href: "https://chatgpt.com/#settings/Connectors" },
+  },
+  {
+    id: "claude-code",
+    name: "Claude Code",
+    tagline: "Terminal",
+    steps: ["Run the command, then in Claude Code type /mcp → easyvc → Authenticate."],
+    action: { kind: "command", label: "Copy command", command: CLAUDE_CODE_CMD },
+  },
+  {
+    id: "codex-cli",
+    name: "Codex CLI",
+    tagline: "Terminal",
+    steps: ["Run the command; a browser tab opens for you to approve access."],
+    action: { kind: "command", label: "Copy command", command: CODEX_CMD },
+  },
+  {
+    id: "cursor",
+    name: "Cursor",
+    tagline: "One click",
+    steps: ["Cursor opens and asks to install the EasyVC server, then prompts you to sign in."],
+    action: { kind: "link", label: "Add to Cursor", href: CURSOR_DEEPLINK },
+  },
+  {
+    id: "vscode",
+    name: "VS Code",
+    tagline: "One click",
+    steps: ["VS Code opens and asks to add the EasyVC server, then prompts you to sign in."],
+    action: { kind: "link", label: "Add to VS Code", href: VSCODE_DEEPLINK },
+  },
+];
 
 const WRITE_TOOLS = [
   "create_deal",
@@ -57,6 +135,26 @@ function CopyButton({ value }: { value: string }) {
   );
 }
 
+function CommandButton({ label, command }: { label: string; command: string }) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <div>
+      <pre className="text-[11px] bg-muted/40 border border-border rounded p-2 overflow-x-auto mb-2 whitespace-pre-wrap break-all">{command}</pre>
+      <button
+        onClick={async () => {
+          await navigator.clipboard.writeText(command);
+          setCopied(true);
+          setTimeout(() => setCopied(false), 1500);
+        }}
+        className="inline-flex items-center justify-center gap-1 rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:opacity-90 w-full"
+      >
+        {copied ? <Check className="h-3 w-3" /> : <Terminal className="h-3 w-3" />}
+        {copied ? "Copied" : label}
+      </button>
+    </div>
+  );
+}
+
 export function AIAgentsSection({ userId }: { userId?: string }) {
   const [tokens, setTokens] = useState<TokenRow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -66,6 +164,42 @@ export function AIAgentsSection({ userId }: { userId?: string }) {
   const [agentMode, setAgentMode] = useState(false);
   const [savingMode, setSavingMode] = useState(false);
   const [calls, setCalls] = useState<ToolCallRow[]>([]);
+  const [connections, setConnections] = useState<Connection[]>([]);
+  const [revoking, setRevoking] = useState<string | null>(null);
+
+  const authHeaders = async () => {
+    const { data: { session } } = await supabase.auth.getSession();
+    return { Authorization: `Bearer ${session?.access_token ?? ""}` };
+  };
+
+  const loadConnections = async () => {
+    try {
+      const resp = await fetch(`${MCP_URL}/connections`, { headers: await authHeaders() });
+      if (!resp.ok) return;
+      const json = await resp.json();
+      setConnections(json.connections ?? []);
+    } catch {
+      /* the list is informational; stay quiet on network errors */
+    }
+  };
+
+  const disconnect = async (clientId: string) => {
+    setRevoking(clientId);
+    try {
+      const resp = await fetch(`${MCP_URL}/connections/revoke`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...(await authHeaders()) },
+        body: JSON.stringify({ client_id: clientId }),
+      });
+      if (!resp.ok) throw new Error("Failed to disconnect");
+      toast.success("Agent disconnected — it will need to sign in again");
+      await loadConnections();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Failed to disconnect");
+    } finally {
+      setRevoking(null);
+    }
+  };
 
   const refresh = async () => {
     if (!userId) return;
@@ -91,6 +225,7 @@ export function AIAgentsSection({ userId }: { userId?: string }) {
     setAgentMode(Boolean((settingsRes.data as any)?.agent_mode_enabled));
     setCalls((callsRes.data ?? []) as ToolCallRow[]);
     setLoading(false);
+    loadConnections();
   };
 
   useEffect(() => { refresh(); }, [userId]);
@@ -164,9 +299,86 @@ export function AIAgentsSection({ userId }: { userId?: string }) {
         <h2 className="text-sm font-semibold text-foreground">AI Agents (MCP)</h2>
       </div>
       <p className="text-xs text-muted-foreground mb-4 max-w-2xl">
-        Let AI agents like Claude Desktop, Cursor, or ChatGPT call your EasyVC workspace.
-        Generate a personal access token below and paste it into your agent's MCP config.
+        Connect Claude, Codex, or any MCP client to your EasyVC workspace. Agents sign in with
+        your EasyVC account and start read-only; turn on Agent Mode below to let them write.
       </p>
+
+      {/* Server URL */}
+      <div className="rounded-md border border-border bg-muted/30 p-3 mb-4">
+        <div className="flex items-center justify-between gap-2">
+          <div className="min-w-0">
+            <p className="text-xs font-medium text-foreground mb-1">MCP server URL</p>
+            <code className="text-xs text-muted-foreground break-all">{MCP_URL}</code>
+          </div>
+          <CopyButton value={MCP_URL} />
+        </div>
+      </div>
+
+      {/* Connect an agent */}
+      <div className="rounded-md border border-border bg-card p-4 mb-4">
+        <p className="text-xs font-medium text-foreground mb-3 flex items-center gap-1">
+          <Plug className="h-3.5 w-3.5" /> Connect an agent
+        </p>
+        <div className="grid gap-3 sm:grid-cols-2">
+          {AGENT_CARDS.map((card) => (
+            <div key={card.id} className="rounded-md border border-border bg-background p-3 flex flex-col">
+              <div className="mb-2">
+                <p className="text-xs font-semibold text-foreground">{card.name}</p>
+                <p className="text-[11px] text-muted-foreground">{card.tagline}</p>
+              </div>
+              <ol className="text-[11px] text-muted-foreground space-y-1 mb-3 list-decimal pl-4 flex-1">
+                {card.steps.map((step, i) => <li key={i}>{step}</li>)}
+              </ol>
+              {card.action.kind === "link" ? (
+                <a
+                  href={card.action.href}
+                  target={card.action.href.startsWith("http") ? "_blank" : undefined}
+                  rel="noreferrer"
+                  className="inline-flex items-center justify-center gap-1 rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:opacity-90"
+                >
+                  {card.action.label} <ExternalLink className="h-3 w-3" />
+                </a>
+              ) : (
+                <CommandButton label={card.action.label} command={card.action.command} />
+              )}
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Connected agents */}
+      <div className="rounded-md border border-border bg-card p-4 mb-4">
+        <p className="text-xs font-medium text-foreground mb-3">Connected agents</p>
+        {connections.length === 0 ? (
+          <p className="text-xs text-muted-foreground">
+            No agents have signed in yet. Once you connect one above, it appears here and you can disconnect it any time.
+          </p>
+        ) : (
+          <ul className="space-y-2">
+            {connections.map((c) => (
+              <li key={c.client_id} className="flex items-center justify-between gap-2 text-xs">
+                <div className="min-w-0">
+                  <p className="font-medium text-foreground truncate">{c.client_name}</p>
+                  <p className="text-muted-foreground truncate">
+                    {c.redirect_host && `${c.redirect_host} · `}
+                    connected {new Date(c.first_connected_at).toLocaleDateString()}
+                    {c.last_issued_at !== c.first_connected_at && ` · last sign-in ${new Date(c.last_issued_at).toLocaleDateString()}`}
+                  </p>
+                </div>
+                <button
+                  onClick={() => disconnect(c.client_id)}
+                  disabled={revoking === c.client_id}
+                  className="inline-flex items-center gap-1 text-muted-foreground hover:text-destructive disabled:opacity-50"
+                  title="Disconnect"
+                >
+                  {revoking === c.client_id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Unplug className="h-3.5 w-3.5" />}
+                  Disconnect
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
 
       {/* Agent Mode */}
       <div className="rounded-md border border-border bg-card p-4 mb-4">
@@ -213,20 +425,12 @@ export function AIAgentsSection({ userId }: { userId?: string }) {
       </div>
 
 
-      {/* Server URL */}
-      <div className="rounded-md border border-border bg-muted/30 p-3 mb-4">
-        <div className="flex items-center justify-between gap-2">
-          <div className="min-w-0">
-            <p className="text-xs font-medium text-foreground mb-1">MCP Server URL</p>
-            <code className="text-xs text-muted-foreground break-all">{MCP_URL}</code>
-          </div>
-          <CopyButton value={MCP_URL} />
-        </div>
-      </div>
-
       {/* Token creation */}
       <div className="rounded-md border border-border bg-card p-4 mb-4">
-        <p className="text-xs font-medium text-foreground mb-2">Create a token</p>
+        <p className="text-xs font-medium text-foreground mb-1">Personal access token</p>
+        <p className="text-xs text-muted-foreground mb-2">
+          For clients without OAuth sign-in (scripts, older MCP clients). Sends as a Bearer header.
+        </p>
         <div className="flex gap-2">
           <input
             type="text"
@@ -296,9 +500,9 @@ export function AIAgentsSection({ userId }: { userId?: string }) {
 
       {/* Client configs */}
       <div className="rounded-md border border-border bg-card p-4">
-        <p className="text-xs font-medium text-foreground mb-2">Claude Desktop / Cursor config</p>
+        <p className="text-xs font-medium text-foreground mb-2">Manual config (token-based)</p>
         <p className="text-xs text-muted-foreground mb-2">
-          Add this to <code>claude_desktop_config.json</code> or your MCP client of choice.
+          For MCP clients configured by JSON file. Generate a token above and paste this in.
         </p>
         <div className="relative">
           <pre className="text-[11px] bg-muted/40 border border-border rounded p-3 overflow-x-auto">{claudeConfig}</pre>
@@ -306,10 +510,6 @@ export function AIAgentsSection({ userId }: { userId?: string }) {
             <CopyButton value={claudeConfig} />
           </div>
         </div>
-        <p className="text-xs text-muted-foreground mt-3">
-          Clients that support OAuth (Claude, ChatGPT) can also connect via one-click using the server URL above —
-          no token needed.
-        </p>
       </div>
 
       {/* Agent activity log */}

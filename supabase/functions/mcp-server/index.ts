@@ -1244,6 +1244,64 @@ async function issueTokens(clientId: string, userId: string, scope: string): Pro
   }, { headers: corsHeaders });
 }
 
+// ---------------- connected agents (Settings → AI Agents) ----------------
+// Authenticated with the user's Supabase JWT from the app. Lists every OAuth
+// client that currently holds a live grant for this user, and lets the user
+// revoke one. The oauth tables are service-role only, so this is the only
+// path the UI has to them.
+async function handleConnectionsList(req: Request): Promise<Response> {
+  const auth = await authenticate(req);
+  if (!auth || auth.via !== "jwt") {
+    return Response.json({ error: "unauthorized" }, { status: 401, headers: corsHeaders });
+  }
+  const { data: tokens } = await admin
+    .from("mcp_oauth_tokens")
+    .select("client_id, created_at, expires_at, revoked_at")
+    .eq("user_id", auth.userId)
+    .order("created_at", { ascending: false });
+  const byClient = new Map<string, { client_id: string; first_connected_at: string; last_issued_at: string; active: boolean }>();
+  for (const t of tokens ?? []) {
+    const live = !t.revoked_at && new Date(t.expires_at) > new Date();
+    const cur = byClient.get(t.client_id);
+    if (!cur) {
+      byClient.set(t.client_id, { client_id: t.client_id, first_connected_at: t.created_at, last_issued_at: t.created_at, active: live || !t.revoked_at });
+    } else {
+      cur.first_connected_at = t.created_at; // ordered desc, so the last seen is the earliest
+      cur.active = cur.active || live || !t.revoked_at;
+    }
+  }
+  const ids = [...byClient.keys()];
+  const { data: clients } = ids.length
+    ? await admin.from("mcp_oauth_clients").select("client_id, client_name, redirect_uris").in("client_id", ids)
+    : { data: [] as any[] };
+  const names = new Map((clients ?? []).map((c: any) => [c.client_id, c]));
+  const connections = ids.map((id) => {
+    const c = names.get(id);
+    let host = "";
+    try { host = new URL((c?.redirect_uris as string[] | undefined)?.[0] ?? "").host; } catch { /* ignore */ }
+    return { ...byClient.get(id)!, client_name: c?.client_name ?? "MCP client", redirect_host: host };
+  }).filter((c) => c.active);
+  return Response.json({ connections }, { headers: corsHeaders });
+}
+
+async function handleConnectionsRevoke(req: Request): Promise<Response> {
+  const auth = await authenticate(req);
+  if (!auth || auth.via !== "jwt") {
+    return Response.json({ error: "unauthorized" }, { status: 401, headers: corsHeaders });
+  }
+  const body = await req.json().catch(() => ({}));
+  const clientId = String(body.client_id ?? "");
+  if (!clientId) return Response.json({ error: "invalid_request" }, { status: 400, headers: corsHeaders });
+  const { error } = await admin
+    .from("mcp_oauth_tokens")
+    .update({ revoked_at: new Date().toISOString() })
+    .eq("user_id", auth.userId)
+    .eq("client_id", clientId)
+    .is("revoked_at", null);
+  if (error) return Response.json({ error: error.message }, { status: 500, headers: corsHeaders });
+  return Response.json({ ok: true }, { headers: corsHeaders });
+}
+
 // ---------------- router ----------------
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
@@ -1259,6 +1317,8 @@ Deno.serve(async (req) => {
     if (path === "/authorize" && req.method === "GET") return handleAuthorize(req);
     if (path === "/authorize/approve" && req.method === "POST") return handleAuthorizeApprove(req);
     if (path === "/token" && req.method === "POST") return handleToken(req);
+    if (path === "/connections" && req.method === "GET") return handleConnectionsList(req);
+    if (path === "/connections/revoke" && req.method === "POST") return handleConnectionsRevoke(req);
 
     // MCP JSON-RPC at root
     if (req.method === "POST" && (path === "/" || path === "")) return handleMcp(req);
