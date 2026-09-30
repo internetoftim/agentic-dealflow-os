@@ -9,6 +9,7 @@
 import { createClient, type SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { getReceiverToken, pollReceiverAccount, ingestReceiverMessage, type ReceiverAccount } from "../_shared/gmail-receiver.ts";
 import { scanForCandidates, summarize, RECEIVER_QUERY } from "../_shared/gmail-ingest.ts";
+import { authorizationServerMetadata, protectedResourceMetadata, routeMcpRequest } from "../_shared/mcp-oauth.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY")!;
@@ -1086,31 +1087,14 @@ function jsonRpcError(id: any, code: number, message: string) {
 }
 
 // ---------------- OAuth 2.1 ----------------
+// Both documents are built by _shared/mcp-oauth.ts; the regression suite checks
+// they match the static copies in public/.well-known served from the app domain.
 async function handleOAuthMetadata(): Promise<Response> {
-  // Keep this identical to public/.well-known/oauth-authorization-server in the app.
-  return Response.json({
-    issuer: OAUTH_ISSUER,
-    authorization_endpoint: `${APP_ORIGIN}/mcp/authorize`,
-    token_endpoint: `${FUNCTION_BASE}/token`,
-    registration_endpoint: `${FUNCTION_BASE}/register`,
-    response_types_supported: ["code"],
-    response_modes_supported: ["query"],
-    grant_types_supported: ["authorization_code", "refresh_token"],
-    code_challenge_methods_supported: ["S256"],
-    token_endpoint_auth_methods_supported: ["none"],
-    scopes_supported: ["mcp"],
-    service_documentation: `${APP_ORIGIN}/llms.txt`,
-  }, { headers: corsHeaders });
+  return Response.json(authorizationServerMetadata({ appOrigin: OAUTH_ISSUER, functionBase: FUNCTION_BASE }), { headers: corsHeaders });
 }
 
 async function handleProtectedResourceMetadata(): Promise<Response> {
-  return Response.json({
-    resource: FUNCTION_BASE,
-    authorization_servers: [OAUTH_ISSUER],
-    scopes_supported: ["mcp"],
-    bearer_methods_supported: ["header"],
-    resource_name: "EasyVC",
-  }, { headers: corsHeaders });
+  return Response.json(protectedResourceMetadata({ appOrigin: OAUTH_ISSUER, functionBase: FUNCTION_BASE }), { headers: corsHeaders });
 }
 
 async function handleRegister(req: Request): Promise<Response> {
@@ -1307,35 +1291,26 @@ Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
   const url = new URL(req.url);
-  // Strip the function prefix so /functions/v1/mcp-server/foo -> /foo
-  const path = url.pathname.replace(/^.*\/mcp-server/, "") || "/";
+  const route = routeMcpRequest(req.method, url.pathname, req.headers.get("accept") ?? "");
 
   try {
-    if (path === "/.well-known/oauth-authorization-server" || path === "/.well-known/openid-configuration") return handleOAuthMetadata();
-    if (path === "/.well-known/oauth-protected-resource") return handleProtectedResourceMetadata();
-    if (path === "/register" && req.method === "POST") return handleRegister(req);
-    if (path === "/authorize" && req.method === "GET") return handleAuthorize(req);
-    if (path === "/authorize/approve" && req.method === "POST") return handleAuthorizeApprove(req);
-    if (path === "/token" && req.method === "POST") return handleToken(req);
-    if (path === "/connections" && req.method === "GET") return handleConnectionsList(req);
-    if (path === "/connections/revoke" && req.method === "POST") return handleConnectionsRevoke(req);
-
-    // MCP JSON-RPC at root
-    if (req.method === "POST" && (path === "/" || path === "")) return handleMcp(req);
-
-    // Streamable HTTP clients may open a GET stream for server-initiated
-    // messages; we are stateless, so decline per spec (405) instead of
-    // handing them the info JSON.
-    if (req.method === "GET" && (path === "/" || path === "") &&
-        (req.headers.get("accept") ?? "").includes("text/event-stream")) {
-      return new Response(null, { status: 405, headers: { ...corsHeaders, Allow: "POST, OPTIONS" } });
-    }
-    if (req.method === "DELETE" && (path === "/" || path === "")) {
-      return new Response(null, { status: 405, headers: { ...corsHeaders, Allow: "POST, OPTIONS" } });
+    switch (route) {
+      case "oauth_metadata": return handleOAuthMetadata();
+      case "resource_metadata": return handleProtectedResourceMetadata();
+      case "register": return handleRegister(req);
+      case "authorize": return handleAuthorize(req);
+      case "authorize_approve": return handleAuthorizeApprove(req);
+      case "token": return handleToken(req);
+      case "connections_list": return handleConnectionsList(req);
+      case "connections_revoke": return handleConnectionsRevoke(req);
+      case "mcp_rpc": return handleMcp(req);
+      // Stateless server: Streamable HTTP GET streams / DELETE are declined per spec.
+      case "method_not_allowed":
+        return new Response(null, { status: 405, headers: { ...corsHeaders, Allow: "POST, OPTIONS" } });
     }
 
     // Helpful GET at root
-    if (req.method === "GET" && (path === "/" || path === "")) {
+    if (route === "info") {
       return Response.json({
         name: "easyvc-mcp",
         version: "1.3.0",

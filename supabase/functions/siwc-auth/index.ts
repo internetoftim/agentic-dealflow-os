@@ -11,9 +11,17 @@
 //   GET /start?next=/x   → sets a PKCE cookie, 302 to auth.openai.com
 //   GET /callback        → exchanges the code, verifies the ID token, 302 to
 //                          APP_ORIGIN/auth/callback#token_hash=…&type=magiclink&next=/x
+//
+// The URL/cookie/claim logic lives in _shared/siwc-core.ts so the regression
+// suite can exercise it without Deno.
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { createRemoteJWKSet, jwtVerify } from "https://esm.sh/jose@5.9.6";
+import {
+  OPENAI_ISSUER, OPENAI_TOKEN_URL, OPENAI_JWKS_URL, SIWC_COOKIE,
+  safeNext, readCookie, pkceCookie, clearPkceCookie, parsePkceCookie,
+  buildAuthorizeUrl, buildAppCallbackUrl, buildLoginErrorUrl, validateClaims,
+} from "../_shared/siwc-core.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -21,15 +29,8 @@ const CLIENT_ID = Deno.env.get("OPENAI_SIWC_CLIENT_ID") ?? "";
 const CLIENT_SECRET = Deno.env.get("OPENAI_SIWC_CLIENT_SECRET") ?? "";
 const APP_ORIGIN = Deno.env.get("APP_ORIGIN") ?? "https://www.onepointsix.ai";
 
-const ISSUER = "https://auth.openai.com";
-const AUTHORIZE_URL = `${ISSUER}/api/accounts/authorize`;
-const TOKEN_URL = `${ISSUER}/api/accounts/oauth/token`;
-const JWKS = createRemoteJWKSet(new URL(`${ISSUER}/.well-known/jwks.json`));
-
-const FUNCTION_BASE = `${SUPABASE_URL}/functions/v1/siwc-auth`;
-const REDIRECT_URI = `${FUNCTION_BASE}/callback`;
-const COOKIE = "siwc_pkce";
-const COOKIE_PATH = "/functions/v1/siwc-auth";
+const JWKS = createRemoteJWKSet(new URL(OPENAI_JWKS_URL));
+const REDIRECT_URI = `${SUPABASE_URL}/functions/v1/siwc-auth/callback`;
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -53,26 +54,11 @@ async function s256(input: string): Promise<string> {
   const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(input));
   return b64url(new Uint8Array(buf));
 }
-function readCookie(req: Request, name: string): string | null {
-  const raw = req.headers.get("cookie") ?? "";
-  for (const part of raw.split(";")) {
-    const [k, ...v] = part.trim().split("=");
-    if (k === name) return decodeURIComponent(v.join("="));
-  }
-  return null;
-}
-// Only allow same-app relative paths as the post-login destination.
-function safeNext(next: string | null): string {
-  if (!next || !next.startsWith("/") || next.startsWith("//")) return "/";
-  return next;
-}
 function redirect(location: string, extraHeaders: Record<string, string> = {}): Response {
   return new Response(null, { status: 302, headers: { ...corsHeaders, Location: location, ...extraHeaders } });
 }
 function failToApp(reason: string): Response {
-  const u = new URL(`${APP_ORIGIN}/login`);
-  u.searchParams.set("siwc_error", reason);
-  return redirect(u.toString());
+  return redirect(buildLoginErrorUrl(APP_ORIGIN, reason));
 }
 
 async function handleStart(req: Request): Promise<Response> {
@@ -81,37 +67,23 @@ async function handleStart(req: Request): Promise<Response> {
   const state = random(16);
   const nonce = random(16);
   const verifier = random(48);
-  const challenge = await s256(verifier);
-
-  const u = new URL(AUTHORIZE_URL);
-  u.searchParams.set("response_type", "code");
-  u.searchParams.set("client_id", CLIENT_ID);
-  u.searchParams.set("redirect_uri", REDIRECT_URI);
-  u.searchParams.set("scope", "openid profile email");
-  u.searchParams.set("state", state);
-  u.searchParams.set("nonce", nonce);
-  u.searchParams.set("code_challenge", challenge);
-  u.searchParams.set("code_challenge_method", "S256");
-
-  // The callback is a top-level navigation from auth.openai.com, so a
+  const codeChallenge = await s256(verifier);
+  const location = buildAuthorizeUrl({ clientId: CLIENT_ID, redirectUri: REDIRECT_URI, state, nonce, codeChallenge });
+  // The callback is a top-level navigation from auth.openai.com, so the
   // SameSite=Lax cookie scoped to this function's path is sent with it.
-  const payload = encodeURIComponent(JSON.stringify({ state, nonce, verifier, next }));
-  const cookie = `${COOKIE}=${payload}; Path=${COOKIE_PATH}; Max-Age=600; HttpOnly; Secure; SameSite=Lax`;
-  return redirect(u.toString(), { "Set-Cookie": cookie });
+  return redirect(location, { "Set-Cookie": pkceCookie({ state, nonce, verifier, next }) });
 }
 
 async function handleCallback(req: Request): Promise<Response> {
   const url = new URL(req.url);
-  const clearCookie = { "Set-Cookie": `${COOKIE}=; Path=${COOKIE_PATH}; Max-Age=0; HttpOnly; Secure; SameSite=Lax` };
+  const clearCookie = { "Set-Cookie": clearPkceCookie() };
   const oauthError = url.searchParams.get("error");
   if (oauthError) return failToApp(oauthError);
 
   const code = url.searchParams.get("code");
   const state = url.searchParams.get("state");
-  const raw = readCookie(req, COOKIE);
-  if (!code || !state || !raw) return failToApp("missing_state");
-  let saved: { state: string; nonce: string; verifier: string; next: string };
-  try { saved = JSON.parse(raw); } catch { return failToApp("bad_state"); }
+  const saved = parsePkceCookie(readCookie(req.headers.get("cookie"), SIWC_COOKIE));
+  if (!code || !state || !saved) return failToApp("missing_state");
   if (saved.state !== state) return failToApp("state_mismatch");
 
   const form = new URLSearchParams({
@@ -122,7 +94,7 @@ async function handleCallback(req: Request): Promise<Response> {
     code_verifier: saved.verifier,
   });
   if (CLIENT_SECRET) form.set("client_secret", CLIENT_SECRET);
-  const tokenResp = await fetch(TOKEN_URL, {
+  const tokenResp = await fetch(OPENAI_TOKEN_URL, {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
     body: form,
@@ -136,16 +108,15 @@ async function handleCallback(req: Request): Promise<Response> {
 
   let claims: Record<string, unknown>;
   try {
-    const verified = await jwtVerify(tokens.id_token, JWKS, { issuer: ISSUER, audience: CLIENT_ID });
+    const verified = await jwtVerify(tokens.id_token, JWKS, { issuer: OPENAI_ISSUER, audience: CLIENT_ID });
     claims = verified.payload as Record<string, unknown>;
   } catch (e) {
     console.error("siwc id_token verification failed", e);
     return failToApp("invalid_id_token");
   }
-  if (claims.nonce !== saved.nonce) return failToApp("nonce_mismatch");
-  const email = typeof claims.email === "string" ? claims.email.toLowerCase() : "";
-  if (!email) return failToApp("email_required");
-  if (claims.email_verified === false) return failToApp("email_unverified");
+  const claimError = validateClaims(claims, saved.nonce);
+  if (claimError) return failToApp(claimError);
+  const email = (claims.email as string).trim().toLowerCase();
 
   const meta = {
     full_name: claims.name ?? null,
@@ -177,10 +148,7 @@ async function handleCallback(req: Request): Promise<Response> {
 
   const tokenHash = link.data.properties?.hashed_token;
   if (!tokenHash) return failToApp("session_failed");
-  const dest = new URL(`${APP_ORIGIN}/auth/callback`);
-  // Fragment, not query: never lands in server logs or referrers.
-  dest.hash = new URLSearchParams({ token_hash: tokenHash, type: "magiclink", next: saved.next }).toString();
-  return redirect(dest.toString(), clearCookie);
+  return redirect(buildAppCallbackUrl(APP_ORIGIN, tokenHash, saved.next), clearCookie);
 }
 
 Deno.serve(async (req) => {
