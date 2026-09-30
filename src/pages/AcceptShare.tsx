@@ -82,7 +82,7 @@ export default function AcceptShare() {
           You've been invited to view <span className="font-medium text-foreground">"{info?.deal_name}"</span> on EasyVC. You'll be able to view all its information and use its chat.
         </p>
         {!user ? (
-          <Button onClick={signInWithGoogle} className="w-full">
+          <Button onClick={() => signInWithGoogle(window.location.pathname)} className="w-full">
             Sign in to accept
           </Button>
         ) : (

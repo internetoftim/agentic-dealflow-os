@@ -19,6 +19,36 @@ at the root and answers 401/404, which made Claude and Codex fall back to
 `https://<supabase>/register` and fail with "Dynamic Client Registration rejected (HTTP 404)".
 Keep the static file and `handleOAuthMetadata()` in `supabase/functions/mcp-server/index.ts` in sync.
 
+## Agent-native sign-in
+The identity a user signs in with is decoupled from Google. The consent page (`/mcp/authorize`)
+is the primary entry point: an agent sends the user there, they sign in on the spot, approve, and
+are returned to the agent. `/login` leads with the same options and keeps Google as the fallback
+that is only *required* for Drive export and Gmail ingestion (connect it later from Settings).
+
+**Sign in with ChatGPT** (Codex / OpenAI accounts) — implemented in `supabase/functions/siwc-auth`
+as a standard OIDC code + PKCE flow against `https://auth.openai.com`, bridged into a Supabase
+session with an admin magic-link token redeemed at `/auth/callback`. It switches itself on once
+these secrets exist on the Supabase project:
+
+| Secret | Value |
+|---|---|
+| `OPENAI_SIWC_CLIENT_ID` | the `oaiapp_…` id OpenAI issues |
+| `OPENAI_SIWC_CLIENT_SECRET` | only for confidential clients; omit for public |
+| `APP_ORIGIN` | `https://www.onepointsix.ai` (default if unset) |
+
+Register this exact callback with OpenAI:
+`https://fbiigltzcxkqjjadqzgl.supabase.co/functions/v1/siwc-auth/callback`.
+OpenAI currently issues client ids through a limited partner trial; request one via the
+[Sign in with ChatGPT interest form](https://openai.com/form/sign-in-with-chatgpt-interest/)
+(docs: https://developers.openai.com/siwc/quickstart). Until the id is set, `GET /siwc-auth/status`
+returns `{enabled:false}` and the ChatGPT button is hidden.
+
+**Sign in with Claude** is not offered: Anthropic's consumer terms prohibit using Claude account
+OAuth in third-party products, and there is no public Claude identity provider. Claude users sign
+in on the consent page with ChatGPT or Google, then work from Claude.
+
+Accounts created this way go through the same invite-only approval queue as Google sign-ups.
+
 ## Claude (claude.ai / Claude Code / Cowork)
 1. claude.ai → Settings → Connectors → *Add custom connector* → name "EasyVC", paste the endpoint,
    leave client id/secret empty (dynamic registration) → *Add* → *Connect* → approve on the EasyVC consent page.

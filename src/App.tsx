@@ -19,6 +19,7 @@ import IngestRelay from "@/pages/IngestRelay";
 import PublicIntake from "@/pages/PublicIntake";
 import AcceptShare from "@/pages/AcceptShare";
 import McpAuthorize from "@/pages/McpAuthorize";
+import AuthCallback from "@/pages/AuthCallback";
 import ConvertLink from "@/pages/ConvertLink";
 import ConversionDashboard from "@/pages/ConversionDashboard";
 import MyConversions from "@/pages/MyConversions";
@@ -60,6 +61,7 @@ const App = () => (
 
             <Route path="/share/:token" element={<AcceptShare />} />
             <Route path="/mcp/authorize" element={<McpAuthorize />} />
+            <Route path="/auth/callback" element={<AuthCallback />} />
             <Route path="/ingest-relay" element={<ProtectedRoute><IngestRelay /></ProtectedRoute>} />
             <Route
               path="/*"

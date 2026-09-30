@@ -14,13 +14,25 @@ export const GMAIL_SCOPE = "https://www.googleapis.com/auth/gmail.modify";
 /** How long a fresh tab waits for the auth lock before offering a retry. */
 export const AUTH_BOOT_TIMEOUT_MS = 8_000;
 
+/**
+ * Sign in with ChatGPT runs through the siwc-auth edge function (OIDC against
+ * auth.openai.com, then a Supabase session). It is only offered once an OpenAI
+ * client id is configured server-side; /status tells us.
+ */
+const SIWC_BASE = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/siwc-auth`;
+
 interface AuthContextType {
   user: User | null;
   session: Session | null;
   loading: boolean;
   /** True when the initial session lookup timed out (usually a lock held by another tab). */
   bootTimedOut: boolean;
-  signInWithGoogle: () => Promise<void>;
+  /** Whether "Continue with ChatGPT" is available (OpenAI client id configured). */
+  chatgptSignInEnabled: boolean;
+  /** `next` is a same-app path to return to after the redirect (e.g. an MCP consent URL). */
+  signInWithGoogle: (next?: string) => Promise<void>;
+  /** Agent-native sign-in: OpenAI account via Sign in with ChatGPT. `next` is a same-app path. */
+  signInWithChatGPT: (next?: string) => void;
   /** Incremental authorization: add Gmail access to the existing grant. */
   requestGmailAccess: () => Promise<void>;
   signOut: () => Promise<void>;
@@ -41,6 +53,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [session, setSession] = useState<Session | null>(null);
   const [loading, setLoading] = useState(true);
   const [bootTimedOut, setBootTimedOut] = useState(false);
+  const [chatgptSignInEnabled, setChatgptSignInEnabled] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -92,7 +105,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return () => { cancelled = true; subscription.unsubscribe(); };
   }, []);
 
-  const signInWithGoogle = async () => {
+  // Is "Continue with ChatGPT" configured server-side? Purely additive: the
+  // button stays hidden until the siwc-auth function reports enabled.
+  useEffect(() => {
+    let cancelled = false;
+    fetch(`${SIWC_BASE}/status`)
+      .then((r) => (r.ok ? r.json() : { enabled: false }))
+      .then((j) => { if (!cancelled) setChatgptSignInEnabled(Boolean(j?.enabled)); })
+      .catch(() => { /* not configured or unreachable: keep the button hidden */ });
+    return () => { cancelled = true; };
+  }, []);
+
+  const signInWithGoogle = async (next?: string) => {
+    const safeNext = next && next.startsWith("/") && !next.startsWith("//") ? next : "";
     if (isInIframe()) {
       // In iframe (preview): use skipBrowserRedirect + popup to avoid cookie issues
       const { data, error } = await supabase.auth.signInWithOAuth({
@@ -136,7 +161,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         provider: "google",
         options: {
           scopes: BASE_SCOPES,
-          redirectTo: window.location.origin,
+          redirectTo: `${window.location.origin}${safeNext}`,
           queryParams: {
             access_type: "offline",
             prompt: "consent",
@@ -160,12 +185,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     });
   };
 
+  const signInWithChatGPT = (next?: string) => {
+    const u = new URL(`${SIWC_BASE}/start`);
+    if (next && next.startsWith("/") && !next.startsWith("//")) u.searchParams.set("next", next);
+    window.location.href = u.toString();
+  };
+
   const signOut = async () => {
     await supabase.auth.signOut();
   };
 
   return (
-    <AuthContext.Provider value={{ user, session, loading, bootTimedOut, signInWithGoogle, requestGmailAccess, signOut }}>
+    <AuthContext.Provider value={{ user, session, loading, bootTimedOut, chatgptSignInEnabled, signInWithGoogle, signInWithChatGPT, requestGmailAccess, signOut }}>
       {children}
     </AuthContext.Provider>
   );

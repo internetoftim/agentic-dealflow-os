@@ -1,5 +1,5 @@
-import { useEffect, useState } from "react";
-import { useSearchParams, Navigate } from "react-router-dom";
+import { useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/integrations/supabase/client";
 import { Loader2, Bot, ShieldCheck } from "lucide-react";
@@ -7,7 +7,7 @@ import { Loader2, Bot, ShieldCheck } from "lucide-react";
 const MCP_BASE = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/mcp-server`;
 
 export default function McpAuthorize() {
-  const { user, loading } = useAuth();
+  const { user, loading, signInWithGoogle, signInWithChatGPT, chatgptSignInEnabled } = useAuth();
   const [params] = useSearchParams();
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -19,16 +19,43 @@ export default function McpAuthorize() {
   const state = params.get("state") ?? "";
   const scope = params.get("scope") ?? "mcp";
 
-  useEffect(() => {
-    if (!loading && !user) {
-      // Bounce through login, keeping the authorize URL as return target
-      const back = encodeURIComponent(window.location.pathname + window.location.search);
-      window.location.href = `/login?next=${back}`;
-    }
-  }, [user, loading]);
-
   if (loading) return <div className="min-h-screen flex items-center justify-center"><Loader2 className="h-5 w-5 animate-spin" /></div>;
-  if (!user) return null;
+
+  if (!user) {
+    // Agent-native entry point: the agent sent the user here, so sign in
+    // right on the consent page and come straight back to it.
+    const here = window.location.pathname + window.location.search;
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-background p-6">
+        <div className="max-w-md w-full rounded-lg border border-border bg-card p-6 shadow-sm">
+          <div className="flex items-center gap-2 mb-2">
+            <Bot className="h-5 w-5 text-primary" />
+            <h1 className="text-lg font-semibold">Sign in to connect your agent</h1>
+          </div>
+          <p className="text-sm text-muted-foreground mb-5">
+            An AI agent wants to use your EasyVC workspace. Sign in, then approve access on the next screen.
+          </p>
+          {chatgptSignInEnabled && (
+            <button
+              onClick={() => signInWithChatGPT(here)}
+              className="mb-2 w-full rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-foreground hover:opacity-90"
+            >
+              Continue with ChatGPT
+            </button>
+          )}
+          <button
+            onClick={() => signInWithGoogle(here)}
+            className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm font-medium hover:bg-muted"
+          >
+            Continue with Google
+          </button>
+          <p className="mt-4 text-xs text-muted-foreground">
+            New here? Your account is created on first sign-in and needs admin approval before the agent can read anything.
+          </p>
+        </div>
+      </div>
+    );
+  }
 
   if (!clientId || !redirectUri || !codeChallenge) {
     return <div className="min-h-screen flex items-center justify-center p-6 text-sm text-destructive">Missing required OAuth parameters.</div>;

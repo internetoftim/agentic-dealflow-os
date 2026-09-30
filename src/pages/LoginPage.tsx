@@ -1,7 +1,16 @@
 import { useAuth } from "@/contexts/AuthContext";
-import { Navigate, Link } from "react-router-dom";
+import { Navigate, Link, useSearchParams } from "react-router-dom";
 import { Helmet } from "react-helmet-async";
-import { Inbox, FileText, Sparkles, KanbanSquare, ShieldCheck, Workflow, FileDown, ArrowRight, Send } from "lucide-react";
+import { Inbox, FileText, Sparkles, KanbanSquare, ShieldCheck, Workflow, FileDown, ArrowRight, Send, Bot } from "lucide-react";
+
+const MCP_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/mcp-server`;
+
+const SIWC_ERRORS: Record<string, string> = {
+  access_denied: "You cancelled the ChatGPT sign-in.",
+  email_required: "Your ChatGPT account didn't share an email address, which EasyVC needs to identify you.",
+  email_unverified: "Your ChatGPT account email isn't verified.",
+  account_create_failed: "We couldn't create your account. Try again or use Google.",
+};
 import { BrandMark } from "@/components/BrandMark";
 import { GOOGLE_LIMITED_USE_DISCLOSURE } from "@/pages/LegalPage";
 
@@ -46,7 +55,12 @@ const features = [
 ];
 
 export default function LoginPage() {
-  const { user, loading, signInWithGoogle } = useAuth();
+  const { user, loading, signInWithGoogle, signInWithChatGPT, chatgptSignInEnabled } = useAuth();
+  const [params] = useSearchParams();
+  const rawNext = params.get("next") ?? "/";
+  const next = rawNext.startsWith("/") && !rawNext.startsWith("//") ? rawNext : "/";
+  const siwcError = params.get("siwc_error");
+  const siwcMessage = siwcError ? (SIWC_ERRORS[siwcError] ?? "ChatGPT sign-in didn't complete. Try again or use Google.") : null;
 
   if (loading) {
     return (
@@ -56,7 +70,7 @@ export default function LoginPage() {
     );
   }
 
-  if (user) return <Navigate to="/" replace />;
+  if (user) return <Navigate to={next} replace />;
 
   return (
     <div className="min-h-screen bg-background">
@@ -129,11 +143,38 @@ export default function LoginPage() {
             <div className="rounded-md border border-border bg-card p-7">
               <h2 className="text-[17px] font-semibold tracking-tight text-foreground">Sign in</h2>
               <p className="mt-1 text-[13px] text-muted-foreground">
-                Continue with Google to access your deal pipeline.
+                Use the account your AI agent already has.
               </p>
+
+              {siwcMessage && (
+                <p className="mt-4 rounded-[5px] border border-destructive/30 bg-destructive/5 px-3 py-2 text-[12px] text-destructive">
+                  {siwcMessage}
+                </p>
+              )}
+
+              {chatgptSignInEnabled && (
+                <button
+                  onClick={() => signInWithChatGPT(next)}
+                  className="mt-6 flex items-center justify-center gap-3 w-full rounded-[5px] bg-primary px-4 py-2.5 text-[13px] font-medium text-primary-foreground hover:opacity-90 transition-opacity"
+                >
+                  <Bot className="h-4 w-4" />
+                  Continue with ChatGPT
+                </button>
+              )}
+
+              <div className={`${chatgptSignInEnabled ? "mt-4" : "mt-6"} rounded-[5px] border border-border bg-muted/30 p-3.5`}>
+                <p className="flex items-center gap-1.5 text-[12.5px] font-medium text-foreground">
+                  <Bot className="h-3.5 w-3.5 text-brand" /> Using Claude or Codex?
+                </p>
+                <p className="mt-1 text-[12px] leading-relaxed text-muted-foreground">
+                  Add EasyVC as a connector in your agent (Settings → Connectors) and connect. You'll be sent here to approve access, then work from your agent.
+                </p>
+                <code className="mt-2 block break-all rounded bg-background px-2 py-1 text-[11px] text-muted-foreground border border-border">{MCP_URL}</code>
+              </div>
+
               <button
-                onClick={() => signInWithGoogle()}
-                className="mt-6 flex items-center justify-center gap-3 w-full rounded-[5px] bg-primary px-4 py-2.5 text-[13px] font-medium text-primary-foreground hover:opacity-90 transition-opacity"
+                onClick={() => signInWithGoogle(next)}
+                className="mt-4 flex items-center justify-center gap-3 w-full rounded-[5px] border border-border bg-background px-4 py-2.5 text-[13px] font-medium text-foreground hover:bg-accent/50 transition-colors"
               >
                 <img
                   src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg"
@@ -145,11 +186,11 @@ export default function LoginPage() {
               <ul className="mt-6 space-y-2 text-[12px] text-muted-foreground border-t border-border pt-5">
                 <li className="flex gap-2">
                   <span className="text-brand shrink-0">—</span>
-                  Asks for your profile and Drive access limited to files EasyVC creates
+                  Google is only needed for Drive export and Gmail ingestion. Connect it later from Settings if you sign in another way.
                 </li>
                 <li className="flex gap-2">
                   <span className="text-brand shrink-0">—</span>
-                  Gmail ingestion is optional — enable it later in Settings and grant it separately
+                  Google sign-in asks for your profile and Drive access limited to files EasyVC creates; Gmail is granted separately.
                 </li>
               </ul>
             </div>
