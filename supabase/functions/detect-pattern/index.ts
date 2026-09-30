@@ -80,7 +80,9 @@ Rules:
           { role: "user", content: `Deduce the naming pattern from this filename: "${sampleFilename}"` },
         ],
         temperature: 0,
-        max_tokens: 200,
+        // Reasoning models (GLM via NYO) spend hundreds of tokens thinking before
+        // the one-line answer; a tight cap returns nothing at all.
+        max_tokens: provider.isOpenAI ? 200 : 2048,
       }),
     });
 
