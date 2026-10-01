@@ -1,5 +1,5 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { resolveChatProvider } from "../_shared/ai-provider.ts";
+import { resolveChatProvider, maxTokensParam } from "../_shared/ai-provider.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -80,9 +80,8 @@ Rules:
           { role: "user", content: `Deduce the naming pattern from this filename: "${sampleFilename}"` },
         ],
         temperature: 0,
-        // Reasoning models (GLM via NYO) spend hundreds of tokens thinking before
-        // the one-line answer; a tight cap returns nothing at all.
-        max_tokens: provider.isOpenAI ? 200 : 2048,
+        // 200 is plenty for the one-line answer; the helper floors it for reasoning models.
+        ...maxTokensParam(provider, 200),
       }),
     });
 

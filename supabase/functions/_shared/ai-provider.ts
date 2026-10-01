@@ -91,7 +91,15 @@ export function resolveChatProvider(
   };
 }
 
-/** `max_completion_tokens` is OpenAI-only; everyone else speaks `max_tokens`. */
+/**
+ * Reasoning models (GLM, DeepSeek via NYO) spend hundreds of tokens thinking
+ * before they write; a cap below this returns an empty answer and NYO's
+ * `reasoning_budget_exhausted` error while still charging for the reasoning.
+ */
+export const REASONING_MIN_OUTPUT_TOKENS = 2048;
+
+/** `max_completion_tokens` is OpenAI-only; everyone else speaks `max_tokens`, floored for reasoning models. */
 export function maxTokensParam(p: ChatProvider, n: number): Record<string, number> {
-  return p.isOpenAI ? { max_completion_tokens: n } : { max_tokens: n };
+  if (p.isOpenAI) return { max_completion_tokens: n };
+  return { max_tokens: Math.max(n, REASONING_MIN_OUTPUT_TOKENS) };
 }

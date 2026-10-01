@@ -25,7 +25,17 @@ describe("GLM via NYO is the default model", () => {
     expect(p.model).toBe("glm-5.3");
     expect(p.headers.Authorization).toBe("Bearer rk_live_x");
     expect(p.supportsVision).toBe(false);
-    expect(maxTokensParam(p, 10)).toEqual({ max_tokens: 10 });
+  });
+
+  it("never sends a reasoning model an output cap it cannot answer under (NYO reasoning_budget_exhausted)", () => {
+    const nyo = resolveChatProvider("nyo-glm-5.3-flash", env({ NYO_API_KEY: "k" }));
+    expect(maxTokensParam(nyo, 100)).toEqual({ max_tokens: 2048 });
+    expect(maxTokensParam(nyo, 4096)).toEqual({ max_tokens: 4096 });
+    for (const fn of ["detect-pattern", "generate-memo"]) {
+      const src = read(`supabase/functions/${fn}/index.ts`);
+      expect(src, fn).toMatch(/maxTokensParam\(/);
+      expect(src, fn).not.toMatch(/max_tokens:\s*\d/);
+    }
   });
 
   it("still routes OpenAI ids to OpenAI and keeps OpenAI-only params there", () => {
