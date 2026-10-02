@@ -6,6 +6,7 @@ import { compressDeck } from "@/lib/compressPdf";
 import { extractTextFromPdf, type VisionProgress } from "@/lib/localVision";
 import { useAiModelSetting, useLocalLlm } from "@/contexts/LocalLlmContext";
 import { getPreset } from "@/lib/localModels";
+import { attachedDeckPath, isDeckFileName, DOC_VIEWER_URL } from "@/lib/deckSources";
 
 export interface Deal {
   id: string;
@@ -156,16 +157,157 @@ export function useSources(dealId?: string) {
         .from("sources")
         .select(SOURCE_LIST_COLUMNS)
         .eq("deal_id", dealId!)
+        // Primary deck first, then newest: the deal's own deck leads the list
+        // however many decks are linked to it.
+        .order("is_primary", { ascending: false })
         .order("created_at", { ascending: false });
       if (error) throw error;
       return data;
     },
     enabled: !!user && !!dealId,
+    // An attached deck is extracted in the background; poll until it settles.
+    refetchInterval: (query) => {
+      const rows = query.state.data as Array<{ processing_status?: string | null }> | undefined;
+      return rows?.some((r) => r.processing_status === "processing") ? 4000 : false;
+    },
   });
 }
 
 export const SOURCE_LIST_COLUMNS =
-  "id, deal_id, user_id, file_name, original_size, compressed_size, storage_path, source_type, processing_status, gmail_message_id, content_hash, created_at";
+  "id, deal_id, user_id, file_name, original_size, compressed_size, storage_path, source_type, processing_status, gmail_message_id, content_hash, is_primary, label, created_at";
+
+/** Every source the user can see, across deals — the Data Room. */
+export function useAllSources() {
+  const { user } = useAuth();
+  return useQuery({
+    queryKey: ["sources", "all"],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("sources")
+        .select(SOURCE_LIST_COLUMNS)
+        .order("created_at", { ascending: false })
+        .limit(2000);
+      if (error) throw error;
+      return data;
+    },
+    enabled: !!user,
+  });
+}
+
+/**
+ * Link an additional deck FILE to an existing deal. The file is stored under a
+ * unique path (it can never overwrite the primary deck), gets its own source
+ * row marked non-primary, and is text-extracted server-side in attach mode —
+ * the deal keeps its name, status and research.
+ */
+export function useAddDeckToDeal() {
+  const queryClient = useQueryClient();
+  const { user } = useAuth();
+
+  return useMutation({
+    mutationFn: async ({ dealId, file, label }: { dealId: string; file: File; label?: string }) => {
+      if (!user) throw new Error("Not authenticated");
+      if (!isDeckFileName(file.name)) throw new Error("Decks must be PDF or PowerPoint files");
+
+      const storagePath = attachedDeckPath(user.id, dealId, file.name, Date.now().toString(36));
+      const { error: uploadError } = await supabase.storage.from("decks").upload(storagePath, file);
+      if (uploadError) throw uploadError;
+
+      const { data: source, error: sourceError } = await supabase
+        .from("sources")
+        .insert({
+          deal_id: dealId,
+          user_id: user.id,
+          file_name: file.name,
+          original_size: `${(file.size / (1024 * 1024)).toFixed(1)}MB`,
+          storage_path: storagePath,
+          source_type: "upload",
+          processing_status: "processing",
+          is_primary: false,
+          label: label?.trim() || null,
+        })
+        .select("id")
+        .single();
+      if (sourceError) {
+        await supabase.storage.from("decks").remove([storagePath]);
+        throw sourceError;
+      }
+
+      const { data, error } = await supabase.functions.invoke("process-deck", {
+        body: { dealId, storagePath, sourceId: source.id, attach: true },
+      });
+      if (error) throw error;
+      if (data?.error) throw new Error(data.error);
+      return { sourceId: source.id as string, storagePath };
+    },
+    onSettled: (_d, _e, variables) => {
+      queryClient.invalidateQueries({ queryKey: ["sources", variables.dealId] });
+      queryClient.invalidateQueries({ queryKey: ["sources", "all"] });
+    },
+  });
+}
+
+/** Link an additional deck by DocSend / Papermark / PandaDoc URL to an existing deal. */
+export function useAddDeckLinkToDeal() {
+  const queryClient = useQueryClient();
+  const { user } = useAuth();
+
+  return useMutation({
+    mutationFn: async ({ dealId, url }: { dealId: string; url: string }) => {
+      if (!user) throw new Error("Not authenticated");
+      const trimmed = url.trim();
+      if (!DOC_VIEWER_URL.test(trimmed)) throw new Error("Paste a DocSend, Papermark, or PandaDoc link");
+
+      const { data, error } = await supabase.functions.invoke("process-docsend", {
+        body: { url: trimmed, dealId },
+      });
+      if (error) throw error;
+      if (data?.error) throw new Error(data.error);
+
+      const { data: run, error: runError } = await supabase.functions.invoke("run-docsend-capture", {
+        body: { dealId, jobId: data.jobId, url: data.url, attach: true },
+      });
+      if (runError) throw runError;
+      if (run?.error) throw new Error(run.error);
+      return run;
+    },
+    onSettled: (_d, _e, variables) => {
+      queryClient.invalidateQueries({ queryKey: ["sources", variables.dealId] });
+      queryClient.invalidateQueries({ queryKey: ["sources", "all"] });
+    },
+  });
+}
+
+/** Promote a deck to be the deal's primary (atomic, owner-only via RLS). */
+export function useSetPrimarySource() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ sourceId }: { sourceId: string; dealId: string }) => {
+      const { error } = await supabase.rpc("set_primary_source", { _source_id: sourceId });
+      if (error) throw error;
+    },
+    onSuccess: (_d, variables) => {
+      queryClient.invalidateQueries({ queryKey: ["sources", variables.dealId] });
+      queryClient.invalidateQueries({ queryKey: ["sources", "all"] });
+    },
+  });
+}
+
+/** Unlink a source from its deal and delete its stored file. */
+export function useRemoveSource() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ sourceId, storagePath }: { sourceId: string; dealId: string; storagePath?: string | null }) => {
+      const { error } = await supabase.from("sources").delete().eq("id", sourceId);
+      if (error) throw error;
+      if (storagePath) await supabase.storage.from("decks").remove([storagePath]);
+    },
+    onSuccess: (_d, variables) => {
+      queryClient.invalidateQueries({ queryKey: ["sources", variables.dealId] });
+      queryClient.invalidateQueries({ queryKey: ["sources", "all"] });
+    },
+  });
+}
 
 export function useLatestCaptureJob(dealId?: string, source?: string) {
   const { user } = useAuth();
@@ -177,6 +319,8 @@ export function useLatestCaptureJob(dealId?: string, source?: string) {
         .from("capture_jobs")
         .select("*")
         .eq("deal_id", dealId!)
+        // The deal's own capture, not one for an additional linked deck.
+        .eq("attach", false)
         .order("created_at", { ascending: false })
         .limit(1)
         .maybeSingle();
@@ -200,6 +344,7 @@ export function useDocsendUrl(dealId?: string, source?: string) {
         .from("capture_jobs")
         .select("url")
         .eq("deal_id", dealId!)
+        .eq("attach", false)
         .order("created_at", { ascending: false })
         .limit(1)
         .maybeSingle();
@@ -560,6 +705,8 @@ export function useRerunWorkflow() {
           .from("capture_jobs")
           .select("url")
           .eq("deal_id", dealId)
+          // Re-run the deal's PRIMARY link, never an additional linked deck.
+          .eq("attach", false)
           .order("created_at", { ascending: false })
           .limit(1)
           .maybeSingle();
@@ -574,12 +721,14 @@ export function useRerunWorkflow() {
         return await runDocsendCapture({ dealId, url: job.url });
       }
 
-      // Uploaded decks: find the most recent stored file and re-process it.
+      // Uploaded decks: re-process the deal's primary deck (falling back to the
+      // most recent stored file for rows that predate the primary flag).
       const { data: src, error: srcError } = await supabase
         .from("sources")
         .select("storage_path")
         .eq("deal_id", dealId)
         .not("storage_path", "is", null)
+        .order("is_primary", { ascending: false })
         .order("created_at", { ascending: false })
         .limit(1)
         .maybeSingle();

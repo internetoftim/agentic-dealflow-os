@@ -2,6 +2,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { createWebResearch } from "../_shared/web-research.ts";
 import { getUserGoogleAccessToken } from "../_shared/google-tokens.ts";
 import { resolveChatProvider } from "../_shared/ai-provider.ts";
+import { pickTargetSource } from "../_shared/deck-sources.ts";
 import { BlobReader, ZipReader, TextWriter } from "https://esm.sh/@zip.js/zip.js@2.7.34";
 import { PDFDocument } from "https://esm.sh/pdf-lib@1.17.1?bundle-deps";
 
@@ -86,6 +87,65 @@ function sanitizeCompanyName(name: string): string {
     .replace(/[\/\\:*?"<>|]/g, "") // filesystem-illegal chars
     .replace(/\s+/g, " ")
     .trim();
+}
+
+/**
+ * Attach mode: an additional deck linked to an existing deal. Extracts the
+ * deck's text into ITS OWN source row and stops. It never renames the deal,
+ * never changes the deal's status or stage, and never restarts website search,
+ * Drive sync or deep research — the primary deck owns the deal's identity.
+ */
+async function handleAttachDeck(
+  adminClient: any,
+  args: { dealId: string; userId: string; storagePath: string; sourceId: string },
+): Promise<Response> {
+  const json = (body: unknown, status = 200) =>
+    new Response(JSON.stringify(body), { status, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+
+  const { data: deal } = await adminClient.from("deals").select("id").eq("id", args.dealId).eq("user_id", args.userId).maybeSingle();
+  if (!deal) return json({ error: "Deal not found" }, 404);
+
+  const { data: source } = await adminClient.from("sources")
+    .select("id, storage_path, extracted_text")
+    .eq("id", args.sourceId).eq("deal_id", args.dealId).eq("user_id", args.userId)
+    .maybeSingle();
+  if (!source) return json({ error: "Source not found" }, 404);
+
+  const storagePath = source.storage_path || args.storagePath;
+  try {
+    await adminClient.from("sources").update({ processing_status: "processing" }).eq("id", source.id);
+
+    // Captured viewer decks arrive with OCR text already stored; keep it.
+    let text = (source.extracted_text ?? "").trim();
+    let pages = 0;
+    if (text.length < 200) {
+      const { data: file, error: downloadError } = await adminClient.storage.from("decks").download(storagePath);
+      if (downloadError || !file) throw new Error(`Failed to download deck: ${downloadError?.message ?? "not found"}`);
+      const buffer = await file.arrayBuffer();
+      const lower = storagePath.toLowerCase();
+      const result = lower.endsWith(".pptx") || lower.endsWith(".ppt")
+        ? await extractPptxText(buffer)
+        : extractPdfText(buffer);
+      if (result.text.length > text.length) text = result.text;
+      pages = result.pageCount;
+    }
+
+    await adminClient.from("sources")
+      .update({
+        ...(text ? { extracted_text: text.slice(0, 100_000) } : {}),
+        processing_status: text ? "extracted" : "uploaded",
+      })
+      .eq("id", source.id);
+    await adminClient.from("deals").update({ updated_at: new Date().toISOString() }).eq("id", args.dealId);
+
+    console.log(`Attached deck ${source.id} to deal ${args.dealId}: ${text.length} chars, ${pages} pages`);
+    return json({ success: true, attached: true, sourceId: source.id, chars: text.length, pages });
+  } catch (e) {
+    const message = e instanceof Error ? e.message : "Unknown error";
+    console.error("attach deck failed:", message);
+    await adminClient.from("sources").update({ processing_status: "error" }).eq("id", source.id);
+    return json({ error: message, attached: false, sourceId: source.id }, 500);
+  }
 }
 
 /** Helper to update deal status */
@@ -393,7 +453,7 @@ Deno.serve(async (req) => {
     }
 
     const body = await req.json();
-    const { dealId, storagePath, resumeFrom, localExtracted, skipCompression } = body;
+    const { dealId, storagePath, resumeFrom, localExtracted, skipCompression, attach, sourceId } = body;
     if (!dealId || !storagePath) {
       return new Response(JSON.stringify({ error: "Missing dealId or storagePath" }), {
         status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
@@ -409,6 +469,18 @@ Deno.serve(async (req) => {
         });
       }
       userId = dealRecord.user_id;
+    }
+
+    // An additional deck for an existing deal: handled entirely apart from the
+    // pipeline below, and before failCtx is set so a failure can never mark the
+    // deal itself as errored.
+    if (attach) {
+      if (!sourceId) {
+        return new Response(JSON.stringify({ error: "Missing sourceId for attach" }), {
+          status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+      return await handleAttachDeck(adminClient, { dealId, userId, storagePath, sourceId: String(sourceId) });
     }
 
     failCtx = { adminClient, dealId, userId, supabaseUrl, supabaseServiceKey };
@@ -509,13 +581,15 @@ Deno.serve(async (req) => {
 
       let extractedText = "";
       let actualPageCount = pageCount;
-      const { data: existingSource } = await adminClient.from("sources")
-        .select("extracted_text, source_type, preview_images")
+      // A deal can hold several decks and documents. Work on the source this
+      // run is actually processing (by id, else by storage path, else the
+      // primary deck) — never on "the latest row" or on every row.
+      const { data: dealSources } = await adminClient.from("sources")
+        .select("id, extracted_text, source_type, preview_images, storage_path, file_name, is_primary, created_at")
         .eq("deal_id", dealId)
         .eq("user_id", userId)
-        .order("created_at", { ascending: false })
-        .limit(1)
-        .maybeSingle();
+        .order("created_at", { ascending: false });
+      const existingSource = pickTargetSource((dealSources ?? []) as any[], { sourceId, storagePaths: [storagePath, pdfStoragePath] });
       const existingSourceText = existingSource?.extracted_text?.trim() ?? "";
       const previewImages = Array.isArray(existingSource?.preview_images)
         ? existingSource.preview_images.filter((item: unknown): item is string => typeof item === "string" && item.startsWith("data:image/"))
@@ -580,10 +654,10 @@ Deno.serve(async (req) => {
           }
         }
 
-        if (extractedText) {
+        if (extractedText && existingSource?.id) {
           await adminClient.from("sources")
             .update({ extracted_text: extractedText.slice(0, 100_000) })
-            .eq("deal_id", dealId).eq("user_id", userId);
+            .eq("id", existingSource.id);
         }
       }
 

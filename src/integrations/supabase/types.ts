@@ -16,6 +16,7 @@ export type Database = {
     Tables: {
       capture_jobs: {
         Row: {
+          attach: boolean
           created_at: string
           deal_id: string
           error_message: string | null
@@ -26,6 +27,7 @@ export type Database = {
           user_id: string
         }
         Insert: {
+          attach?: boolean
           created_at?: string
           deal_id: string
           error_message?: string | null
@@ -36,6 +38,7 @@ export type Database = {
           user_id: string
         }
         Update: {
+          attach?: boolean
           created_at?: string
           deal_id?: string
           error_message?: string | null
@@ -764,6 +767,8 @@ export type Database = {
           file_name: string
           gmail_message_id: string | null
           id: string
+          is_primary: boolean
+          label: string | null
           original_size: string | null
           preview_images: Json | null
           processing_status: string
@@ -780,6 +785,8 @@ export type Database = {
           file_name: string
           gmail_message_id?: string | null
           id?: string
+          is_primary?: boolean
+          label?: string | null
           original_size?: string | null
           preview_images?: Json | null
           processing_status?: string
@@ -796,6 +803,8 @@ export type Database = {
           file_name?: string
           gmail_message_id?: string | null
           id?: string
+          is_primary?: boolean
+          label?: string | null
           original_size?: string | null
           preview_images?: Json | null
           processing_status?: string
@@ -970,6 +979,7 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      set_primary_source: { Args: { _source_id: string }; Returns: undefined }
       accept_share_token: { Args: { _token: string }; Returns: string }
       can_access_deal: {
         Args: { _deal_id: string; _user_id: string }

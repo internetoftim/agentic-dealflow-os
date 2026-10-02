@@ -1,5 +1,6 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { captureSync } from "../_shared/docsend-capture-client.ts";
+import { capturedDeckPath } from "../_shared/deck-sources.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -10,6 +11,8 @@ const corsHeaders = {
 const DEFAULT_MAX_PAGES = 50;
 
 type RunDocsendCaptureRequest = {
+  /** Link an additional deck to an existing deal instead of (re)capturing its primary deck. */
+  attach?: boolean;
   dealId?: string;
   gateEmail?: string | null;
   jobId?: string;
@@ -50,6 +53,7 @@ async function markCaptureFailure(
   dealId: string,
   jobId: string | null,
   message: string,
+  attach = false,
 ) {
   const adminClient = createClient(supabaseUrl, supabaseServiceKey);
   const updatedAt = new Date().toISOString();
@@ -61,10 +65,39 @@ async function markCaptureFailure(
       .eq("id", jobId);
   }
 
+  // A failed *additional* deck must not flip a healthy deal to "error".
+  if (attach) return;
+
   await adminClient
     .from("deals")
     .update({ status: "error", updated_at: updatedAt })
     .eq("id", dealId);
+}
+
+/** Attached capture: always a NEW, non-primary source row; returns its id. */
+async function insertAttachedSource(
+  adminClient: any,
+  dealId: string,
+  userId: string,
+  sourceType: string,
+  storagePath: string,
+  fileName: string,
+  originalSize: string,
+  previewImages?: string[] | null,
+): Promise<string> {
+  const { data, error } = await adminClient.from("sources").insert({
+    deal_id: dealId,
+    user_id: userId,
+    source_type: sourceType,
+    file_name: fileName,
+    original_size: originalSize,
+    storage_path: storagePath,
+    processing_status: "uploaded",
+    is_primary: false,
+    ...(previewImages?.length ? { preview_images: previewImages } : {}),
+  }).select("id").single();
+  if (error || !data) throw new Error(`Failed to create attached source: ${error?.message ?? "unknown"}`);
+  return data.id as string;
 }
 
 async function prepareCaptureJob(
@@ -73,6 +106,7 @@ async function prepareCaptureJob(
   userId: string,
   url: string,
   jobId?: string,
+  attach = false,
 ): Promise<CaptureJobRecord> {
   const updatedAt = new Date().toISOString();
 
@@ -105,6 +139,7 @@ async function prepareCaptureJob(
       user_id: userId,
       url,
       status: "processing",
+      attach,
     })
     .select("id")
     .single();
@@ -132,6 +167,9 @@ async function upsertCapturedSource(
     .eq("deal_id", dealId)
     .eq("user_id", userId)
     .eq("source_type", sourceType)
+    // Re-capturing the deal's own link must refresh its primary deck, not an
+    // attached deck that happens to be newer.
+    .order("is_primary", { ascending: false })
     .order("created_at", { ascending: false })
     .limit(1)
     .maybeSingle();
@@ -178,6 +216,7 @@ async function handOffToProcessDeck(
   supabaseServiceKey: string,
   dealId: string,
   storagePath: string,
+  attachSourceId?: string,
 ) {
   const response = await fetch(`${supabaseUrl}/functions/v1/process-deck`, {
     method: "POST",
@@ -185,7 +224,11 @@ async function handOffToProcessDeck(
       Authorization: `Bearer ${supabaseServiceKey}`,
       "Content-Type": "application/json",
     },
-    body: JSON.stringify({ dealId, storagePath, skipCompression: true }),
+    body: JSON.stringify(
+      attachSourceId
+        ? { dealId, storagePath, attach: true, sourceId: attachSourceId }
+        : { dealId, storagePath, skipCompression: true },
+    ),
   });
 
   if (!response.ok) {
@@ -195,6 +238,7 @@ async function handOffToProcessDeck(
 }
 
 async function processCaptureInBackground(args: {
+  attach: boolean;
   captureServiceApiKey: string;
   captureServiceUrl: string;
   dealId: string;
@@ -218,7 +262,9 @@ async function processCaptureInBackground(args: {
 
   const pdfBytes = pdfBytesFromBase64(captureResult.pdfBase64);
   const sizeMB = `${(pdfBytes.length / (1024 * 1024)).toFixed(1)}MB`;
-  const storagePath = `${args.userId}/${args.dealId}/deck.pdf`;
+  // The primary capture keeps deck.pdf; an attached deck gets its own file so
+  // it can never overwrite the primary.
+  const storagePath = capturedDeckPath(args.userId, args.dealId, args.attach ? args.jobId : null);
   const updatedAt = new Date().toISOString();
   const sourceType = deriveSourceType(args.url, args.dealSource);
   const fileName = `${sourceType}-${extractSlug(args.url)}.pdf`;
@@ -236,28 +282,37 @@ async function processCaptureInBackground(args: {
     throw new Error(`Failed to upload captured PDF: ${uploadError.message}`);
   }
 
-  await upsertCapturedSource(
-    adminClient,
-    args.dealId,
-    args.userId,
-    sourceType,
-    storagePath,
-    fileName,
-    sizeMB,
-    captureResult.previewImages,
-  );
+  let attachSourceId: string | undefined;
+  if (args.attach) {
+    attachSourceId = await insertAttachedSource(
+      adminClient, args.dealId, args.userId, sourceType, storagePath, fileName, sizeMB, captureResult.previewImages,
+    );
+  } else {
+    await upsertCapturedSource(
+      adminClient,
+      args.dealId,
+      args.userId,
+      sourceType,
+      storagePath,
+      fileName,
+      sizeMB,
+      captureResult.previewImages,
+    );
 
-  const { error: dealUpdateError } = await adminClient
-    .from("deals")
-    .update({
-      deck_size: sizeMB,
-      pages: captureResult.pageCount || 0,
-      updated_at: updatedAt,
-    })
-    .eq("id", args.dealId);
+    // Deck size and page count describe the PRIMARY deck; an attached deck
+    // leaves them alone.
+    const { error: dealUpdateError } = await adminClient
+      .from("deals")
+      .update({
+        deck_size: sizeMB,
+        pages: captureResult.pageCount || 0,
+        updated_at: updatedAt,
+      })
+      .eq("id", args.dealId);
 
-  if (dealUpdateError) {
-    throw new Error(`Failed to update deal after capture: ${dealUpdateError.message}`);
+    if (dealUpdateError) {
+      throw new Error(`Failed to update deal after capture: ${dealUpdateError.message}`);
+    }
   }
 
   const { error: jobCompleteError } = await adminClient
@@ -274,13 +329,15 @@ async function processCaptureInBackground(args: {
   }
 
   try {
-    await handOffToProcessDeck(args.supabaseUrl, args.supabaseServiceKey, args.dealId, storagePath);
+    await handOffToProcessDeck(args.supabaseUrl, args.supabaseServiceKey, args.dealId, storagePath, attachSourceId);
   } catch (error) {
     const message = error instanceof Error ? error.message : "process-deck handoff failed";
-    await adminClient
-      .from("deals")
-      .update({ status: "error", updated_at: new Date().toISOString() })
-      .eq("id", args.dealId);
+    if (!args.attach) {
+      await adminClient
+        .from("deals")
+        .update({ status: "error", updated_at: new Date().toISOString() })
+        .eq("id", args.dealId);
+    }
     throw new ProcessDeckHandoffError(message);
   }
 }
@@ -311,6 +368,7 @@ Deno.serve(async (req) => {
 
   let scheduledJobId: string | null = null;
   let scheduledDealId: string | null = null;
+  let scheduledAttach = false;
 
   try {
     const authHeader = req.headers.get("Authorization");
@@ -338,6 +396,7 @@ Deno.serve(async (req) => {
     const requestedMaxPages = typeof requestBody?.maxPages === "number" ? requestBody.maxPages : DEFAULT_MAX_PAGES;
     const maxPages = Math.max(1, Math.min(100, requestedMaxPages));
     const gateEmail = requestBody?.gateEmail ?? null;
+    const attach = requestBody?.attach === true;
 
     let actorId: string | null = null;
     if (isInternalCall) {
@@ -390,18 +449,24 @@ Deno.serve(async (req) => {
       ownerId,
       url,
       requestBody?.jobId?.trim(),
+      attach,
     );
     scheduledJobId = captureJob.id;
     scheduledDealId = dealId;
+    scheduledAttach = attach;
 
-    await adminClient
-      .from("deals")
-      .update({ status: "scraping", updated_at: new Date().toISOString() })
-      .eq("id", dealId);
+    // Attaching a deck leaves the deal's status alone: the deal stays usable
+    // (and "memo-ready") while the extra deck is captured in the background.
+    if (!attach) {
+      await adminClient
+        .from("deals")
+        .update({ status: "scraping", updated_at: new Date().toISOString() })
+        .eq("id", dealId);
+    }
 
     if (!captureServiceUrl || !captureServiceApiKey) {
       const errorMessage = "DocSend capture service is not configured";
-      await markCaptureFailure(supabaseUrl, supabaseServiceKey, dealId, captureJob.id, errorMessage);
+      await markCaptureFailure(supabaseUrl, supabaseServiceKey, dealId, captureJob.id, errorMessage, attach);
       return new Response(
         JSON.stringify({ error: errorMessage }),
         { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
@@ -409,6 +474,7 @@ Deno.serve(async (req) => {
     }
 
     const backgroundTask = processCaptureInBackground({
+      attach,
       captureServiceApiKey,
       captureServiceUrl,
       dealId,
@@ -426,13 +492,13 @@ Deno.serve(async (req) => {
       if (error instanceof ProcessDeckHandoffError) {
         return;
       }
-      await markCaptureFailure(supabaseUrl, supabaseServiceKey, dealId, captureJob.id, message);
+      await markCaptureFailure(supabaseUrl, supabaseServiceKey, dealId, captureJob.id, message, attach);
     });
 
     scheduleBackgroundTask(backgroundTask);
 
     return new Response(
-      JSON.stringify({ success: true, dealId, jobId: captureJob.id, scheduled: true }),
+      JSON.stringify({ success: true, dealId, jobId: captureJob.id, scheduled: true, attach }),
       { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
   } catch (error) {
@@ -446,6 +512,7 @@ Deno.serve(async (req) => {
         scheduledDealId,
         scheduledJobId,
         message,
+        scheduledAttach,
       );
     }
 

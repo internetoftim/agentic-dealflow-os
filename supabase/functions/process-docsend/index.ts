@@ -46,7 +46,8 @@ Deno.serve(async (req) => {
       });
     }
 
-    const { url } = await req.json();
+    // `dealId` (optional): link this deck to an existing deal instead of creating one.
+    const { url, dealId: attachDealId } = await req.json();
     if (!url || typeof url !== "string") {
       return new Response(JSON.stringify({ error: "Missing url parameter" }), {
         status: 400,
@@ -68,6 +69,29 @@ Deno.serve(async (req) => {
 
     const sourceType = isDocSend ? "docsend" : isPandaDoc ? "pandadoc" : "papermark";
     const dealName = deriveDealName(normalizedUrl);
+
+    // Attach mode: no new deal. Verify ownership, queue a capture job on the
+    // existing deal, and let the caller run the capture with attach=true.
+    if (attachDealId) {
+      const { data: existing } = await adminClient
+        .from("deals").select("id").eq("id", String(attachDealId)).eq("user_id", user.id).maybeSingle();
+      if (!existing) {
+        return new Response(JSON.stringify({ error: "Deal not found" }), {
+          status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+      const { data: attachJob, error: attachJobError } = await adminClient
+        .from("capture_jobs")
+        .insert({ deal_id: existing.id, user_id: user.id, url: normalizedUrl, status: "pending", attach: true })
+        .select()
+        .single();
+      if (attachJobError) throw new Error(`Failed to create capture job: ${attachJobError.message}`);
+      console.log(`Queued attached ${sourceType} deck for deal ${existing.id} (job ${attachJob.id})`);
+      return new Response(
+        JSON.stringify({ success: true, attach: true, dealId: existing.id, jobId: attachJob.id, url: normalizedUrl }),
+        { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+      );
+    }
 
     const { data: deal, error: dealError } = await adminClient
       .from("deals")

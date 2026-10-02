@@ -1,7 +1,9 @@
 import { useState, useCallback, useRef, useEffect } from "react";
 import { useSearchParams } from "react-router-dom";
 import { Upload, Link, Cog, Check, Search, Send, FileText, Globe, Layers, Square, Linkedin, Loader2, FileUp, CircleDashed, CircleCheck, Circle, Pause, Clock, Download, Mail, ExternalLink, Users, Trash2, Share2, RotateCcw } from "lucide-react";
-import { useDeals, useSources, useLatestCaptureJob, useCreateDealWithUpload, useProcessDocsend, useRetryDocsendCapture, useRerunWorkflow, useCancelDeal, useDeleteDeal, WORKFLOW_STEPS, PROCESSING_STATUSES, DOC_VIEWER_SOURCES } from "@/hooks/useDeals";
+import { useDeals, useSources, useLatestCaptureJob, useCreateDealWithUpload, useProcessDocsend, useRetryDocsendCapture, useRerunWorkflow, useCancelDeal, useDeleteDeal, useAddDeckToDeal, useAddDeckLinkToDeal, useSetPrimarySource, useRemoveSource, WORKFLOW_STEPS, PROCESSING_STATUSES, DOC_VIEWER_SOURCES } from "@/hooks/useDeals";
+import { AddDeckControl } from "@/components/AddDeckControl";
+import { isDeckSource, pickPrimarySource, type DealSource } from "@/lib/deckSources";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import { useDealChat } from "@/hooks/useDealChat";
@@ -44,6 +46,10 @@ export default function DealWorkspace() {
   const cancelDeal = useCancelDeal();
   const deleteDeal = useDeleteDeal();
   const generateMemo = useGenerateMemo();
+  const addDeck = useAddDeckToDeal();
+  const addDeckLink = useAddDeckLinkToDeal();
+  const setPrimarySource = useSetPrimarySource();
+  const removeSource = useRemoveSource();
 
   const { data: latestCaptureJob } = useLatestCaptureJob(activeDeal?.id, activeDeal?.source);
   const { addNote } = useDealNotes(activeDeal?.id);
@@ -179,6 +185,52 @@ export default function DealWorkspace() {
   ];
 
   const loadedSources = sources ?? [];
+  // A deal can hold several decks; the primary one defines the deal.
+  const primarySource = pickPrimarySource(loadedSources as DealSource[]);
+  const deckCount = (loadedSources as DealSource[]).filter(isDeckSource).length;
+  const addingDeck = addDeck.isPending || addDeckLink.isPending;
+
+  const handleAddDeckFile = (file: File) => {
+    if (!activeDeal) return;
+    toast.promise(addDeck.mutateAsync({ dealId: activeDeal.id, file }), {
+      loading: `Linking ${file.name} to ${activeDeal.name}…`,
+      success: "Deck linked to this deal",
+      error: (err) => `Couldn't link the deck: ${err.message}`,
+    });
+  };
+
+  const handleAddDeckLink = (url: string) => {
+    if (!activeDeal) return;
+    toast.promise(addDeckLink.mutateAsync({ dealId: activeDeal.id, url }), {
+      loading: "Starting capture of the linked deck…",
+      success: "Capture started — the deck will appear in this deal's sources in a minute or two.",
+      error: (err) => `Couldn't link the deck: ${err.message}`,
+    });
+  };
+
+  const handleMakePrimary = (source: { id: string; file_name: string }) => {
+    if (!activeDeal) return;
+    toast.promise(setPrimarySource.mutateAsync({ sourceId: source.id, dealId: activeDeal.id }), {
+      loading: "Updating primary deck…",
+      success: `${source.file_name} is now the primary deck`,
+      error: (err) => `Couldn't change the primary deck: ${err.message}`,
+    });
+  };
+
+  const handleRemoveSource = (source: { id: string; file_name: string; storage_path?: string | null }) => {
+    if (!activeDeal) return;
+    if (!confirm(`Remove "${source.file_name}" from ${activeDeal.name}? The file is deleted; the deal stays.`)) return;
+    setSelectedSourceIds((prev) => {
+      const next = new Set(prev);
+      next.delete(source.id);
+      return next;
+    });
+    toast.promise(removeSource.mutateAsync({ sourceId: source.id, dealId: activeDeal.id, storagePath: source.storage_path }), {
+      loading: "Removing…",
+      success: "Removed from this deal",
+      error: (err) => `Couldn't remove it: ${err.message}`,
+    });
+  };
 
   const toggleSource = (id: string) =>
     setSelectedSourceIds((prev) => {
@@ -325,7 +377,9 @@ export default function DealWorkspace() {
         </div>
 
         <div>
-          <h3 className="eyebrow mb-2">Loaded Sources</h3>
+          <h3 className="eyebrow mb-2">
+            {deckCount > 1 ? `Linked decks & sources · ${loadedSources.length}` : "Loaded Sources"}
+          </h3>
           <div className="flex flex-col gap-2">
             {loadedSources.length === 0 && (
               <p className="text-xs text-muted-foreground">No sources uploaded yet.</p>
@@ -333,10 +387,20 @@ export default function DealWorkspace() {
             {loadedSources.map((src: any) => (
               <div key={src.id} className="rounded-md border border-border bg-card p-3">
                 <div className="flex items-center gap-2 mb-1">
-                  <FileText className="h-3.5 w-3.5 text-muted-foreground" />
+                  <FileText className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
                   <span className="text-xs font-medium text-foreground truncate">{src.file_name}</span>
+                  {deckCount > 1 && src.id === primarySource?.id && (
+                    <span className="shrink-0 rounded-full bg-brand-muted px-1.5 py-px text-[9.5px] font-medium text-brand">Primary</span>
+                  )}
                 </div>
-                {src.processing_status === "uploaded" ? (
+                {src.processing_status === "error" ? (
+                  <span className="text-[11px] text-destructive">Couldn't read this file</span>
+                ) : src.processing_status === "extracted" || src.processing_status === "attached" ? (
+                  <span className="inline-flex items-center gap-1.5 rounded-full bg-success-muted px-2 py-0.5 text-[11px] font-medium text-success">
+                    <Check className="h-3 w-3" />
+                    {src.original_size ?? "Linked"} ready
+                  </span>
+                ) : src.processing_status === "uploaded" ? (
                   <span className="inline-flex items-center gap-1.5 rounded-full bg-success-muted px-2 py-0.5 text-[11px] font-medium text-success">
                     <Check className="h-3 w-3" />
                     {src.original_size} uploaded ⚡
@@ -349,6 +413,9 @@ export default function DealWorkspace() {
                 )}
               </div>
             ))}
+            {activeDeal && isOwnerOfActive && loadedSources.length > 0 && (
+              <AddDeckControl onAddFile={handleAddDeckFile} onAddLink={handleAddDeckLink} busy={addingDeck} />
+            )}
           </div>
         </div>
 
@@ -610,10 +677,11 @@ export default function DealWorkspace() {
             <FileText className="h-3 w-3" /> {activeDeal?.pages ?? "—"} pages
           </span>
           {/* Download raw file */}
-          {loadedSources.length > 0 && loadedSources[0]?.storage_path && (
+          {primarySource?.storage_path && (
             <button
               onClick={async () => {
-                const path = loadedSources[0].storage_path;
+                // With several decks linked, "the deck" is the primary one.
+                const path = primarySource.storage_path!;
                 const { data, error } = await supabase.storage.from("decks").download(path);
                 if (error || !data) {
                   toast.error("Failed to download deck");
@@ -622,7 +690,7 @@ export default function DealWorkspace() {
                 const url = URL.createObjectURL(data);
                 const a = document.createElement("a");
                 a.href = url;
-                a.download = loadedSources[0].file_name || "deck.pdf";
+                a.download = primarySource.file_name || "deck.pdf";
                 a.click();
                 URL.revokeObjectURL(url);
               }}
@@ -756,6 +824,12 @@ export default function DealWorkspace() {
                 selected={selectedSourceIds}
                 onToggle={toggleSource}
                 onToggleAll={toggleAllSources}
+                canManage={isOwnerOfActive}
+                adding={addingDeck}
+                onAddFile={handleAddDeckFile}
+                onAddLink={handleAddDeckLink}
+                onMakePrimary={handleMakePrimary}
+                onRemove={handleRemoveSource}
               />
               <div className="flex-1 flex flex-col min-w-0">
               <div className="flex-1 p-5 space-y-4 overflow-auto">

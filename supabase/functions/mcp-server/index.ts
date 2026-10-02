@@ -335,11 +335,12 @@ const WRITE_TOOLS = [
   {
     name: "ingest_deck_link",
     description:
-      "Ingest a pitch deck from a DocSend, Papermark, or PandaDoc link: creates a deal and starts the cloud capture + analysis pipeline. Requires Agent Mode.",
+      "Ingest a pitch deck from a DocSend, Papermark, or PandaDoc link. Without deal_id it creates a deal and starts the cloud capture + analysis pipeline. With deal_id it links the deck to that existing deal as an additional deck (a newer version, a later round): the deal keeps its name, status and research, and the new deck grounds chat and memos. Requires Agent Mode.",
     inputSchema: {
       type: "object",
       properties: {
         url: { type: "string", description: "DocSend / Papermark / PandaDoc link" },
+        deal_id: { type: "string", description: "Existing deal to link this deck to. Omit to create a new deal." },
         name: { type: "string", description: "Company name (defaults to the link slug)" },
         stage: { type: "string" },
         sector: { type: "string" },
@@ -538,7 +539,10 @@ async function runTool(name: string, args: any, userId: string) {
       if (!id) throw new Error("deal_id required");
       const [{ data: deal, error: e1 }, { data: sources }, { data: people }] = await Promise.all([
         admin.from("deals").select("*").eq("id", id).eq("user_id", userId).maybeSingle(),
-        admin.from("sources").select("id, file_name, source_type, created_at").eq("deal_id", id).eq("user_id", userId),
+        // A deal can hold several decks; is_primary marks the one that defines the deal.
+        admin.from("sources").select("id, file_name, source_type, is_primary, label, processing_status, created_at")
+          .eq("deal_id", id).eq("user_id", userId)
+          .order("is_primary", { ascending: false }).order("created_at", { ascending: true }),
         admin.from("deal_people").select("*").eq("deal_id", id).eq("user_id", userId),
       ]);
       if (e1) throw new Error(e1.message);
@@ -804,6 +808,22 @@ async function runWriteTool(name: string, args: any, userId: string) {
         throw new Error("url must be a DocSend, Papermark, or PandaDoc link");
       }
       const source = /docsend\.com/i.test(url) ? "docsend" : /pandadoc\.com/i.test(url) ? "pandadoc" : "papermark";
+
+      // Link an additional deck to an existing deal: no new deal, no status change.
+      const attachDealId = String(args?.deal_id ?? "").trim();
+      if (attachDealId) {
+        await assertOwnedDeal(attachDealId, userId);
+        const attachCapture = fetch(`${SUPABASE_URL}/functions/v1/run-docsend-capture`, {
+          method: "POST",
+          headers: { Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`, "Content-Type": "application/json" },
+          body: JSON.stringify({ dealId: attachDealId, url, attach: true }),
+        }).then(async (res) => {
+          if (!res.ok) console.error("run-docsend-capture (attach) failed:", res.status, await res.text());
+        }).catch((e) => console.error("run-docsend-capture (attach) dispatch failed:", e));
+        (globalThis as any).EdgeRuntime?.waitUntil?.(attachCapture);
+        return { attached: true, deal_id: attachDealId, capture: "started", hint: "Poll get_deal: the new deck appears in sources with is_primary=false once captured (a few minutes)." };
+      }
+
       let slugName = "";
       try { slugName = decodeURIComponent(new URL(url).pathname.split("/").filter(Boolean).pop() ?? ""); } catch { /* keep empty */ }
       const dealName = String(args?.name ?? "").trim() || slugName || "Untitled deal";

@@ -219,11 +219,14 @@ Deno.serve(async (req) => {
       .select("ai_model, deep_research_provider")
       .eq("user_id", user.id)
       .single();
+    // Research is anchored on the deal's PRIMARY deck; with several decks
+    // linked, "the latest row" could be an appendix or an old version.
     const { data: latestSource } = await adminClient
       .from("sources")
       .select("extracted_text, preview_images")
       .eq("deal_id", dealId)
       .eq("user_id", user.id)
+      .order("is_primary", { ascending: false })
       .order("created_at", { ascending: false })
       .limit(1)
       .maybeSingle();
