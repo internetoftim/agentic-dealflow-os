@@ -31,4 +31,10 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
+      # Edge functions are redeployed from the GitHub sync a minute or two after
+      # a push. Give that time to land so the suite tests this commit, not the
+      # previous deploy (a new endpoint would otherwise 404 here).
+      - name: Wait for the edge-function deploy
+        if: github.event_name == 'push'
+        run: sleep 180
       - run: npm run test:live
