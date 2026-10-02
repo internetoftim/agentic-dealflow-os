@@ -38,8 +38,9 @@ export interface MessageReport {
   events: IngestEvent[];
 }
 
+import { PROCESSING_STATUSES, hasLiveJob } from "./job-queue.ts";
+
 const GMAIL = "https://gmail.googleapis.com/gmail/v1/users/me";
-const PROCESSING_STATUSES = ["uploading", "converting", "compressing", "scraping", "extracting", "searching-website", "syncing"];
 
 const DECK_EXT = [".pdf", ".pptx", ".ppt"];
 const DOC_EXT = [".xlsx", ".xls", ".csv", ".docx", ".txt", ".md"];
@@ -218,8 +219,10 @@ export async function ingestGmailMessage(ctx: IngestContext, messageId: string):
   // Decks first so documents in the same mail attach to the new deal.
   attachments.sort((a, b) => (a.kind === "deck" ? -1 : 1) - (b.kind === "deck" ? -1 : 1));
 
-  const { data: active } = await adminClient.from("deals").select("id").eq("user_id", userId).in("status", PROCESSING_STATUSES).limit(1);
-  let hasActiveJob = (active?.length ?? 0) > 0;
+  // Only a job that is actually running holds the queue; a zombie stuck in a
+  // processing status for 20+ minutes does not (see _shared/job-queue.ts).
+  const { data: active } = await adminClient.from("deals").select("id, status, updated_at").eq("user_id", userId).in("status", [...PROCESSING_STATUSES]).limit(50);
+  let hasActiveJob = hasLiveJob(active ?? []);
   let dealForDocs: string | null = null;
 
   for (const att of attachments) {

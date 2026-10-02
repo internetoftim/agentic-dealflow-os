@@ -1,6 +1,7 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { getUserGoogleAccessToken } from "../_shared/google-tokens.ts";
 import { pollReceiverAccount, type ReceiverAccount } from "../_shared/gmail-receiver.ts";
+import { healQueues } from "../_shared/queue-heal.ts";
 import { ingestGmailMessage } from "../_shared/gmail-ingest.ts";
 
 const corsHeaders = {
@@ -202,6 +203,20 @@ Deno.serve(async (req) => {
             status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" },
           });
         }
+        // This path starts paid processing for a deal, so it is not open to the
+        // world: the caller must be the service role or the deal's owner.
+        const bearer = (req.headers.get("Authorization") ?? "").replace(/^Bearer\s+/i, "").trim();
+        let allowed = bearer === supabaseServiceKey;
+        if (!allowed && bearer) {
+          const userClient = createClient(supabaseUrl, supabaseAnonKey, { global: { headers: { Authorization: `Bearer ${bearer}` } } });
+          const { data: { user } } = await userClient.auth.getUser();
+          allowed = !!user && user.id === deal.user_id;
+        }
+        if (!allowed) {
+          return new Response(JSON.stringify({ error: "unauthorized" }), {
+            status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" },
+          });
+        }
         const { data: source } = await adminClient
           .from("sources")
           .select("storage_path")
@@ -233,6 +248,17 @@ Deno.serve(async (req) => {
       }
     }
 
+    // ---- Queue reaper. This function is the project's one-minute cron, so it
+    // is where the processing queue heals itself: jobs that died mid-flight are
+    // failed and the next queued deal is started, instead of every later upload
+    // waiting forever behind a zombie. Runs first so slow mail polling cannot
+    // starve it.
+    try {
+      const healed = await healQueues({ adminClient, supabaseUrl, serviceKey: supabaseServiceKey });
+      if (healed.failed || healed.started) console.log(`Queue reaper: failed ${healed.failed} stale job(s), started ${healed.started} queued deal(s)`);
+    } catch (e) {
+      console.error("Queue reaper failed:", e);
+    }
 
     // Fetch all users with gmail_label_enabled and a valid Google token
     const { data: eligibleUsers, error: usersError } = await adminClient

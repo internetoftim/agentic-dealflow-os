@@ -1,4 +1,5 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { PROCESSING_STATUSES, hasLiveJob } from "../_shared/job-queue.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -162,16 +163,16 @@ Deno.serve(async (req) => {
     // Match the in-app uploader's per-user concurrency guard: if a deck job is
     // already running, enqueue this one; process-deck drains the queue when the
     // active job finishes (or fails).
-    const PROCESSING_STATUSES = ["uploading", "converting", "compressing", "scraping", "extracting", "searching-website", "syncing"];
+    // "Running" means recently active: a zombie job does not hold the queue.
     let hasActiveJob = false;
     if (file) {
       const { data: activeDeals } = await adminClient
         .from("deals")
-        .select("id")
+        .select("id, status, updated_at")
         .eq("user_id", userId)
-        .in("status", PROCESSING_STATUSES)
-        .limit(1);
-      hasActiveJob = (activeDeals?.length ?? 0) > 0;
+        .in("status", [...PROCESSING_STATUSES])
+        .limit(50);
+      hasActiveJob = hasLiveJob(activeDeals ?? []);
     }
 
     // Create deal record

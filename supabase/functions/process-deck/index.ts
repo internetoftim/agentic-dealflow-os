@@ -3,6 +3,9 @@ import { createWebResearch } from "../_shared/web-research.ts";
 import { getUserGoogleAccessToken } from "../_shared/google-tokens.ts";
 import { resolveChatProvider } from "../_shared/ai-provider.ts";
 import { pickTargetSource } from "../_shared/deck-sources.ts";
+import { extractPdfTextRobust } from "../_shared/pdf-text.ts";
+import { hasReadableContent, identityUpdate, isPlaceholderName } from "../_shared/deal-identity.ts";
+import { healQueues } from "../_shared/queue-heal.ts";
 import { BlobReader, ZipReader, TextWriter } from "https://esm.sh/@zip.js/zip.js@2.7.34";
 import { PDFDocument } from "https://esm.sh/pdf-lib@1.17.1?bundle-deps";
 
@@ -44,37 +47,10 @@ async function extractPptxText(arrayBuffer: ArrayBuffer): Promise<{ text: string
   return { text: slideTexts.join("\n\n"), pageCount: slideEntries.length };
 }
 
-/** Very basic PDF text extraction. */
-function extractPdfText(arrayBuffer: ArrayBuffer): { text: string; pageCount: number } {
-  const bytes = new Uint8Array(arrayBuffer);
-  const raw = new TextDecoder("latin1").decode(bytes);
-  const pageCount = (raw.match(/\/Type\s*\/Page(?!\s*s)/g) || []).length;
-
-  const textChunks: string[] = [];
-  const btPattern = /BT\s([\s\S]*?)ET/g;
-  let match;
-  while ((match = btPattern.exec(raw)) !== null) {
-    const block = match[1];
-    const tjPattern = /\(([^)]*)\)\s*Tj/g;
-    let tj;
-    while ((tj = tjPattern.exec(block)) !== null) {
-      const text = tj[1].replace(/\\n/g, "\n").replace(/\\\(/g, "(").replace(/\\\)/g, ")");
-      if (text.trim()) textChunks.push(text.trim());
-    }
-    const tjArrayPattern = /\[([^\]]*)\]\s*TJ/g;
-    let tja;
-    while ((tja = tjArrayPattern.exec(block)) !== null) {
-      const inner = tja[1];
-      const strPattern = /\(([^)]*)\)/g;
-      let s;
-      while ((s = strPattern.exec(inner)) !== null) {
-        const text = s[1].replace(/\\n/g, "\n").replace(/\\\(/g, "(").replace(/\\\)/g, ")");
-        if (text.trim()) textChunks.push(text.trim());
-      }
-    }
-  }
-  return { text: textChunks.join(" ").replace(/\s+/g, " ").trim(), pageCount };
-}
+// PDF text extraction lives in _shared/pdf-text.ts (a real PDF.js parser with
+// the old regex reader as fallback). The regex reader alone returned nothing
+// for compressed PDFs — i.e. nearly all of them — which is how deals ended up
+// named "Unknown".
 
 function isCapturedViewerSource(sourceType?: string | null): boolean {
   return CAPTURED_VIEWER_SOURCES.has((sourceType ?? "").toLowerCase());
@@ -125,7 +101,7 @@ async function handleAttachDeck(
       const lower = storagePath.toLowerCase();
       const result = lower.endsWith(".pptx") || lower.endsWith(".ppt")
         ? await extractPptxText(buffer)
-        : extractPdfText(buffer);
+        : await extractPdfTextRobust(buffer);
       if (result.text.length > text.length) text = result.text;
       pages = result.pageCount;
     }
@@ -172,49 +148,14 @@ async function checkAborted(adminClient: any, dealId: string, currentStep: strin
 
 /** After a job finishes or is cancelled, check if there's a queued deal for this user and start it. */
 async function processNextQueued(adminClient: any, userId: string, supabaseUrl: string, supabaseServiceKey: string) {
-  const { data: queued } = await adminClient
-    .from("deals")
-    .select("id")
-    .eq("user_id", userId)
-    .eq("status", "queued")
-    .order("created_at", { ascending: true })
-    .limit(1);
-  
-  if (queued && queued.length > 0) {
-    const nextDeal = queued[0];
-    // Get the source to find storage path
-    const { data: sources } = await adminClient
-      .from("sources")
-      .select("storage_path, source_type")
-      .eq("deal_id", nextDeal.id)
-      .order("created_at", { ascending: false })
-      .limit(1);
-    const nextSource = sources?.[0];
-    const storagePath = nextSource?.storage_path;
-    if (!storagePath) return;
-    const skipCompression = isCapturedViewerSource(nextSource?.source_type);
-
-    // Update status from queued to uploading
-    await adminClient.from("deals").update({ status: "uploading", updated_at: new Date().toISOString() }).eq("id", nextDeal.id);
-
-    // Fire process-deck for the queued deal
-    try {
-      await fetch(`${supabaseUrl}/functions/v1/process-deck`, {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${supabaseServiceKey}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          dealId: nextDeal.id,
-          storagePath,
-          ...(skipCompression ? { skipCompression: true } : {}),
-        }),
-      });
-      console.log(`Started queued deal: ${nextDeal.id}`);
-    } catch (e) {
-      console.warn("Failed to start queued deal:", e);
-    }
+  // Shared with the cron reaper: fails zombie jobs, then starts the oldest
+  // queued deal if nothing is live. The next job is dispatched without being
+  // awaited — awaiting a whole pipeline from inside another one is what got
+  // earlier runs killed mid-flight and left deals stuck in "extracting".
+  try {
+    await healQueues({ adminClient, supabaseUrl, serviceKey: supabaseServiceKey }, userId);
+  } catch (e) {
+    console.warn("Failed to advance the queue:", e);
   }
 }
 
@@ -618,10 +559,10 @@ Deno.serve(async (req) => {
             if (!pdfFile) throw new Error("Cannot download PDF for text extraction");
             return await pdfFile.arrayBuffer();
             })();
-            const result = extractPdfText(pdfBuffer);
+            const result = await extractPdfTextRobust(pdfBuffer);
             extractedText = result.text;
             if (result.pageCount > 0) actualPageCount = result.pageCount;
-            console.log(`Extracted ${extractedText.length} chars from PDF, ${actualPageCount} pages`);
+            console.log(`Extracted ${extractedText.length} chars from PDF via ${result.method}, ${actualPageCount} pages`);
           } catch (e) {
             console.error("Text extraction failed (non-fatal):", e);
           }
@@ -661,9 +602,16 @@ Deno.serve(async (req) => {
         }
       }
 
+      // Nothing a model could read (no text layer and no slide images): asking it
+      // to identify the company just yields "Unknown". Keep the deal's identity.
+      const unreadable = !hasReadableContent(extractedText, previewImages.length);
+      if (unreadable) {
+        console.warn(`Deal ${dealId}: no readable text or slide images — skipping identity extraction, keeping the current name`);
+      }
+
       // For local-florence2 model: skip LLM metadata extraction, use basic heuristic
-      if (isLocalModel) {
-        console.log("Local model selected — skipping LLM metadata extraction, using heuristic");
+      if (isLocalModel || unreadable) {
+        if (isLocalModel) console.log("Local model selected — skipping LLM metadata extraction, using heuristic");
         const updatePayload: Record<string, unknown> = {
           updated_at: new Date().toISOString(),
           pages: actualPageCount > 0 ? actualPageCount : null,
@@ -755,17 +703,15 @@ Deno.serve(async (req) => {
         const metadata = JSON.parse(toolCall.function.arguments);
         console.log("Extracted metadata:", JSON.stringify(metadata));
 
-        const updatePayload: Record<string, unknown> = { updated_at: new Date().toISOString() };
-        if (metadata.startup_name) updatePayload.name = sanitizeCompanyName(metadata.startup_name);
         console.log(`Identity confidence: ${metadata.confidence_score ?? "N/A"}/100`);
+        // A placeholder ("Unknown", "Untitled", …) never replaces a real name,
+        // stage or sector; see _shared/deal-identity.ts.
         // Don't set website from LLM extraction — Step 4 will verify via search + scrape
-        if (metadata.stage) updatePayload.stage = metadata.stage;
-        if (metadata.sector) updatePayload.sector = metadata.sector;
-        if (metadata.ask_amount) updatePayload.ask_amount = metadata.ask_amount;
-        if (metadata.valuation) updatePayload.valuation = metadata.valuation;
-        if (metadata.revenue) updatePayload.revenue = metadata.revenue;
-        if (metadata.growth) updatePayload.growth = metadata.growth;
-        if (metadata.team_size) updatePayload.team_size = metadata.team_size;
+        const { data: identityNow } = await adminClient.from("deals").select("name, stage, sector").eq("id", dealId).single();
+        const updatePayload: Record<string, unknown> = {
+          updated_at: new Date().toISOString(),
+          ...identityUpdate(identityNow ?? {}, metadata, sanitizeCompanyName),
+        };
         updatePayload.pages = actualPageCount > 0 ? actualPageCount : (metadata.page_count ?? null);
 
         await adminClient.from("deals").update(updatePayload).eq("id", dealId);
@@ -821,7 +767,9 @@ Deno.serve(async (req) => {
 
       const { data: currentDeal } = await adminClient.from("deals").select("website, name, sector, stage").eq("id", dealId).single();
 
-      if (currentDeal?.name) {
+      // Searching the web for a company called "Unknown" (or a file name) attaches
+      // someone else's website to the deal; only search for a real name.
+      if (currentDeal?.name && !isPlaceholderName(currentDeal.name)) {
         await setDealStatus(adminClient, dealId, "searching-website");
         await adminClient.from("deals").update({ website_searching: true }).eq("id", dealId);
 

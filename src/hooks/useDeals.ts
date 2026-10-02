@@ -7,6 +7,7 @@ import { extractTextFromPdf, type VisionProgress } from "@/lib/localVision";
 import { useAiModelSetting, useLocalLlm } from "@/contexts/LocalLlmContext";
 import { getPreset } from "@/lib/localModels";
 import { attachedDeckPath, isDeckFileName, DOC_VIEWER_URL } from "@/lib/deckSources";
+import { hasLiveJob } from "@/lib/jobQueue";
 
 export interface Deal {
   id: string;
@@ -278,6 +279,48 @@ export function useAddDeckLinkToDeal() {
   });
 }
 
+/**
+ * Start a queued deal right now. The server reaper does this within a minute
+ * when nothing is running; this is the user's "don't wait" button, and the
+ * escape hatch if the queue is ever wrongly blocked.
+ */
+export function useStartQueuedDeal() {
+  const queryClient = useQueryClient();
+  const { user } = useAuth();
+
+  return useMutation({
+    mutationFn: async ({ dealId }: { dealId: string }) => {
+      if (!user) throw new Error("Not authenticated");
+      const { data: src, error: srcError } = await supabase
+        .from("sources")
+        .select("id, storage_path")
+        .eq("deal_id", dealId)
+        .not("storage_path", "is", null)
+        .order("is_primary", { ascending: false })
+        .order("created_at", { ascending: true })
+        .limit(1)
+        .maybeSingle();
+      if (srcError) throw srcError;
+      if (!src?.storage_path) throw new Error("No stored deck found for this deal");
+
+      const { error: updateError } = await supabase
+        .from("deals")
+        .update({ status: "uploading", paused_at_step: null, updated_at: new Date().toISOString() })
+        .eq("id", dealId);
+      if (updateError) throw updateError;
+
+      // Fire and return: the pipeline reports progress through the deal's status.
+      supabase.functions
+        .invoke("process-deck", { body: { dealId, storagePath: src.storage_path } })
+        .catch((e) => console.warn("Deck processing failed to start:", e));
+      return { dealId };
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["deals"] });
+    },
+  });
+}
+
 /** Promote a deck to be the deal's primary (atomic, owner-only via RLS). */
 export function useSetPrimarySource() {
   const queryClient = useQueryClient();
@@ -504,13 +547,15 @@ export function useCreateDealWithUpload() {
     }) => {
       if (!user) throw new Error("Not authenticated");
 
-      // Check if there's already an active job for this user
+      // Is a job really running for this user? A deal stuck in a processing
+      // status with no activity for 20+ minutes is a zombie, not an active job —
+      // counting those is what left uploads "queued" behind nothing.
       const { data: activeDeals } = await supabase
         .from("deals")
-        .select("id")
+        .select("id, status, updated_at")
         .eq("user_id", user.id)
         .in("status", PROCESSING_STATUSES);
-      const hasActiveJob = (activeDeals?.length ?? 0) > 0;
+      const hasActiveJob = hasLiveJob(activeDeals ?? []);
 
       // Check user's model preference
       const { data: settings } = await supabase

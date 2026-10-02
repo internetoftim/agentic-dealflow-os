@@ -1,8 +1,10 @@
 import { useState, useCallback, useRef, useEffect } from "react";
 import { useSearchParams } from "react-router-dom";
 import { Upload, Link, Cog, Check, Search, Send, FileText, Globe, Layers, Square, Linkedin, Loader2, FileUp, CircleDashed, CircleCheck, Circle, Pause, Clock, Download, Mail, ExternalLink, Users, Trash2, Share2, RotateCcw } from "lucide-react";
-import { useDeals, useSources, useLatestCaptureJob, useCreateDealWithUpload, useProcessDocsend, useRetryDocsendCapture, useRerunWorkflow, useCancelDeal, useDeleteDeal, useAddDeckToDeal, useAddDeckLinkToDeal, useSetPrimarySource, useRemoveSource, WORKFLOW_STEPS, PROCESSING_STATUSES, DOC_VIEWER_SOURCES } from "@/hooks/useDeals";
+import { useDeals, useSources, useLatestCaptureJob, useCreateDealWithUpload, useProcessDocsend, useRetryDocsendCapture, useRerunWorkflow, useCancelDeal, useDeleteDeal, useAddDeckToDeal, useAddDeckLinkToDeal, useSetPrimarySource, useRemoveSource, useStartQueuedDeal, WORKFLOW_STEPS, PROCESSING_STATUSES, DOC_VIEWER_SOURCES } from "@/hooks/useDeals";
 import { AddDeckControl } from "@/components/AddDeckControl";
+import { DealsList } from "@/components/DealsList";
+import { isLiveJob } from "@/lib/jobQueue";
 import { isDeckSource, pickPrimarySource, type DealSource } from "@/lib/deckSources";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
@@ -50,6 +52,10 @@ export default function DealWorkspace() {
   const addDeckLink = useAddDeckLinkToDeal();
   const setPrimarySource = useSetPrimarySource();
   const removeSource = useRemoveSource();
+  const startQueuedDeal = useStartQueuedDeal();
+  // The job a queued deal is actually waiting behind: one of MY deals that is
+  // processing and recently active. Zombies do not count.
+  const runningDeal = (deals ?? []).find((d) => !!user && d.user_id === user.id && isLiveJob(d));
 
   const { data: latestCaptureJob } = useLatestCaptureJob(activeDeal?.id, activeDeal?.source);
   const { addNote } = useDealNotes(activeDeal?.id);
@@ -258,87 +264,9 @@ export default function DealWorkspace() {
 
   return (
     <div className="flex h-[calc(100vh-3.5rem)]">
-      {/* LEFT PANEL — deal list first: it's the primary navigation. */}
+      {/* LEFT PANEL — in order: Add a deal, Loaded Sources, Pipeline Status,
+          then the (collapsible) deals list at the bottom. */}
       <div className="w-[290px] shrink-0 border-r border-border bg-surface-sunken flex flex-col overflow-auto">
-        {deals && deals.length > 0 && (
-          <div className="border-b border-border px-3 py-3">
-            <div className="eyebrow px-1.5 pb-1.5">Deals · {deals.length}</div>
-            <div className="flex flex-col gap-px">
-              {deals.map((d) => (
-                <div
-                  key={d.id}
-                  className={`group flex items-center rounded-[5px] transition-colors ${
-                    activeDeal?.id === d.id
-                      ? "bg-card shadow-surface"
-                      : "hover:bg-accent/60"
-                  }`}
-                >
-                  <button
-                    onClick={() => setSelectedDealId(d.id)}
-                    className="flex-1 min-w-0 text-left px-2.5 py-1.5 flex items-center gap-1.5"
-                  >
-                    <span
-                      className={`h-3.5 w-[2px] rounded-full shrink-0 ${
-                        activeDeal?.id === d.id ? "bg-brand" : "bg-transparent"
-                      }`}
-                    />
-                    <span
-                      className={`truncate text-[12.5px] ${
-                        activeDeal?.id === d.id
-                          ? "font-medium text-foreground"
-                          : "text-muted-foreground group-hover:text-foreground"
-                      }`}
-                    >
-                      {d.name}
-                    </span>
-                    {user && d.user_id !== user.id && (
-                      memberLabel(d.user_id) ? (
-                        <span className="text-[10px] text-muted-foreground shrink-0">
-                          {memberLabel(d.user_id)}
-                        </span>
-                      ) : (
-                        <Share2 className="h-3 w-3 text-muted-foreground shrink-0" aria-label="Shared with you" />
-                      )
-                    )}
-                  </button>
-                  {user && d.user_id === user.id && !PROCESSING_STATUSES.includes(d.status as any) && (
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        toast.promise(
-                          rerunWorkflow.mutateAsync({ dealId: d.id, source: d.source }),
-                          {
-                            loading: `Re-running ${d.name}…`,
-                            success: "Workflow re-started",
-                            error: (err: any) => `Re-run failed: ${err.message}`,
-                          },
-                        );
-                      }}
-                      aria-label={`Re-run workflow for ${d.name}`}
-                      disabled={rerunWorkflow.isPending}
-                      className="opacity-0 group-hover:opacity-100 focus:opacity-100 p-1.5 rounded text-muted-foreground hover:text-foreground transition-opacity"
-                    >
-                      <RotateCcw className="h-3 w-3" />
-                    </button>
-                  )}
-                  {user && d.user_id === user.id && (
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setDealPendingDelete({ id: d.id, name: d.name });
-                      }}
-                      aria-label={`Delete ${d.name}`}
-                      className="opacity-0 group-hover:opacity-100 focus:opacity-100 p-1.5 mr-1 rounded text-muted-foreground hover:text-destructive transition-opacity"
-                    >
-                      <Trash2 className="h-3 w-3" />
-                    </button>
-                  )}
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-
         <div className="flex flex-col gap-5 p-4">
         <div>
           <h2 className="eyebrow mb-2">Add a deal</h2>
@@ -425,9 +353,33 @@ export default function DealWorkspace() {
             <h3 className="eyebrow mb-2">Pipeline Status</h3>
             <div className="rounded-md border border-border bg-card p-3 flex flex-col gap-1.5">
               {activeDeal.status === "queued" ? (
-                <div className="flex items-center gap-2 text-muted-foreground">
-                  <Clock className="h-3.5 w-3.5" />
-                  <span className="text-xs font-medium">Queued — waiting for active job</span>
+                <div className="flex flex-col gap-2">
+                  <div className="flex items-start gap-2 text-muted-foreground">
+                    <Clock className="h-3.5 w-3.5 shrink-0 mt-0.5" />
+                    <span className="text-xs font-medium">
+                      {runningDeal
+                        ? `Queued — starts when “${runningDeal.name}” finishes`
+                        : "Queued — nothing else is running; starting shortly"}
+                    </span>
+                  </div>
+                  {isOwnerOfActive && !runningDeal && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="h-7 text-[11px] gap-1 px-2 w-fit"
+                      onClick={() =>
+                        toast.promise(startQueuedDeal.mutateAsync({ dealId: activeDeal.id }), {
+                          loading: "Starting…",
+                          success: "Processing started",
+                          error: (err: any) => `Couldn't start: ${err.message}`,
+                        })
+                      }
+                      disabled={startQueuedDeal.isPending}
+                    >
+                      {startQueuedDeal.isPending ? <Loader2 className="h-3 w-3 animate-spin" /> : <RotateCcw className="h-3 w-3" />}
+                      Start now
+                    </Button>
+                  )}
                 </div>
               ) : activeDeal.status === "cancelled" ? (
                 <div className="flex flex-col gap-2">
@@ -598,6 +550,24 @@ export default function DealWorkspace() {
         )}
 
         </div>
+
+        <DealsList
+          deals={deals ?? []}
+          activeId={activeDeal?.id}
+          currentUserId={user?.id}
+          onSelect={setSelectedDealId}
+          canRerun={(d) => !PROCESSING_STATUSES.includes(d.status as any)}
+          rerunPending={rerunWorkflow.isPending}
+          memberLabel={memberLabel}
+          onRerun={(d) =>
+            toast.promise(rerunWorkflow.mutateAsync({ dealId: d.id, source: d.source ?? undefined }), {
+              loading: `Re-running ${d.name}…`,
+              success: "Workflow re-started",
+              error: (err: any) => `Re-run failed: ${err.message}`,
+            })
+          }
+          onDelete={(d) => setDealPendingDelete({ id: d.id, name: d.name })}
+        />
       </div>
 
       {/* RIGHT PANEL */}
