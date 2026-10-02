@@ -6,6 +6,8 @@ import { pickTargetSource } from "../_shared/deck-sources.ts";
 import { extractPdfTextRobust } from "../_shared/pdf-text.ts";
 import { hasReadableContent, identityUpdate, isPlaceholderName } from "../_shared/deal-identity.ts";
 import { healQueues } from "../_shared/queue-heal.ts";
+import { logPipelineRun } from "../_shared/run-log.ts";
+import { EXTRACTION_VERSION } from "../_shared/feedback-log.ts";
 import { BlobReader, ZipReader, TextWriter } from "https://esm.sh/@zip.js/zip.js@2.7.34";
 import { PDFDocument } from "https://esm.sh/pdf-lib@1.17.1?bundle-deps";
 
@@ -522,6 +524,9 @@ Deno.serve(async (req) => {
 
       let extractedText = "";
       let actualPageCount = pageCount;
+      // How the text was obtained; logged with the run so extraction quality
+      // can be compared across methods and versions later.
+      let extractionMethod = "none";
       // A deal can hold several decks and documents. Work on the source this
       // run is actually processing (by id, else by storage path, else the
       // primary deck) — never on "the latest row" or on every row.
@@ -540,15 +545,18 @@ Deno.serve(async (req) => {
       // If client already extracted text locally (e.g. Florence-2), load it
       if (localExtracted) {
         extractedText = existingSourceText;
+        extractionMethod = "client";
         console.log(`Using locally-extracted text: ${extractedText.length} chars`);
       } else if (hasStoredCapturedText) {
         extractedText = existingSourceText;
+        extractionMethod = "stored-ocr";
         console.log(`Using stored OCR fallback text: ${extractedText.length} chars`);
       } else {
         // Server-side text extraction
         // For PPTX: prefer Slides API text (most accurate), then PPTX XML, then PDF text
         if (isPptx && slidesApiText.length >= 200) {
           extractedText = slidesApiText;
+          extractionMethod = "slides-api";
           console.log(`Using Slides API text: ${extractedText.length} chars`);
         } else {
           // Try PDF text extraction — download on-demand if not already in memory
@@ -561,6 +569,7 @@ Deno.serve(async (req) => {
             })();
             const result = await extractPdfTextRobust(pdfBuffer);
             extractedText = result.text;
+            extractionMethod = result.method;
             if (result.pageCount > 0) actualPageCount = result.pageCount;
             console.log(`Extracted ${extractedText.length} chars from PDF via ${result.method}, ${actualPageCount} pages`);
           } catch (e) {
@@ -571,6 +580,7 @@ Deno.serve(async (req) => {
           if (isPptx && extractedText.length < 200) {
             if (slidesApiText.length > extractedText.length) {
               extractedText = slidesApiText;
+              extractionMethod = "slides-api";
               console.log(`Using Slides API text (short but best available): ${extractedText.length} chars`);
             } else {
               try {
@@ -580,6 +590,7 @@ Deno.serve(async (req) => {
                   const pptxResult = await extractPptxText(origBuffer);
                   if (pptxResult.text.length > extractedText.length) {
                     extractedText = pptxResult.text;
+                    extractionMethod = "pptx-xml";
                     actualPageCount = pptxResult.pageCount;
                   }
                 }
@@ -622,6 +633,12 @@ Deno.serve(async (req) => {
         };
         // Don't blindly set website from text — Step 4 will verify it via search
         await adminClient.from("deals").update(updatePayload).eq("id", dealId);
+        await logPipelineRun(adminClient, {
+          deal_id: dealId, user_id: userId, stage: "extraction", version: EXTRACTION_VERSION,
+          status: unreadable ? "unreadable" : "skipped",
+          input: { storage_path: storagePath, extraction_method: extractionMethod, local_model: isLocalModel },
+          metrics: { text_chars: extractedText.length, pages: actualPageCount, preview_images: previewImages.length },
+        });
       } else {
         // LLM metadata extraction (cloud models; GLM via NYO by default)
         const provider = resolveChatProvider(model, (k) => Deno.env.get(k));
@@ -719,6 +736,15 @@ Deno.serve(async (req) => {
         updatePayload.pages = actualPageCount > 0 ? actualPageCount : (metadata.page_count ?? null);
 
         await adminClient.from("deals").update(updatePayload).eq("id", dealId);
+        // What the model read, what it said, and what was actually applied. A
+        // later correction by the user is attributed to this run.
+        await logPipelineRun(adminClient, {
+          deal_id: dealId, user_id: userId, stage: "extraction", version: EXTRACTION_VERSION,
+          provider: provider.id, model: provider.model,
+          input: { storage_path: storagePath, extraction_method: extractionMethod, images_sent: supportsMultimodal ? Math.min(previewImages.length, 8) : 0, identity_before: identityNow ?? null },
+          output: { metadata, applied: updatePayload },
+          metrics: { text_chars: extractedText.length, pages: actualPageCount, confidence: metadata.confidence_score ?? null, usage: aiResult.usage ?? null },
+        });
       }
     }
 

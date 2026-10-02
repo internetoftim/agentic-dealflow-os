@@ -1,9 +1,10 @@
 import { useState, useCallback, useRef, useEffect } from "react";
 import { useSearchParams } from "react-router-dom";
-import { Upload, Link, Cog, Check, Search, Send, FileText, Globe, Layers, Square, Linkedin, Loader2, FileUp, CircleDashed, CircleCheck, Circle, Pause, Clock, Download, Mail, ExternalLink, Users, Trash2, Share2, RotateCcw } from "lucide-react";
+import { Upload, Link, Cog, Check, Search, Send, FileText, Globe, Layers, Square, Linkedin, Loader2, FileUp, CircleDashed, CircleCheck, Circle, Pause, Clock, Download, Mail, ExternalLink, Users, Trash2, Share2, RotateCcw, Bot } from "lucide-react";
 import { useDeals, useSources, useLatestCaptureJob, useCreateDealWithUpload, useProcessDocsend, useRetryDocsendCapture, useRerunWorkflow, useCancelDeal, useDeleteDeal, useAddDeckToDeal, useAddDeckLinkToDeal, useSetPrimarySource, useRemoveSource, useStartQueuedDeal, WORKFLOW_STEPS, PROCESSING_STATUSES, DOC_VIEWER_SOURCES } from "@/hooks/useDeals";
 import { AddDeckControl } from "@/components/AddDeckControl";
 import { DealsList } from "@/components/DealsList";
+import { DealAgentPanel } from "@/components/DealAgentPanel";
 import { isLiveJob } from "@/lib/jobQueue";
 import { isDeckSource, pickPrimarySource, type DealSource } from "@/lib/deckSources";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
@@ -31,6 +32,14 @@ export default function DealWorkspace() {
   const [selectedDealId, setSelectedDealId] = useState<string | undefined>();
   const [dealPendingDelete, setDealPendingDelete] = useState<{ id: string; name: string } | null>(null);
   const [shareOpen, setShareOpen] = useState(false);
+  // The deal agent side panel; open by default, remembered per browser.
+  const [agentOpen, setAgentOpen] = useState(() => {
+    try { return window.localStorage.getItem("easyvc.agentPanel.open") !== "0"; } catch { return true; }
+  });
+  const toggleAgent = (open: boolean) => {
+    setAgentOpen(open);
+    try { window.localStorage.setItem("easyvc.agentPanel.open", open ? "1" : "0"); } catch { /* private mode */ }
+  };
   const chatEndRef = useRef<HTMLDivElement>(null);
   const { user } = useAuth();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -594,14 +603,25 @@ export default function DealWorkspace() {
                   )}
                 </p>
               </div>
-              {isOwnerOfActive && (
+              <div className="shrink-0 flex items-center gap-1.5">
                 <button
-                  onClick={() => setShareOpen(true)}
-                  className="shrink-0 inline-flex items-center gap-1.5 rounded-[5px] border border-border bg-background px-2.5 py-1.5 text-[12px] font-medium text-foreground hover:bg-accent transition-colors"
+                  onClick={() => toggleAgent(!agentOpen)}
+                  aria-pressed={agentOpen}
+                  className={`inline-flex items-center gap-1.5 rounded-[5px] border px-2.5 py-1.5 text-[12px] font-medium transition-colors ${
+                    agentOpen ? "border-brand/40 bg-brand-muted text-brand" : "border-border bg-background text-foreground hover:bg-accent"
+                  }`}
                 >
-                  <Share2 className="h-3 w-3" /> Share
+                  <Bot className="h-3 w-3" /> Agent
                 </button>
-              )}
+                {isOwnerOfActive && (
+                  <button
+                    onClick={() => setShareOpen(true)}
+                    className="inline-flex items-center gap-1.5 rounded-[5px] border border-border bg-background px-2.5 py-1.5 text-[12px] font-medium text-foreground hover:bg-accent transition-colors"
+                  >
+                    <Share2 className="h-3 w-3" /> Share
+                  </button>
+                )}
+              </div>
             </div>
 
             {/* Headline figures — tabular so they scan as a column */}
@@ -1130,6 +1150,17 @@ export default function DealWorkspace() {
           )}
         </div>
       </div>
+
+      {/* AGENT PANEL — conversational refinement of the deal's data room. It sits
+          beside every tab so edits show up in Structured Data and Memo as they land. */}
+      {agentOpen && activeDeal && (
+        <DealAgentPanel
+          dealId={activeDeal.id}
+          dealName={activeDeal.name}
+          canEdit={isOwnerOfActive}
+          onClose={() => toggleAgent(false)}
+        />
+      )}
 
       <AlertDialog
         open={!!dealPendingDelete}

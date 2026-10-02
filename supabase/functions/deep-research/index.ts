@@ -1,6 +1,9 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { createWebResearch, findCompanyUrls, tavilyResearchCompany, type CompanyProfile, type SearchResult } from "../_shared/web-research.ts";
 import { resolveChatProvider, effectiveCloudModel } from "../_shared/ai-provider.ts";
+import { filterExcludedArticles, filterExcludedNames, filterExcludedInvestorString, nameKey } from "../_shared/deal-agent-tools.ts";
+import { logPipelineRun } from "../_shared/run-log.ts";
+import { RESEARCH_VERSION } from "../_shared/feedback-log.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -663,13 +666,21 @@ Extract the company's official website URL and LinkedIn company page URL using t
       console.error("News search failed (non-fatal):", e);
     }
 
+    // What the user told the deal agent is not relevant stays out: research
+    // rebuilds these lists on every run, and without this a removed article,
+    // investor or person would simply come back.
+    const exclusions = deal.research_exclusions;
+    const keptArticles = filterExcludedArticles(latestArticles, exclusions);
+    const keptInvestorResearch = filterExcludedNames(investorResearch, exclusions, "investors");
+    investors = filterExcludedInvestorString(investors, exclusions);
+
     // Update deal with research results
     const updatePayload: Record<string, unknown> = {
       deep_research_status: "completed",
       updated_at: new Date().toISOString(),
       research_verification: verification,
-      investor_research: investorResearch,
-      latest_articles: latestArticles,
+      investor_research: keptInvestorResearch,
+      latest_articles: keptArticles,
       deck_preview: deckPreview,
     };
 
@@ -827,9 +838,36 @@ Use web_search to find their names, titles, and LinkedIn profile URLs. Then call
     }
 
     // Store people in deal_people table
+    const peopleFound = people.length;
+    people = filterExcludedNames(people, exclusions, "people");
+
+    // One row per research run: which provider/model/version produced which
+    // articles, investors and people. "Not relevant" feedback from the deal
+    // agent is attributed to this run.
+    await logPipelineRun(adminClient, {
+      deal_id: dealId, user_id: user.id, stage: "research", version: RESEARCH_VERSION,
+      provider, model: aiModel,
+      input: { deal_name: deal.name, sector: deal.sector, stage: deal.stage, known_website: deal.website ?? null, deck_chars: deckTextContext.length },
+      output: {
+        website: research.website ?? null, linkedin_url: research.linkedin_url ?? null, crunchbase_url: crunchbaseUrl,
+        funding_total: fundingTotal, last_funding_round: lastFundingRound, num_employees: numEmployees,
+        investors, articles: keptArticles.map((a) => ({ title: a.title, url: a.url, source: a.source })),
+        people: people.map((p) => ({ name: p.name, title: p.title })),
+      },
+      metrics: {
+        articles_found: latestArticles.length, articles_kept: keptArticles.length,
+        investors_found: investorResearch.length, investors_kept: keptInvestorResearch.length,
+        people_found: peopleFound, people_kept: people.length,
+      },
+    });
     if (people.length > 0) {
-      // Delete existing people for this deal first
-      await adminClient.from("deal_people").delete().eq("deal_id", dealId);
+      // Replace the RESEARCHED people only. People the user added or corrected
+      // through the deal agent (manual = true) are kept, and research does not
+      // add a duplicate of them.
+      const { data: manualPeople } = await adminClient.from("deal_people").select("name").eq("deal_id", dealId).eq("manual", true);
+      const manualNames = new Set((manualPeople ?? []).map((p: { name: string }) => nameKey(p.name)));
+      people = people.filter((p) => !manualNames.has(nameKey(p.name)));
+      await adminClient.from("deal_people").delete().eq("deal_id", dealId).eq("manual", false);
 
       const rows = people.slice(0, 10).map(p => ({
         deal_id: dealId,

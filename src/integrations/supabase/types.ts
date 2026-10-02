@@ -162,6 +162,7 @@ export type Database = {
           deal_id: string
           id: string
           linkedin_url: string | null
+          manual: boolean
           name: string
           title: string | null
           user_id: string
@@ -171,6 +172,7 @@ export type Database = {
           deal_id: string
           id?: string
           linkedin_url?: string | null
+          manual?: boolean
           name: string
           title?: string | null
           user_id: string
@@ -180,11 +182,74 @@ export type Database = {
           deal_id?: string
           id?: string
           linkedin_url?: string | null
+          manual?: boolean
           name?: string
           title?: string | null
           user_id?: string
         }
         Relationships: []
+      }
+      deal_revisions: {
+        Row: {
+          actor: string
+          after: Json
+          before: Json
+          created_at: string
+          deal_id: string
+          id: string
+          reverted_at: string | null
+          reverts: string | null
+          summary: string
+          target: string
+          target_id: string | null
+          tool: string
+          turn_id: string | null
+          user_id: string
+          version: number
+        }
+        Insert: {
+          actor?: string
+          after?: Json
+          before?: Json
+          created_at?: string
+          deal_id: string
+          id?: string
+          reverted_at?: string | null
+          reverts?: string | null
+          summary: string
+          target?: string
+          target_id?: string | null
+          tool: string
+          turn_id?: string | null
+          user_id: string
+          version?: number
+        }
+        Update: {
+          actor?: string
+          after?: Json
+          before?: Json
+          created_at?: string
+          deal_id?: string
+          id?: string
+          reverted_at?: string | null
+          reverts?: string | null
+          summary?: string
+          target?: string
+          target_id?: string | null
+          tool?: string
+          turn_id?: string | null
+          user_id?: string
+          version?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "deal_revisions_deal_id_fkey"
+            columns: ["deal_id"]
+            isOneToOne: false
+            referencedRelation: "deals"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       deal_share_access: {
         Row: {
@@ -282,6 +347,7 @@ export type Database = {
           num_employees: string | null
           pages: number | null
           paused_at_step: string | null
+          research_exclusions: Json
           research_verification: Json | null
           revenue: string | null
           sector: string
@@ -320,6 +386,7 @@ export type Database = {
           num_employees?: string | null
           pages?: number | null
           paused_at_step?: string | null
+          research_exclusions?: Json
           research_verification?: Json | null
           revenue?: string | null
           sector?: string
@@ -358,6 +425,7 @@ export type Database = {
           num_employees?: string | null
           pages?: number | null
           paused_at_step?: string | null
+          research_exclusions?: Json
           research_verification?: Json | null
           revenue?: string | null
           sector?: string

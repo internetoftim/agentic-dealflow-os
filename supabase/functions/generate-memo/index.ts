@@ -2,6 +2,8 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { getUserGoogleAccessToken } from "../_shared/google-tokens.ts";
 import { marked } from "https://esm.sh/marked@15.0.4";
 import { resolveChatProvider, maxTokensParam } from "../_shared/ai-provider.ts";
+import { logPipelineRun } from "../_shared/run-log.ts";
+import { MEMO_VERSION } from "../_shared/feedback-log.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -202,6 +204,14 @@ DEAL CONTEXT:
       .eq("id", dealId);
 
     console.log(`Memo saved (${memoContent.length} chars)`);
+    // Logged so later edits to the memo can be attributed to this run.
+    await logPipelineRun(adminClient, {
+      deal_id: dealId, user_id: userId, stage: "memo", version: MEMO_VERSION,
+      provider: provider.id, model: provider.model,
+      input: { custom_prompt: memoPrompt !== DEFAULT_MEMO_PROMPT, deck_chars: deckContent.length },
+      output: { memo_chars: memoContent.length, memo_head: memoContent.slice(0, 400) },
+      metrics: { usage: aiResult.usage ?? null },
+    });
 
     // Step 5: Upload recap PDF to Google Drive
     let driveFileId: string | null = null;

@@ -36,6 +36,10 @@ verify_jwt = false
 [functions.mcp-server]
 verify_jwt = false
 
+# Deal agent: validates the user's JWT itself and checks deal ownership.
+[functions.deal-agent]
+verify_jwt = false
+
 # Sign in with ChatGPT: browser redirects from auth.openai.com carry no Supabase JWT.
 [functions.siwc-auth]
 verify_jwt = false

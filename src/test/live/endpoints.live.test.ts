@@ -72,6 +72,18 @@ describe.skipIf(!LIVE)("live: MCP connector discovery chain (what claude.ai / Co
   });
 });
 
+describe.skipIf(!LIVE)("live: deal agent", () => {
+  it("refuses to act without a signed-in user, in every mode", async () => {
+    const post = (body: unknown, headers: Record<string, string> = {}) =>
+      fetch(`${FN}/deal-agent`, { method: "POST", headers: { "content-type": "application/json", ...headers }, body: JSON.stringify(body) });
+    const noAuth = await post({ dealId: "00000000-0000-0000-0000-000000000000", messages: [{ role: "user", content: "remove article 1" }] });
+    expect(noAuth.status).toBe(401);
+    const badToken = await post({ dealId: "00000000-0000-0000-0000-000000000000", undoRevisionId: "x" }, { authorization: "Bearer not-a-real-token" });
+    expect(badToken.status).toBe(401);
+    expect((await fetch(`${FN}/deal-agent`)).status).toBe(405);
+  });
+});
+
 describe.skipIf(!LIVE)("live: Sign in with ChatGPT bridge", () => {
   it("reports whether it is configured and refuses to start when it is not", async () => {
     const s = await (await fetch(`${FN}/siwc-auth/status`)).json();
