@@ -163,6 +163,9 @@ describe("deck text extraction", () => {
     expect(pd).toMatch(/\.\.\.identityUpdate\(identityNow \?\? \{\}, metadata, sanitizeCompanyName\)/);
     expect(pd).not.toMatch(/updatePayload\.name = sanitizeCompanyName\(metadata\.startup_name\)/);
     expect(pd).toMatch(/if \(currentDeal\?\.name && !isPlaceholderName\(currentDeal\.name\)\)/);
+    // The compression step must not wipe a page count the extractor found.
+    expect(pd).toMatch(/if \(actualPageCount > 0\) pageCount = actualPageCount;/);
+    expect(pd).not.toMatch(/pages: pageCount \|\| null/);
   });
 });
 

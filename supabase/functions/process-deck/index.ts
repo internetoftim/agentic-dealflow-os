@@ -604,6 +604,10 @@ Deno.serve(async (req) => {
 
       // Nothing a model could read (no text layer and no slide images): asking it
       // to identify the company just yields "Unknown". Keep the deal's identity.
+      // Carry the extracted page count forward: the compression step below
+      // writes `pages` too, and used to overwrite a known count with null.
+      if (actualPageCount > 0) pageCount = actualPageCount;
+
       const unreadable = !hasReadableContent(extractedText, previewImages.length);
       if (unreadable) {
         console.warn(`Deal ${dealId}: no readable text or slide images — skipping identity extraction, keeping the current name`);
@@ -744,14 +748,14 @@ Deno.serve(async (req) => {
           if (compressUploadError) console.warn("Failed to upload compressed PDF:", compressUploadError.message);
           await adminClient.from("deals").update({
             compressed_size: `${(compressedPdf.length / (1024 * 1024)).toFixed(1)}MB`,
-            pages: pageCount || null,
+            ...(pageCount ? { pages: pageCount } : {}),
             updated_at: new Date().toISOString(),
           }).eq("id", dealId);
         } else {
           console.log("Skipping compression — PDF already <= 10MB");
           await adminClient.from("deals").update({
             compressed_size: `${(pdfBytes.length / (1024 * 1024)).toFixed(1)}MB`,
-            pages: pageCount || null,
+            ...(pageCount ? { pages: pageCount } : {}),
             updated_at: new Date().toISOString(),
           }).eq("id", dealId);
         }
