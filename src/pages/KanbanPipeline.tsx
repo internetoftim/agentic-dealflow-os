@@ -55,7 +55,7 @@ function WorkflowProgress({ deal, onCancel, isCancelling }: {
     return (
       <div className="mt-3 flex items-center gap-1.5 text-muted-foreground">
         <Clock className="h-3 w-3" />
-        <span className="text-[11px]">Queued — waiting for active job</span>
+        <span className="text-[11px]">Queued — starts automatically, one deck at a time</span>
       </div>
     );
   }

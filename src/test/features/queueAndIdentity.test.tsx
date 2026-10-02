@@ -228,6 +228,7 @@ describe("Start now on a queued deal", () => {
   it("the workspace explains what a queued deal is waiting for and offers Start now only when nothing is running", () => {
     const page = read("src/pages/DealWorkspace.tsx");
     expect(page).not.toMatch(/Queued — waiting for active job/);
+    expect(read("src/pages/KanbanPipeline.tsx")).not.toMatch(/waiting for active job/);
     expect(page).toMatch(/Queued — starts when/);
     expect(page).toMatch(/Queued — nothing else is running; starting shortly/);
     expect(page).toMatch(/isOwnerOfActive && !runningDeal &&/);
