@@ -1,7 +1,6 @@
 // @vitest-environment jsdom
 import { describe, expect, it, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 
 /**
@@ -17,7 +16,7 @@ describe("ErrorBoundary", () => {
     const spy = vi.spyOn(console, "error").mockImplementation(() => {});
     render(
       <ErrorBoundary>
-        <Boom message="Edge function returned 404: Error, {&quot;code&quot;:&quot;NOT_FOUND&quot;}" />
+        <Boom message={'Edge function returned 404: Error, {"code":"NOT_FOUND"}'} />
       </ErrorBoundary>,
     );
 
@@ -40,7 +39,7 @@ describe("ErrorBoundary", () => {
     );
     const retry = await screen.findByRole("button", { name: /try again/i });
     fail = false;
-    await userEvent.click(retry);
+    fireEvent.click(retry);
     expect(await screen.findByText("Deal pipeline")).toBeInTheDocument();
     spy.mockRestore();
   });
