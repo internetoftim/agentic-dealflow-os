@@ -14,6 +14,83 @@ export type Database = {
   }
   public: {
     Tables: {
+      agent_turns: {
+        Row: {
+          changed: boolean
+          created_at: string
+          deal_id: string
+          error: string | null
+          history: Json
+          id: string
+          latency_ms: number | null
+          model: string | null
+          prompt_version: string
+          provider: string | null
+          rated_at: string | null
+          rating: number | null
+          rating_comment: string | null
+          reply: string | null
+          snapshot: string
+          steps: number
+          tool_calls: Json
+          usage: Json
+          user_id: string
+          user_message: string
+        }
+        Insert: {
+          changed?: boolean
+          created_at?: string
+          deal_id: string
+          error?: string | null
+          history?: Json
+          id?: string
+          latency_ms?: number | null
+          model?: string | null
+          prompt_version: string
+          provider?: string | null
+          rated_at?: string | null
+          rating?: number | null
+          rating_comment?: string | null
+          reply?: string | null
+          snapshot?: string
+          steps?: number
+          tool_calls?: Json
+          usage?: Json
+          user_id: string
+          user_message: string
+        }
+        Update: {
+          changed?: boolean
+          created_at?: string
+          deal_id?: string
+          error?: string | null
+          history?: Json
+          id?: string
+          latency_ms?: number | null
+          model?: string | null
+          prompt_version?: string
+          provider?: string | null
+          rated_at?: string | null
+          rating?: number | null
+          rating_comment?: string | null
+          reply?: string | null
+          snapshot?: string
+          steps?: number
+          tool_calls?: Json
+          usage?: Json
+          user_id?: string
+          user_message?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "agent_turns_deal_id_fkey"
+            columns: ["deal_id"]
+            isOneToOne: false
+            referencedRelation: "deals"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       capture_jobs: {
         Row: {
           attach: boolean
@@ -249,6 +326,27 @@ export type Database = {
             referencedRelation: "deals"
             referencedColumns: ["id"]
           },
+          {
+            foreignKeyName: "deal_revisions_reverts_fkey"
+            columns: ["reverts"]
+            isOneToOne: false
+            referencedRelation: "deal_revisions"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "deal_revisions_turn_id_fkey"
+            columns: ["turn_id"]
+            isOneToOne: false
+            referencedRelation: "agent_turns"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "deal_revisions_turn_id_fkey"
+            columns: ["turn_id"]
+            isOneToOne: false
+            referencedRelation: "rlhf_agent_turns"
+            referencedColumns: ["turn_id"]
+          },
         ]
       }
       deal_share_access: {
@@ -447,6 +545,86 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "teams"
             referencedColumns: ["id"]
+          },
+        ]
+      }
+      feedback_events: {
+        Row: {
+          after: Json | null
+          before: Json | null
+          context: Json
+          created_at: string
+          deal_id: string
+          id: string
+          item: Json
+          kind: string
+          label: string
+          producer: Json
+          reason: string | null
+          revision_id: string | null
+          turn_id: string | null
+          user_id: string
+        }
+        Insert: {
+          after?: Json | null
+          before?: Json | null
+          context?: Json
+          created_at?: string
+          deal_id: string
+          id?: string
+          item?: Json
+          kind: string
+          label: string
+          producer?: Json
+          reason?: string | null
+          revision_id?: string | null
+          turn_id?: string | null
+          user_id: string
+        }
+        Update: {
+          after?: Json | null
+          before?: Json | null
+          context?: Json
+          created_at?: string
+          deal_id?: string
+          id?: string
+          item?: Json
+          kind?: string
+          label?: string
+          producer?: Json
+          reason?: string | null
+          revision_id?: string | null
+          turn_id?: string | null
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "feedback_events_deal_id_fkey"
+            columns: ["deal_id"]
+            isOneToOne: false
+            referencedRelation: "deals"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "feedback_events_revision_id_fkey"
+            columns: ["revision_id"]
+            isOneToOne: false
+            referencedRelation: "deal_revisions"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "feedback_events_turn_id_fkey"
+            columns: ["turn_id"]
+            isOneToOne: false
+            referencedRelation: "agent_turns"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "feedback_events_turn_id_fkey"
+            columns: ["turn_id"]
+            isOneToOne: false
+            referencedRelation: "rlhf_agent_turns"
+            referencedColumns: ["turn_id"]
           },
         ]
       }
@@ -692,6 +870,62 @@ export type Database = {
           user_id?: string
         }
         Relationships: []
+      }
+      pipeline_runs: {
+        Row: {
+          created_at: string
+          deal_id: string
+          error: string | null
+          id: string
+          input: Json
+          metrics: Json
+          model: string | null
+          output: Json
+          provider: string | null
+          stage: string
+          status: string
+          user_id: string
+          version: string
+        }
+        Insert: {
+          created_at?: string
+          deal_id: string
+          error?: string | null
+          id?: string
+          input?: Json
+          metrics?: Json
+          model?: string | null
+          output?: Json
+          provider?: string | null
+          stage: string
+          status?: string
+          user_id: string
+          version: string
+        }
+        Update: {
+          created_at?: string
+          deal_id?: string
+          error?: string | null
+          id?: string
+          input?: Json
+          metrics?: Json
+          model?: string | null
+          output?: Json
+          provider?: string | null
+          stage?: string
+          status?: string
+          user_id?: string
+          version?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "pipeline_runs_deal_id_fkey"
+            columns: ["deal_id"]
+            isOneToOne: false
+            referencedRelation: "deals"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       profiles: {
         Row: {
@@ -1044,10 +1278,105 @@ export type Database = {
       }
     }
     Views: {
-      [_ in never]: never
+      rlhf_agent_turns: {
+        Row: {
+          actions: Json | null
+          changed: boolean | null
+          created_at: string | null
+          deal_id: string | null
+          history: Json | null
+          instruction: string | null
+          model: string | null
+          prompt_version: string | null
+          provider: string | null
+          rating: number | null
+          rating_comment: string | null
+          reply: string | null
+          reverted_changes: number | null
+          reward: number | null
+          reward_source: string | null
+          state: string | null
+          total_changes: number | null
+          turn_id: string | null
+          user_id: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "agent_turns_deal_id_fkey"
+            columns: ["deal_id"]
+            isOneToOne: false
+            referencedRelation: "deals"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      rlhf_item_labels: {
+        Row: {
+          context: Json | null
+          created_at: string | null
+          deal_id: string | null
+          feedback_id: string | null
+          human_value: Json | null
+          item: Json | null
+          kind: string | null
+          label: string | null
+          model_value: Json | null
+          producer_model: string | null
+          producer_provider: string | null
+          producer_run_id: string | null
+          producer_stage: string | null
+          producer_version: string | null
+          reason: string | null
+          user_id: string | null
+        }
+        Insert: {
+          context?: Json | null
+          created_at?: string | null
+          deal_id?: string | null
+          feedback_id?: string | null
+          human_value?: Json | null
+          item?: Json | null
+          kind?: string | null
+          label?: string | null
+          model_value?: Json | null
+          producer_model?: never
+          producer_provider?: never
+          producer_run_id?: never
+          producer_stage?: never
+          producer_version?: never
+          reason?: string | null
+          user_id?: string | null
+        }
+        Update: {
+          context?: Json | null
+          created_at?: string | null
+          deal_id?: string | null
+          feedback_id?: string | null
+          human_value?: Json | null
+          item?: Json | null
+          kind?: string | null
+          label?: string | null
+          model_value?: Json | null
+          producer_model?: never
+          producer_provider?: never
+          producer_run_id?: never
+          producer_stage?: never
+          producer_version?: never
+          reason?: string | null
+          user_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "feedback_events_deal_id_fkey"
+            columns: ["deal_id"]
+            isOneToOne: false
+            referencedRelation: "deals"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
     }
     Functions: {
-      set_primary_source: { Args: { _source_id: string }; Returns: undefined }
       accept_share_token: { Args: { _token: string }; Returns: string }
       can_access_deal: {
         Args: { _deal_id: string; _user_id: string }
@@ -1141,6 +1470,7 @@ export type Database = {
         Args: { _member_user_id: string }
         Returns: undefined
       }
+      set_primary_source: { Args: { _source_id: string }; Returns: undefined }
       sync_my_profile: {
         Args: { _avatar_url: string; _display_name: string; _email: string }
         Returns: {
