@@ -1,15 +1,17 @@
 // @vitest-environment jsdom
 import { describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
+import type { ReactNode } from "react";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 
 /**
  * A backend endpoint can answer 404 ("Requested function was not found") while
  * it is mid-deploy. That must never leave the user staring at a blank page.
  */
-function Boom({ message }: { message: string }) {
+function Boom({ message }: { message: string }): ReactNode {
   throw new Error(message);
 }
+
 
 describe("ErrorBoundary", () => {
   it("keeps the page usable when a service call fails", async () => {
