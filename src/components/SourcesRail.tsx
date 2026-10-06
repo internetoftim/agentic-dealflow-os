@@ -25,6 +25,7 @@ export function SourcesRail({
   onMakePrimary,
   onRemove,
   deal,
+  selectable = true,
 }: {
   sources: SourceRow[];
   selected: Set<string>;
@@ -39,6 +40,8 @@ export function SourcesRail({
   onRemove?: (source: SourceRow) => void;
   /** The deal, for the legacy deal-level Drive id of the primary deck. */
   deal?: { gdrive_file_id?: string | null } | null;
+  /** False when nothing consumes the selection (no chat to ground): plain list. */
+  selectable?: boolean;
 }) {
   const allSelected = sources.length > 0 && sources.every((s) => selected.has(s.id));
   const primaryId = pickPrimarySource(sources as DealSource[])?.id;
@@ -48,7 +51,7 @@ export function SourcesRail({
     <div className="w-[210px] shrink-0 border-r border-border bg-surface-sunken/60 hidden lg:flex flex-col min-h-0">
       <div className="flex items-center justify-between px-3.5 py-2.5 border-b border-border">
         <span className="eyebrow">Sources · {sources.length}</span>
-        {sources.length > 1 && (
+        {selectable && sources.length > 1 && (
           <button
             onClick={onToggleAll}
             className="text-[10px] font-medium text-muted-foreground hover:text-foreground transition-colors"
@@ -65,7 +68,7 @@ export function SourcesRail({
           </p>
         )}
         {sources.map((s) => {
-          const checked = selected.has(s.id);
+          const checked = selectable && selected.has(s.id);
           const isPrimary = s.id === primaryId && isDeckSource(s as DealSource);
           const isDeck = isDeckSource(s as DealSource);
           const processing = s.processing_status === "processing";
@@ -79,16 +82,18 @@ export function SourcesRail({
               }`}
             >
               <button
-                onClick={() => onToggle(s.id)}
+                onClick={() => selectable && onToggle(s.id)}
                 className="flex-1 min-w-0 flex items-start gap-2 px-2 py-1.5 text-left"
               >
-                {checked ? (
+                {!selectable ? (
+                  <FileText className="h-3.5 w-3.5 text-muted-foreground/70 shrink-0 mt-0.5" />
+                ) : checked ? (
                   <CheckSquare className="h-3.5 w-3.5 text-brand shrink-0 mt-0.5" />
                 ) : (
                   <Square className="h-3.5 w-3.5 text-muted-foreground/50 shrink-0 mt-0.5" />
                 )}
                 <span className="min-w-0">
-                  <span className={`block text-[11.5px] leading-snug break-words ${checked ? "text-foreground" : "text-muted-foreground"}`}>
+                  <span className={`block text-[11.5px] leading-snug break-words ${checked || !selectable ? "text-foreground" : "text-muted-foreground"}`}>
                     {s.label ? `${s.label} · ${s.file_name}` : s.file_name}
                   </span>
                   <span className="mt-0.5 flex flex-wrap items-center gap-1">
@@ -151,7 +156,9 @@ export function SourcesRail({
         {sources.length > 0 && (
           <p className="px-1.5 pt-2 text-[10px] text-muted-foreground/70 leading-relaxed">
             <FileText className="h-3 w-3 inline mr-1 align-[-2px]" />
-            Checked sources ground the chat. Nothing checked = all sources.
+            {selectable
+              ? "Checked sources ground the chat. Nothing checked = all sources."
+              : "Every source here grounds the memo and the Deal Agent."}
           </p>
         )}
       </div>

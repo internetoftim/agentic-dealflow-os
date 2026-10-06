@@ -1,6 +1,6 @@
-import { useState, useCallback, useRef, useEffect } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { useSearchParams } from "react-router-dom";
-import { Upload, Link, Cog, Check, Search, Send, FileText, Globe, Layers, Square, Linkedin, Loader2, FileUp, CircleDashed, CircleCheck, Circle, Pause, Clock, Download, Mail, ExternalLink, Users, Trash2, Share2, RotateCcw, Bot } from "lucide-react";
+import { Upload, Link, Cog, Check, Search, FileText, Globe, Layers, Linkedin, Loader2, FileUp, CircleDashed, CircleCheck, Circle, Pause, Clock, Download, Mail, ExternalLink, Users, Trash2, Share2, RotateCcw, Bot } from "lucide-react";
 import { useDeals, useSources, useLatestCaptureJob, useCreateDealWithUpload, useProcessDocsend, useRetryDocsendCapture, useRerunWorkflow, useCancelDeal, useDeleteDeal, useAddDeckToDeal, useAddDeckLinkToDeal, useSetPrimarySource, useRemoveSource, useStartQueuedDeal, WORKFLOW_STEPS, PROCESSING_STATUSES, DOC_VIEWER_SOURCES } from "@/hooks/useDeals";
 import { AddDeckControl } from "@/components/AddDeckControl";
 import { DealsList } from "@/components/DealsList";
@@ -13,7 +13,6 @@ import { isLiveJob } from "@/lib/jobQueue";
 import { isDeckSource, pickPrimarySource, type DealSource } from "@/lib/deckSources";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
-import { useDealChat } from "@/hooks/useDealChat";
 import { useGenerateMemo } from "@/hooks/useGenerateMemo";
 import { toast } from "sonner";
 import ReactMarkdown from "react-markdown";
@@ -24,14 +23,12 @@ import { useAuth } from "@/contexts/AuthContext";
 import { ShareDealDialog } from "@/components/ShareDealDialog";
 import { SourcesRail } from "@/components/SourcesRail";
 import { DealNotesPanel } from "@/components/DealNotesPanel";
-import { useDealNotes } from "@/hooks/useDealNotes";
 import { useTeam } from "@/hooks/useTeam";
 import { useQueryClient } from "@tanstack/react-query";
-const quickActions = ["Extract Cap Table", "Calculate Burn Rate", "Team Background", "Market Size"];
 
 export default function DealWorkspace() {
-  const [activeTab, setActiveTab] = useState<"chat" | "data" | "memo">("chat");
-  const [chatInput, setChatInput] = useState("");
+  // Structured Data opens first: the figures a partner scans before anything else.
+  const [activeTab, setActiveTab] = useState<"data" | "room">("data");
   const [docSendUrl, setDocSendUrl] = useState("");
   const [selectedDealId, setSelectedDealId] = useState<string | undefined>();
   const [dealPendingDelete, setDealPendingDelete] = useState<{ id: string; name: string } | null>(null);
@@ -44,7 +41,6 @@ export default function DealWorkspace() {
     setAgentOpen(open);
     try { window.localStorage.setItem("easyvc.agentPanel.open", open ? "1" : "0"); } catch { /* private mode */ }
   };
-  const chatEndRef = useRef<HTMLDivElement>(null);
   const { user } = useAuth();
   const [searchParams, setSearchParams] = useSearchParams();
   const [selectedSourceIds, setSelectedSourceIds] = useState<Set<string>>(new Set());
@@ -71,8 +67,6 @@ export default function DealWorkspace() {
   const runningDeal = (deals ?? []).find((d) => !!user && d.user_id === user.id && isLiveJob(d));
 
   const { data: latestCaptureJob } = useLatestCaptureJob(activeDeal?.id, activeDeal?.source);
-  const { addNote } = useDealNotes(activeDeal?.id);
-  const { messages, isStreaming, send, stop } = useDealChat(activeDeal?.id, Array.from(selectedSourceIds));
   const isDocViewerDeal = DOC_VIEWER_SOURCES.includes((activeDeal?.source ?? "") as (typeof DOC_VIEWER_SOURCES)[number]);
   const docsendUrl = latestCaptureJob?.url ?? null;
   const isCloudCaptureActive = activeDeal?.status === "scraping" && ["pending", "processing"].includes(latestCaptureJob?.status ?? "");
@@ -106,21 +100,6 @@ export default function DealWorkspace() {
     },
     enabled: !!activeDeal?.id,
   });
-
-  // Auto-scroll chat
-  useEffect(() => {
-    chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages]);
-
-  const handleSend = () => {
-    if (!chatInput.trim()) return;
-    send(chatInput);
-    setChatInput("");
-  };
-
-  const handleQuickAction = (action: string) => {
-    send(action);
-  };
 
   const handleFileDrop = useCallback(
     async (e: React.DragEvent<HTMLLabelElement>) => {
@@ -197,10 +176,12 @@ export default function DealWorkspace() {
     );
   }, [activeDeal?.id, activeDeal?.source, rerunWorkflow]);
 
+  // Two tabs: the structured facts, and the data room with the memo set
+  // beside its sources. Conversation lives in the Deal Agent panel on the
+  // right, which stays open across both.
   const tabs = [
-    { key: "chat" as const, label: "Data Room", icon: Layers },
     { key: "data" as const, label: "Structured Data", icon: Search },
-    { key: "memo" as const, label: "Memo", icon: FileText },
+    { key: "room" as const, label: "Data Room & Memo", icon: Layers },
   ];
 
   const loadedSources = sources ?? [];
@@ -223,7 +204,7 @@ export default function DealWorkspace() {
     if (!activeDeal || !statusSummary?.action) return null;
     switch (statusSummary.action) {
       case "open-memo":
-        return activeTab === "memo" ? null : { label: activeDeal.memo_draft ? "Open memo" : "Go to memo", run: () => setActiveTab("memo"), pending: false };
+        return activeTab === "room" ? null : { label: activeDeal.memo_draft ? "Open memo" : "Go to memo", run: () => setActiveTab("room"), pending: false };
       case "stop":
         return { label: "Stop", run: () => cancelDeal.mutate(activeDeal.id), pending: cancelDeal.isPending };
       case "start":
@@ -874,11 +855,12 @@ export default function DealWorkspace() {
 
         {/* Tab content */}
         <div className="flex-1 flex flex-col overflow-auto">
-          {activeTab === "chat" && (
+          {activeTab === "room" && (
             <div className="flex-1 flex min-h-0">
               <SourcesRail
                 deal={activeDeal}
                 sources={loadedSources as any}
+                selectable={false}
                 selected={selectedSourceIds}
                 onToggle={toggleSource}
                 onToggleAll={toggleAllSources}
@@ -889,94 +871,58 @@ export default function DealWorkspace() {
                 onMakePrimary={handleMakePrimary}
                 onRemove={handleRemoveSource}
               />
-              <div className="flex-1 flex flex-col min-w-0">
-              <div className="flex-1 p-5 space-y-4 overflow-auto">
-                {messages.map((msg, i) => (
-                  <div key={i} className={`group max-w-[80%] ${msg.role === "assistant" ? "" : "ml-auto"}`}>
-                    <div className={`rounded-lg p-3.5 text-sm leading-relaxed ${
-                      msg.role === "assistant"
-                        ? "bg-muted text-foreground"
-                        : "bg-primary text-primary-foreground"
-                    }`}>
-                      {msg.role === "assistant" ? (
-                        <div className="prose prose-sm max-w-none dark:prose-invert">
-                          <ReactMarkdown>{msg.content}</ReactMarkdown>
-                        </div>
+              {/* The memo is the deliverable: it takes the centre, set like a document. */}
+            <div className="flex-1 min-w-0 overflow-auto p-6">
+              {/* The memo is the deliverable — set it like a document, not a card. */}
+              <div className="mx-auto max-w-[46rem] rounded-md border border-border bg-card px-10 py-8">
+                <div className="flex items-start justify-between gap-4 mb-6 pb-4 border-b border-border">
+                  <div>
+                    <p className="eyebrow">Investment Memo</p>
+                    <h3 className="font-serif text-[19px] font-semibold tracking-tight text-foreground mt-1">
+                      {activeDeal?.name ?? "Draft"}
+                    </h3>
+                  </div>
+                  {activeDeal && (
+                    <button
+                      onClick={() => {
+                        if (!activeDeal) return;
+                        toast.promise(
+                          generateMemo.mutateAsync(activeDeal.id),
+                          {
+                            loading: "Generating memo (deep research + AI)…",
+                            success: (data) =>
+                              data.driveFileId
+                                ? `Memo generated & uploaded to Drive as "${data.driveFileName}"`
+                                : "Memo generated successfully!",
+                            error: (err) => `Memo failed: ${err.message}`,
+                          }
+                        );
+                      }}
+                      disabled={generateMemo.isPending}
+                      className="shrink-0 flex items-center gap-1.5 rounded-[5px] bg-primary px-3 py-1.5 text-[12px] font-medium text-primary-foreground hover:opacity-90 transition-opacity disabled:opacity-50"
+                    >
+                      {generateMemo.isPending ? (
+                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
                       ) : (
-                        msg.content
+                        <FileUp className="h-3.5 w-3.5" />
                       )}
-                    </div>
-                    {msg.role === "assistant" && i > 0 && activeDeal && (
-                      <button
-                        onClick={() =>
-                          toast.promise(addNote.mutateAsync(msg.content), {
-                            loading: "Saving note…",
-                            success: "Saved to notes",
-                            error: (e) => e.message,
-                          })
-                        }
-                        className="mt-1 inline-flex items-center gap-1 text-[10.5px] text-muted-foreground opacity-0 group-hover:opacity-100 hover:text-brand transition-all"
-                      >
-                        <FileText className="h-3 w-3" /> Save to notes
-                      </button>
-                    )}
-                  </div>
-                ))}
-                {isStreaming && messages[messages.length - 1]?.role !== "assistant" && (
-                  <div className="max-w-[80%]">
-                    <div className="rounded-lg p-3.5 bg-muted text-foreground">
-                      <div className="flex gap-1">
-                        <span className="h-2 w-2 rounded-full bg-muted-foreground animate-bounce" style={{ animationDelay: "0ms" }} />
-                        <span className="h-2 w-2 rounded-full bg-muted-foreground animate-bounce" style={{ animationDelay: "150ms" }} />
-                        <span className="h-2 w-2 rounded-full bg-muted-foreground animate-bounce" style={{ animationDelay: "300ms" }} />
-                      </div>
-                    </div>
-                  </div>
-                )}
-                <div ref={chatEndRef} />
-              </div>
-              <div className="px-5 pb-2 flex gap-2 flex-wrap">
-                {quickActions.map((a) => (
-                  <button
-                    key={a}
-                    onClick={() => handleQuickAction(a)}
-                    disabled={isStreaming}
-                    className="rounded-full border border-border bg-card px-3 py-1.5 text-xs font-medium text-foreground hover:bg-accent transition-colors disabled:opacity-50"
-                  >
-                    {a}
-                  </button>
-                ))}
-              </div>
-              <div className="px-5 pb-5">
-                <div className="flex items-center gap-2 rounded-lg border border-input bg-card px-3 py-2.5">
-                  <input
-                    type="text"
-                    value={chatInput}
-                    onChange={(e) => setChatInput(e.target.value)}
-                    onKeyDown={(e) => e.key === "Enter" && !e.shiftKey && handleSend()}
-                    placeholder="Ask about the deck…"
-                    className="flex-1 text-sm bg-transparent outline-none placeholder:text-muted-foreground"
-                    disabled={isStreaming}
-                  />
-                  {isStreaming ? (
-                    <button
-                      onClick={stop}
-                      className="p-1.5 rounded-md bg-destructive text-destructive-foreground hover:opacity-90 transition-opacity"
-                    >
-                      <Square className="h-3.5 w-3.5" />
-                    </button>
-                  ) : (
-                    <button
-                      onClick={handleSend}
-                      disabled={!chatInput.trim()}
-                      className="p-1.5 rounded-md bg-primary text-primary-foreground hover:opacity-90 transition-opacity disabled:opacity-50"
-                    >
-                      <Send className="h-3.5 w-3.5" />
+                      {generateMemo.isPending ? "Generating…" : activeDeal.memo_draft ? "Regenerate" : "Generate memo"}
                     </button>
                   )}
                 </div>
+                {activeDeal?.memo_draft ? (
+                  <div className="memo-prose">
+                    <ReactMarkdown>{activeDeal.memo_draft}</ReactMarkdown>
+                  </div>
+                ) : (
+                  <p className="font-serif text-[15px] text-muted-foreground leading-relaxed">
+                    {generateMemo.isPending
+                      ? "Generating memo… This may take a minute."
+                      : "No memo yet. Generate one from the deck, deep research, and your notes."}
+                  </p>
+                )}
               </div>
-              </div>
+            </div>
               <DealNotesPanel
                 dealId={activeDeal?.id}
                 memberLabel={memberLabel}
@@ -1112,24 +1058,6 @@ export default function DealWorkspace() {
                 </div>
               )}
 
-              {activeDeal && Array.isArray((activeDeal as any)?.deck_preview) && (activeDeal as any).deck_preview.length > 0 && (
-                <div className="rounded-md border border-border bg-card p-5 mt-4">
-                  <h3 className="eyebrow mb-4">Deck Preview (Traction / Ask / Team)</h3>
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                    {(activeDeal as any).deck_preview.map((preview: any, idx: number) => (
-                      <div key={`${preview.section}-${idx}`} className="rounded-[5px] border border-border bg-background p-3">
-                        <div className="text-xs uppercase tracking-wide text-muted-foreground mb-1">{preview.section}</div>
-                        <div className="text-xs text-foreground mb-2">{preview.slide > 0 ? `Slide ${preview.slide}` : "Slide not found"}</div>
-                        {preview.preview_image ? (
-                          <img src={preview.preview_image} alt={`${preview.section} slide preview`} className="w-full rounded border border-border mb-2" />
-                        ) : null}
-                        <p className="text-xs text-muted-foreground line-clamp-4">{preview.snippet || "No slide snippet available."}</p>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-
               {/* Key People */}
               {activeDeal && dealPeople && dealPeople.length > 0 && (
                 <div className="rounded-md border border-border bg-card p-5 mt-4">
@@ -1161,59 +1089,6 @@ export default function DealWorkspace() {
                   </div>
                 </div>
               )}
-            </div>
-          )}
-          {activeTab === "memo" && (
-            <div className="p-6">
-              {/* The memo is the deliverable — set it like a document, not a card. */}
-              <div className="mx-auto max-w-[46rem] rounded-md border border-border bg-card px-10 py-8">
-                <div className="flex items-start justify-between gap-4 mb-6 pb-4 border-b border-border">
-                  <div>
-                    <p className="eyebrow">Investment Memo</p>
-                    <h3 className="font-serif text-[19px] font-semibold tracking-tight text-foreground mt-1">
-                      {activeDeal?.name ?? "Draft"}
-                    </h3>
-                  </div>
-                  {activeDeal && (
-                    <button
-                      onClick={() => {
-                        if (!activeDeal) return;
-                        toast.promise(
-                          generateMemo.mutateAsync(activeDeal.id),
-                          {
-                            loading: "Generating memo (deep research + AI)…",
-                            success: (data) =>
-                              data.driveFileId
-                                ? `Memo generated & uploaded to Drive as "${data.driveFileName}"`
-                                : "Memo generated successfully!",
-                            error: (err) => `Memo failed: ${err.message}`,
-                          }
-                        );
-                      }}
-                      disabled={generateMemo.isPending}
-                      className="shrink-0 flex items-center gap-1.5 rounded-[5px] bg-primary px-3 py-1.5 text-[12px] font-medium text-primary-foreground hover:opacity-90 transition-opacity disabled:opacity-50"
-                    >
-                      {generateMemo.isPending ? (
-                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                      ) : (
-                        <FileUp className="h-3.5 w-3.5" />
-                      )}
-                      {generateMemo.isPending ? "Generating…" : activeDeal.memo_draft ? "Regenerate" : "Generate memo"}
-                    </button>
-                  )}
-                </div>
-                {activeDeal?.memo_draft ? (
-                  <div className="memo-prose">
-                    <ReactMarkdown>{activeDeal.memo_draft}</ReactMarkdown>
-                  </div>
-                ) : (
-                  <p className="font-serif text-[15px] text-muted-foreground leading-relaxed">
-                    {generateMemo.isPending
-                      ? "Generating memo… This may take a minute."
-                      : "No memo yet. Generate one from the deck, deep research, and your notes."}
-                  </p>
-                )}
-              </div>
             </div>
           )}
         </div>
