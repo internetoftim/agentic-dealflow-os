@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import { FolderOpen, FileText, Download, Search, ChevronDown, ChevronRight, Loader2 } from "lucide-react";
+import { FolderOpen, FileText, Download, Search, ChevronDown, ChevronRight, Loader2, ExternalLink } from "lucide-react";
+import { sourceDriveUrl } from "@/lib/driveLinks";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { useDeals, useAllSources } from "@/hooks/useDeals";
@@ -124,8 +125,9 @@ export default function DataRoom() {
                   <ul>
                     {files.map((file) => {
                       const kind = sourceKind(file, primaryId);
+                      const driveUrl = sourceDriveUrl(file, deal, primaryId);
                       return (
-                        <li key={file.id} className="grid grid-cols-[1fr_auto_auto_auto] items-center gap-4 px-4 py-2.5 border-b border-border last:border-b-0 hover:bg-accent/40 transition-colors">
+                        <li key={file.id} className="grid grid-cols-[1fr_auto_auto_auto_auto] items-center gap-4 px-4 py-2.5 border-b border-border last:border-b-0 hover:bg-accent/40 transition-colors">
                           <div className="flex items-center gap-2 min-w-0">
                             <FileText className="h-4 w-4 text-muted-foreground shrink-0" />
                             <span className="text-[13px] text-foreground truncate">{file.label ? `${file.label} · ${file.file_name}` : file.file_name}</span>
@@ -139,6 +141,20 @@ export default function DataRoom() {
                           <span className="text-[12px] text-muted-foreground tabular-nums">
                             {file.created_at ? new Date(file.created_at).toLocaleDateString() : "—"}
                           </span>
+                          {driveUrl ? (
+                            <a
+                              href={driveUrl}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              title="Open in Google Drive"
+                              aria-label={`Open ${file.file_name} in Google Drive`}
+                              className="inline-flex items-center gap-1 text-[11.5px] text-muted-foreground hover:text-foreground"
+                            >
+                              <ExternalLink className="h-3.5 w-3.5" /> Drive
+                            </a>
+                          ) : (
+                            <span className="text-[11.5px] text-muted-foreground/40" title="Not synced to Google Drive">—</span>
+                          )}
                           <button
                             onClick={() => download(file)}
                             disabled={!file.storage_path || downloading === file.id}

@@ -163,10 +163,16 @@ describe("edge functions: attaching a deck never disturbs the deal", () => {
     const failCtxAt = pd.indexOf("failCtx = { adminClient, dealId, userId");
     expect(attachAt).toBeGreaterThan(0);
     expect(attachAt).toBeLessThan(failCtxAt);
-    const handler = pd.slice(pd.indexOf("async function handleAttachDeck"), pd.indexOf("/** Helper to update deal status */"));
+    const handler = pd.slice(pd.indexOf("async function handleAttachDeck"), pd.indexOf("async function syncAttachedDeckToDrive"));
     expect(handler).not.toMatch(/setDealStatus|status: "error"[\s\S]*from\("deals"\)/);
-    expect(handler).not.toMatch(/deep-research|sync-to-drive|updatePayload\.name/);
+    expect(handler).not.toMatch(/deep-research|updatePayload\.name/);
     expect(handler).toMatch(/\.eq\("id", source\.id\)/);
+    // Drive sync of an attached deck goes through the attach-aware path only,
+    // which never touches the deal's status or its primary Drive id.
+    const driveSync = pd.slice(pd.indexOf("async function syncAttachedDeckToDrive"), pd.indexOf("/** Helper to update deal status */"));
+    expect(driveSync).toMatch(/attach: true/);
+    expect(driveSync).toMatch(/sourceId: args\.sourceId/);
+    expect(driveSync).not.toMatch(/from\("deals"\)\.update/);
   });
 
   it("process-deck writes extracted text to ONE source, not every source of the deal", () => {

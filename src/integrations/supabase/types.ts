@@ -1069,6 +1069,8 @@ export type Database = {
           file_name: string
           gmail_message_id: string | null
           id: string
+          gdrive_file_id: string | null
+          drive_synced_at: string | null
           is_primary: boolean
           label: string | null
           original_size: string | null
@@ -1087,6 +1089,8 @@ export type Database = {
           file_name: string
           gmail_message_id?: string | null
           id?: string
+          gdrive_file_id?: string | null
+          drive_synced_at?: string | null
           is_primary?: boolean
           label?: string | null
           original_size?: string | null
@@ -1105,6 +1109,8 @@ export type Database = {
           file_name?: string
           gmail_message_id?: string | null
           id?: string
+          gdrive_file_id?: string | null
+          drive_synced_at?: string | null
           is_primary?: boolean
           label?: string | null
           original_size?: string | null

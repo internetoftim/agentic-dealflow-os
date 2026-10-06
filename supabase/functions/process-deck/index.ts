@@ -116,13 +116,56 @@ async function handleAttachDeck(
       .eq("id", source.id);
     await adminClient.from("deals").update({ updated_at: new Date().toISOString() }).eq("id", args.dealId);
 
+    // Every deck linked to a deal gets its own copy in Drive (when sync is on),
+    // so the partner can open any version from Drive, not just the primary.
+    const driveFileId = await syncAttachedDeckToDrive(adminClient, { ...args, storagePath, sourceId: source.id });
+
     console.log(`Attached deck ${source.id} to deal ${args.dealId}: ${text.length} chars, ${pages} pages`);
-    return json({ success: true, attached: true, sourceId: source.id, chars: text.length, pages });
+    return json({ success: true, attached: true, sourceId: source.id, chars: text.length, pages, driveFileId });
   } catch (e) {
     const message = e instanceof Error ? e.message : "Unknown error";
     console.error("attach deck failed:", message);
     await adminClient.from("sources").update({ processing_status: "error" }).eq("id", source.id);
     return json({ error: message, attached: false, sourceId: source.id }, 500);
+  }
+}
+
+/**
+ * Drive sync for an attached deck. Best effort: sync-to-drive is told
+ * attach=true so it links the file to the source row and leaves the deal's
+ * status and primary Drive id alone. Returns the Drive file id, or null.
+ */
+async function syncAttachedDeckToDrive(
+  adminClient: any,
+  args: { dealId: string; userId: string; storagePath: string; sourceId: string },
+): Promise<string | null> {
+  try {
+    const { data: settings } = await adminClient
+      .from("user_settings").select("drive_sync_enabled").eq("user_id", args.userId).maybeSingle();
+    if (!settings?.drive_sync_enabled) return null;
+    const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
+    const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+    const response = await fetch(`${supabaseUrl}/functions/v1/sync-to-drive`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${serviceKey}`, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        dealId: args.dealId,
+        userId: args.userId,
+        storagePath: args.storagePath,
+        fileName: args.storagePath.split("/").pop() ?? "deck.pdf",
+        sourceId: args.sourceId,
+        attach: true,
+      }),
+    });
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok || !result?.driveFileId) {
+      console.warn("attached deck Drive sync skipped:", result?.error ?? response.status);
+      return null;
+    }
+    return result.driveFileId as string;
+  } catch (e) {
+    console.warn("attached deck Drive sync skipped:", e instanceof Error ? e.message : e);
+    return null;
   }
 }
 

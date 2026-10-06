@@ -1,4 +1,5 @@
-import { FileText, CheckSquare, Square, Star, Trash2, Loader2 } from "lucide-react";
+import { FileText, CheckSquare, Square, Star, Trash2, Loader2, ExternalLink } from "lucide-react";
+import { sourceDriveUrl } from "@/lib/driveLinks";
 import { AddDeckControl } from "@/components/AddDeckControl";
 import { isDeckSource, pickPrimarySource, type DealSource } from "@/lib/deckSources";
 
@@ -23,6 +24,7 @@ export function SourcesRail({
   onAddLink,
   onMakePrimary,
   onRemove,
+  deal,
 }: {
   sources: SourceRow[];
   selected: Set<string>;
@@ -35,6 +37,8 @@ export function SourcesRail({
   onAddLink?: (url: string) => void;
   onMakePrimary?: (source: SourceRow) => void;
   onRemove?: (source: SourceRow) => void;
+  /** The deal, for the legacy deal-level Drive id of the primary deck. */
+  deal?: { gdrive_file_id?: string | null } | null;
 }) {
   const allSelected = sources.length > 0 && sources.every((s) => selected.has(s.id));
   const primaryId = pickPrimarySource(sources as DealSource[])?.id;
@@ -66,6 +70,7 @@ export function SourcesRail({
           const isDeck = isDeckSource(s as DealSource);
           const processing = s.processing_status === "processing";
           const failed = s.processing_status === "error";
+          const driveUrl = sourceDriveUrl(s, deal, primaryId);
           return (
             <div
               key={s.id}
@@ -96,6 +101,18 @@ export function SourcesRail({
                       </span>
                     )}
                     {failed && <span className="text-[9.5px] text-destructive">Couldn't read</span>}
+                    {driveUrl && (
+                      <a
+                        href={driveUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        onClick={(e) => e.stopPropagation()}
+                        aria-label={`Open ${s.file_name} in Google Drive`}
+                        className="inline-flex items-center gap-0.5 text-[9.5px] text-muted-foreground hover:text-foreground"
+                      >
+                        <ExternalLink className="h-2.5 w-2.5" /> Drive
+                      </a>
+                    )}
                   </span>
                 </span>
               </button>

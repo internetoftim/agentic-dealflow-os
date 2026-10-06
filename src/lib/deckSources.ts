@@ -30,6 +30,9 @@ export type DealSource = {
   processing_status?: string | null;
   is_primary?: boolean | null;
   label?: string | null;
+  /** This deck's own copy in Google Drive (each linked deck is synced). */
+  gdrive_file_id?: string | null;
+  drive_synced_at?: string | null;
   created_at?: string | null;
 };
 

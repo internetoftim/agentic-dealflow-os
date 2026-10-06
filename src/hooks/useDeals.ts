@@ -175,7 +175,7 @@ export function useSources(dealId?: string) {
 }
 
 export const SOURCE_LIST_COLUMNS =
-  "id, deal_id, user_id, file_name, original_size, compressed_size, storage_path, source_type, processing_status, gmail_message_id, content_hash, is_primary, label, created_at";
+  "id, deal_id, user_id, file_name, original_size, compressed_size, storage_path, source_type, processing_status, gmail_message_id, content_hash, is_primary, label, gdrive_file_id, drive_synced_at, created_at";
 
 /** Every source the user can see, across deals — the Data Room. */
 export function useAllSources() {

@@ -75,6 +75,12 @@ Deno.serve(async (req) => {
 
     const body = await req.json();
     const { dealId, storagePath, fileName } = body;
+    // A deal can hold several decks; each gets its own copy in Drive. sourceId
+    // names the source row that should remember the Drive file. attach=true
+    // means an additional deck: it is uploaded and linked but never changes
+    // the deal's status or the deal-level (primary) Drive id.
+    const sourceId: string | null = typeof body.sourceId === "string" ? body.sourceId : null;
+    const attach: boolean = body.attach === true;
 
     if (isServiceRole) {
       // Called from process-deck with service role — userId must be in body
@@ -234,13 +240,23 @@ Deno.serve(async (req) => {
 
     const driveFile = await driveRes.json();
 
-    await adminClient
-      .from("deals")
-      .update({ gdrive_file_id: driveFile.id, status: "memo-ready" })
-      .eq("id", dealId);
+    // Remember the Drive copy on the source row (the deck that was uploaded).
+    // Without an explicit sourceId, the row stored at this path is the one.
+    const syncedAt = new Date().toISOString();
+    let sourceQuery = adminClient.from("sources").update({ gdrive_file_id: driveFile.id, drive_synced_at: syncedAt }).eq("deal_id", dealId);
+    sourceQuery = sourceId ? sourceQuery.eq("id", sourceId) : sourceQuery.eq("storage_path", storagePath);
+    const { error: sourceError } = await sourceQuery;
+    if (sourceError) console.warn("sync-to-drive: source row not updated:", sourceError.message);
+
+    if (!attach) {
+      await adminClient
+        .from("deals")
+        .update({ gdrive_file_id: driveFile.id, status: "memo-ready" })
+        .eq("id", dealId);
+    }
 
     return new Response(
-      JSON.stringify({ success: true, driveFileId: driveFile.id, driveFileName }),
+      JSON.stringify({ success: true, driveFileId: driveFile.id, driveFileName, sourceId, attach }),
       { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
   } catch (error) {

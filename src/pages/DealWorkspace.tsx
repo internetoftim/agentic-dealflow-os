@@ -5,6 +5,10 @@ import { useDeals, useSources, useLatestCaptureJob, useCreateDealWithUpload, use
 import { AddDeckControl } from "@/components/AddDeckControl";
 import { DealsList } from "@/components/DealsList";
 import { DealAgentPanel } from "@/components/DealAgentPanel";
+import { DeckFilesMenu } from "@/components/DeckFilesMenu";
+import { DealStatusBanner } from "@/components/DealStatusBanner";
+import { summarizeDealStatus } from "@/lib/dealStatus";
+import { downloadSourceFile, sourceDriveUrl } from "@/lib/driveLinks";
 import { isLiveJob } from "@/lib/jobQueue";
 import { isDeckSource, pickPrimarySource, type DealSource } from "@/lib/deckSources";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
@@ -205,6 +209,44 @@ export default function DealWorkspace() {
   const deckCount = (loadedSources as DealSource[]).filter(isDeckSource).length;
   const addingDeck = addDeck.isPending || addDeckLink.isPending;
 
+  // One-glance status for the header: what state the deal is in and the one
+  // action that matters now.
+  const statusSummary = activeDeal
+    ? summarizeDealStatus(activeDeal, {
+        captureFailed: isCloudCaptureFailed,
+        captureError: captureFailureMessage,
+        runningDealName: runningDeal && runningDeal.id !== activeDeal.id ? runningDeal.name : null,
+        canRetryCapture: !!latestCaptureJob?.url,
+      })
+    : null;
+  const statusAction = (() => {
+    if (!activeDeal || !statusSummary?.action) return null;
+    switch (statusSummary.action) {
+      case "open-memo":
+        return activeTab === "memo" ? null : { label: activeDeal.memo_draft ? "Open memo" : "Go to memo", run: () => setActiveTab("memo"), pending: false };
+      case "stop":
+        return { label: "Stop", run: () => cancelDeal.mutate(activeDeal.id), pending: cancelDeal.isPending };
+      case "start":
+        return isOwnerOfActive
+          ? {
+              label: "Start now",
+              pending: startQueuedDeal.isPending,
+              run: () =>
+                toast.promise(startQueuedDeal.mutateAsync({ dealId: activeDeal.id }), {
+                  loading: "Starting…",
+                  success: "Processing started",
+                  error: (err: any) => `Couldn't start: ${err.message}`,
+                }),
+            }
+          : null;
+      case "retry-capture":
+        return { label: "Retry capture", run: handleRetryCapture, pending: retryDocsendCapture.isPending };
+      case "rerun":
+        return isOwnerOfActive ? { label: "Re-run workflow", run: handleRerunWorkflow, pending: rerunWorkflow.isPending } : null;
+    }
+  })();
+  const pipelineDone = !!activeDeal && (statusSummary?.tone === "ready");
+
   const handleAddDeckFile = (file: File) => {
     if (!activeDeal) return;
     toast.promise(addDeck.mutateAsync({ dealId: activeDeal.id, file }), {
@@ -321,7 +363,9 @@ export default function DealWorkspace() {
             {loadedSources.length === 0 && (
               <p className="text-xs text-muted-foreground">No sources uploaded yet.</p>
             )}
-            {loadedSources.map((src: any) => (
+            {loadedSources.map((src: any) => {
+              const driveUrl = sourceDriveUrl(src, activeDeal, primarySource?.id);
+              return (
               <div key={src.id} className="rounded-md border border-border bg-card p-3">
                 <div className="flex items-center gap-2 mb-1">
                   <FileText className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
@@ -329,6 +373,30 @@ export default function DealWorkspace() {
                   {deckCount > 1 && src.id === primarySource?.id && (
                     <span className="shrink-0 rounded-full bg-brand-muted px-1.5 py-px text-[9.5px] font-medium text-brand">Primary</span>
                   )}
+                  <span className="ml-auto flex shrink-0 items-center gap-1">
+                    {src.storage_path && (
+                      <button
+                        onClick={() => downloadSourceFile(src).catch((e) => toast.error(`Couldn't download: ${e.message}`))}
+                        title="Download"
+                        aria-label={`Download ${src.file_name}`}
+                        className="text-muted-foreground hover:text-foreground"
+                      >
+                        <Download className="h-3 w-3" />
+                      </button>
+                    )}
+                    {driveUrl && (
+                      <a
+                        href={driveUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        title="Open in Google Drive"
+                        aria-label={`Open ${src.file_name} in Google Drive`}
+                        className="text-muted-foreground hover:text-foreground"
+                      >
+                        <ExternalLink className="h-3 w-3" />
+                      </a>
+                    )}
+                  </span>
                 </div>
                 {src.processing_status === "error" ? (
                   <span className="text-[11px] text-destructive">Couldn't read this file</span>
@@ -349,7 +417,8 @@ export default function DealWorkspace() {
                   </span>
                 )}
               </div>
-            ))}
+              );
+            })}
             {activeDeal && isOwnerOfActive && loadedSources.length > 0 && (
               <AddDeckControl onAddFile={handleAddDeckFile} onAddLink={handleAddDeckLink} busy={addingDeck} />
             )}
@@ -360,7 +429,13 @@ export default function DealWorkspace() {
         {activeDeal && (
           <div>
             <h3 className="eyebrow mb-2">Pipeline Status</h3>
-            <div className="rounded-md border border-border bg-card p-3 flex flex-col gap-1.5">
+            <div className={`rounded-md border border-border bg-card p-3 flex flex-col gap-1.5 ${pipelineDone ? "opacity-80" : ""}`}>
+              {pipelineDone && (
+                <div className="flex items-center gap-2 text-success">
+                  <Check className="h-3.5 w-3.5 shrink-0" />
+                  <span className="text-xs font-medium">All steps complete</span>
+                </div>
+              )}
               {activeDeal.status === "queued" ? (
                 <div className="flex flex-col gap-2">
                   <div className="flex items-start gap-2 text-muted-foreground">
@@ -604,6 +679,7 @@ export default function DealWorkspace() {
                 </p>
               </div>
               <div className="shrink-0 flex items-center gap-1.5">
+                <DeckFilesMenu sources={loadedSources as DealSource[]} deal={activeDeal} />
                 <button
                   onClick={() => toggleAgent(!agentOpen)}
                   aria-pressed={agentOpen}
@@ -623,6 +699,15 @@ export default function DealWorkspace() {
                 )}
               </div>
             </div>
+
+            {statusSummary && (
+              <DealStatusBanner
+                summary={statusSummary}
+                actionLabel={statusAction?.label}
+                onAction={statusAction?.run}
+                actionPending={statusAction?.pending}
+              />
+            )}
 
             {/* Headline figures — tabular so they scan as a column */}
             {(() => {
@@ -666,28 +751,10 @@ export default function DealWorkspace() {
           <span className="inline-flex items-center gap-1.5">
             <FileText className="h-3 w-3" /> {activeDeal?.pages ?? "—"} pages
           </span>
-          {/* Download raw file */}
-          {primarySource?.storage_path && (
-            <button
-              onClick={async () => {
-                // With several decks linked, "the deck" is the primary one.
-                const path = primarySource.storage_path!;
-                const { data, error } = await supabase.storage.from("decks").download(path);
-                if (error || !data) {
-                  toast.error("Failed to download deck");
-                  return;
-                }
-                const url = URL.createObjectURL(data);
-                const a = document.createElement("a");
-                a.href = url;
-                a.download = primarySource.file_name || "deck.pdf";
-                a.click();
-                URL.revokeObjectURL(url);
-              }}
-              className="inline-flex items-center gap-1.5 hover:text-foreground transition-colors"
-            >
-              <Download className="h-3 w-3" /> Download deck
-            </button>
+          {deckCount > 1 && (
+            <span className="inline-flex items-center gap-1.5">
+              <Layers className="h-3 w-3" /> {deckCount} decks linked
+            </span>
           )}
           {/* Doc viewer source link */}
           {isDocViewerDeal && docsendUrl && (
@@ -772,7 +839,7 @@ export default function DealWorkspace() {
               rel="noopener noreferrer"
               className="inline-flex items-center gap-1.5 hover:text-foreground transition-colors"
             >
-              <Check className="h-3 w-3 text-success" /> Synced to Drive
+              <Check className="h-3 w-3 text-success" /> {deckCount > 1 ? "Primary deck in Drive" : "Synced to Drive"}
             </a>
           )}
         </div>
@@ -810,6 +877,7 @@ export default function DealWorkspace() {
           {activeTab === "chat" && (
             <div className="flex-1 flex min-h-0">
               <SourcesRail
+                deal={activeDeal}
                 sources={loadedSources as any}
                 selected={selectedSourceIds}
                 onToggle={toggleSource}
