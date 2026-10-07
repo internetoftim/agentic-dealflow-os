@@ -79,7 +79,7 @@ export default function AcceptShare() {
           {info?.owner_display_name} shared a deal with you
         </h1>
         <p className="text-sm text-muted-foreground">
-          You've been invited to view <span className="font-medium text-foreground">"{info?.deal_name}"</span> on EasyVC. You'll be able to view all its information and use its chat.
+          You've been invited to view <span className="font-medium text-foreground">"{info?.deal_name}"</span> on EasyVC. You'll be able to view all its information, download its decks, and open its Google Drive files (deck copies and the memo PDF) with view access.
         </p>
         {!user ? (
           <Button onClick={() => signInWithGoogle(window.location.pathname)} className="w-full">

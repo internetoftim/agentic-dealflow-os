@@ -40,6 +40,11 @@ verify_jwt = false
 [functions.deal-agent]
 verify_jwt = false
 
+# Deal sharing → Google Drive permissions: validates the JWT itself (owner,
+# collaborator, or service role from sync-to-drive / generate-memo).
+[functions.deal-share-drive]
+verify_jwt = false
+
 # Sign in with ChatGPT: browser redirects from auth.openai.com carry no Supabase JWT.
 [functions.siwc-auth]
 verify_jwt = false

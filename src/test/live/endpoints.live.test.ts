@@ -84,6 +84,16 @@ describe.skipIf(!LIVE)("live: deal agent", () => {
   });
 });
 
+describe.skipIf(!LIVE)("live: deal sharing → Google Drive access", () => {
+  it("refuses to touch Drive permissions without a signed-in user", async () => {
+    const post = (headers: Record<string, string> = {}) =>
+      fetch(`${FN}/deal-share-drive`, { method: "POST", headers: { "content-type": "application/json", ...headers }, body: JSON.stringify({ dealId: "00000000-0000-0000-0000-000000000000", revokeAccessId: "x" }) });
+    expect((await post()).status).toBe(401);
+    expect((await post({ authorization: "Bearer not-a-real-token" })).status).toBe(401);
+    expect((await fetch(`${FN}/deal-share-drive`)).status).toBe(405);
+  });
+});
+
 describe.skipIf(!LIVE)("live: Sign in with ChatGPT bridge", () => {
   it("reports whether it is configured and refuses to start when it is not", async () => {
     const s = await (await fetch(`${FN}/siwc-auth/status`)).json();

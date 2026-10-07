@@ -390,6 +390,57 @@ export type Database = {
           },
         ]
       }
+      deal_share_drive_grants: {
+        Row: {
+          access_id: string
+          created_at: string
+          deal_id: string
+          drive_file_id: string
+          error: string | null
+          granted_at: string | null
+          id: string
+          owner_id: string
+          permission_id: string | null
+          recipient_email: string | null
+          recipient_id: string
+          revoked_at: string | null
+          status: string
+          updated_at: string
+        }
+        Insert: {
+          access_id: string
+          created_at?: string
+          deal_id: string
+          drive_file_id: string
+          error?: string | null
+          granted_at?: string | null
+          id?: string
+          owner_id: string
+          permission_id?: string | null
+          recipient_email?: string | null
+          recipient_id: string
+          revoked_at?: string | null
+          status?: string
+          updated_at?: string
+        }
+        Update: {
+          access_id?: string
+          created_at?: string
+          deal_id?: string
+          drive_file_id?: string
+          error?: string | null
+          granted_at?: string | null
+          id?: string
+          owner_id?: string
+          permission_id?: string | null
+          recipient_email?: string | null
+          recipient_id?: string
+          revoked_at?: string | null
+          status?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
       deal_shares: {
         Row: {
           created_at: string
@@ -432,6 +483,7 @@ export type Database = {
           deep_research_status: string
           funding_total: string | null
           gdrive_file_id: string | null
+          memo_gdrive_file_id: string | null
           growth: string | null
           id: string
           investor_research: Json | null
@@ -471,6 +523,7 @@ export type Database = {
           deep_research_status?: string
           funding_total?: string | null
           gdrive_file_id?: string | null
+          memo_gdrive_file_id?: string | null
           growth?: string | null
           id?: string
           investor_research?: Json | null
@@ -510,6 +563,7 @@ export type Database = {
           deep_research_status?: string
           funding_total?: string | null
           gdrive_file_id?: string | null
+          memo_gdrive_file_id?: string | null
           growth?: string | null
           id?: string
           investor_research?: Json | null

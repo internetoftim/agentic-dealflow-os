@@ -25,6 +25,41 @@ export interface DealShareAccess {
   recipient_email?: string | null;
 }
 
+/** One collaborator's view permission on one Drive file of the deal. */
+export interface DealShareDriveGrant {
+  id: string;
+  access_id: string;
+  recipient_id: string;
+  recipient_email: string | null;
+  drive_file_id: string;
+  status: "pending" | "granted" | "failed" | "revoked";
+  error: string | null;
+  granted_at: string | null;
+}
+
+export type DriveSyncResult = {
+  success?: boolean;
+  files?: number;
+  granted?: number;
+  revoked?: number;
+  failed?: number;
+  driveConnected?: boolean;
+  error?: string;
+};
+
+/**
+ * Brings the deal's Google Drive permissions in line with who it is shared
+ * with (idempotent). Optionally revokes one collaborator first, which also
+ * removes their Drive access.
+ */
+export async function syncDealDriveAccess(dealId: string, revokeAccessId?: string): Promise<DriveSyncResult> {
+  const { data, error } = await supabase.functions.invoke("deal-share-drive", {
+    body: revokeAccessId ? { dealId, revokeAccessId } : { dealId },
+  });
+  if (error) throw error;
+  return (data ?? {}) as DriveSyncResult;
+}
+
 function buildShareUrl(token: string) {
   return `${window.location.origin}/share/${token}`;
 }
@@ -132,16 +167,18 @@ export function useDealShareAccessList(dealId?: string, ownerId?: string) {
     enabled: !!user && !!dealId && isOwner,
   });
 
+  // Revoking goes through the server so the collaborator's Drive permissions
+  // are removed together with their EasyVC access.
   const revokeAccessMutation = useMutation({
     mutationFn: async (accessId: string) => {
-      const { error } = await supabase
-        .from("deal_share_access")
-        .update({ revoked_at: new Date().toISOString() })
-        .eq("id", accessId);
-      if (error) throw error;
+      if (!dealId) throw new Error("Missing deal");
+      const result = await syncDealDriveAccess(dealId, accessId);
+      if (result.error) throw new Error(result.error);
+      return result;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["deal-share-access", dealId] });
+      queryClient.invalidateQueries({ queryKey: ["deal-share-drive", dealId] });
     },
   });
 
@@ -151,6 +188,41 @@ export function useDealShareAccessList(dealId?: string, ownerId?: string) {
     revokeAccess: revokeAccessMutation.mutateAsync,
     isRevoking: revokeAccessMutation.isPending,
   };
+}
+
+/** Drive permissions granted to the deal's collaborators (owner view). */
+export function useDealShareDriveGrants(dealId?: string, ownerId?: string, enabled = true) {
+  const { user } = useAuth();
+  const queryClient = useQueryClient();
+  const isOwner = !!user && !!ownerId && user.id === ownerId;
+
+  const grants = useQuery({
+    queryKey: ["deal-share-drive", dealId],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("deal_share_drive_grants")
+        .select("id, access_id, recipient_id, recipient_email, drive_file_id, status, error, granted_at")
+        .eq("deal_id", dealId!);
+      if (error) throw error;
+      return (data ?? []) as DealShareDriveGrant[];
+    },
+    enabled: !!dealId && isOwner && enabled,
+  });
+
+  const sync = useMutation({
+    mutationFn: () => syncDealDriveAccess(dealId!),
+    onSettled: () => queryClient.invalidateQueries({ queryKey: ["deal-share-drive", dealId] }),
+  });
+
+  return { grants: grants.data ?? [], isLoading: grants.isLoading, sync: sync.mutateAsync, isSyncing: sync.isPending, lastSync: sync.data };
+}
+
+/** Summary of one collaborator's Drive access, for the share dialog. */
+export function driveAccessFor(accessId: string, grants: DealShareDriveGrant[]) {
+  const mine = grants.filter((g) => g.access_id === accessId && g.status !== "revoked");
+  const granted = mine.filter((g) => g.status === "granted").length;
+  const failed = mine.filter((g) => g.status === "failed");
+  return { granted, failed: failed.length, error: failed[0]?.error ?? null, total: mine.length };
 }
 
 export async function lookupShareToken(token: string) {
@@ -163,5 +235,9 @@ export async function lookupShareToken(token: string) {
 export async function acceptShareToken(token: string) {
   const { data, error } = await supabase.rpc("accept_share_token", { _token: token });
   if (error) throw error;
-  return data as string; // deal_id
+  const dealId = data as string;
+  // Joining also grants view access to the deal's Google Drive files. Best
+  // effort: the owner's share dialog and every later Drive sync retry it.
+  await syncDealDriveAccess(dealId).catch(() => undefined);
+  return dealId;
 }

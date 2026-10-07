@@ -1,8 +1,9 @@
 import { useState } from "react";
-import { Copy, Check, Loader2, Link2, Trash2, UserMinus, Share2 } from "lucide-react";
+import { useEffect } from "react";
+import { Copy, Check, Loader2, Link2, Trash2, UserMinus, Share2, HardDrive, AlertCircle } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
-import { useDealShareLink, useDealShareAccessList } from "@/hooks/useDealShare";
+import { useDealShareLink, useDealShareAccessList, useDealShareDriveGrants, driveAccessFor } from "@/hooks/useDealShare";
 import { toast } from "sonner";
 
 interface Props {
@@ -16,7 +17,16 @@ interface Props {
 export function ShareDealDialog({ open, onOpenChange, dealId, dealName, ownerId }: Props) {
   const { share, shareUrl, isLoading, create, isCreating, revokeLink, isRevoking } = useDealShareLink(dealId, ownerId);
   const { accessList, revokeAccess, isRevoking: isRevokingAccess } = useDealShareAccessList(dealId, ownerId);
+  const { grants, sync: syncDrive, isSyncing: isSyncingDrive } = useDealShareDriveGrants(dealId, ownerId, open);
   const [copied, setCopied] = useState(false);
+
+  // Opening the dialog reconciles Drive access, so anyone who joined while a
+  // grant failed (or whose deck/memo landed in Drive later) is caught up.
+  const hasCollaborators = accessList.some((a) => !a.revoked_at);
+  useEffect(() => {
+    if (open && hasCollaborators) void syncDrive().catch(() => undefined);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, hasCollaborators, dealId]);
 
   const handleCreate = () => {
     create()
@@ -45,7 +55,7 @@ export function ShareDealDialog({ open, onOpenChange, dealId, dealName, ownerId 
   };
 
   const handleRevokeAccess = (id: string, name: string) => {
-    if (!confirm(`Remove ${name}'s access to this deal?`)) return;
+    if (!confirm(`Remove ${name}'s access to this deal? Their view access to its Google Drive files is removed too.`)) return;
     revokeAccess(id)
       .then(() => toast.success("Access revoked"))
       .catch((e) => toast.error(`Failed: ${e.message}`));
@@ -62,7 +72,8 @@ export function ShareDealDialog({ open, onOpenChange, dealId, dealName, ownerId 
             <Share2 className="h-4 w-4" /> Share "{dealName}"
           </DialogTitle>
           <DialogDescription>
-            Anyone with the link who is signed in to the platform can view this deal and use its chat. They cannot edit it or run agents.
+            Anyone who joins with this link can view the deal, download its decks, read its notes and memo, and gets
+            view access to its Google Drive files (every deck copy and the memo PDF). They cannot edit it or run agents.
           </DialogDescription>
         </DialogHeader>
 
@@ -119,6 +130,7 @@ export function ShareDealDialog({ open, onOpenChange, dealId, dealName, ownerId 
               <div className="flex flex-col gap-1.5">
                 {activeAccess.map((a) => {
                   const display = a.recipient_name || a.recipient_email || "Unknown user";
+                  const drive = driveAccessFor(a.id, grants);
                   return (
                     <div key={a.id} className="flex items-center justify-between gap-2 rounded-md border border-border px-3 py-2">
                       <div className="min-w-0">
@@ -126,6 +138,20 @@ export function ShareDealDialog({ open, onOpenChange, dealId, dealName, ownerId 
                         {a.recipient_email && a.recipient_name && (
                           <p className="text-[11px] text-muted-foreground truncate">{a.recipient_email}</p>
                         )}
+                        <p
+                          className={`mt-0.5 inline-flex items-center gap-1 text-[11px] ${drive.failed ? "text-destructive" : "text-muted-foreground"}`}
+                          aria-label={`Google Drive access for ${display}`}
+                          title={drive.error ?? undefined}
+                        >
+                          {drive.failed ? <AlertCircle className="h-3 w-3" /> : <HardDrive className="h-3 w-3" />}
+                          {drive.failed
+                            ? `Drive: ${drive.failed} file${drive.failed === 1 ? "" : "s"} not shared${drive.error ? ` — ${drive.error}` : ""}`
+                            : drive.granted
+                            ? `Drive: can view ${drive.granted} file${drive.granted === 1 ? "" : "s"}`
+                            : isSyncingDrive
+                            ? "Drive: sharing…"
+                            : "Drive: no files in Drive yet"}
+                        </p>
                       </div>
                       <Button
                         size="sm"

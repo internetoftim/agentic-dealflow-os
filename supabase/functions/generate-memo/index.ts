@@ -1,5 +1,6 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { getUserGoogleAccessToken } from "../_shared/google-tokens.ts";
+import { syncSharedDriveAccess } from "../_shared/share-drive-sync.ts";
 import { marked } from "https://esm.sh/marked@15.0.4";
 import { resolveChatProvider, maxTokensParam } from "../_shared/ai-provider.ts";
 import { logPipelineRun } from "../_shared/run-log.ts";
@@ -379,6 +380,9 @@ DEAL CONTEXT:
           const pdfFile = await pdfUploadRes.json();
           driveFileId = pdfFile.id;
           console.log(`PDF recap uploaded to Drive: ${driveFileName} (${driveFileId})`);
+          // Remember the memo's Drive copy and share it with the deal's collaborators.
+          await adminClient.from("deals").update({ memo_gdrive_file_id: driveFileId }).eq("id", dealId);
+          await syncSharedDriveAccess(supabaseUrl, supabaseServiceKey, dealId);
         } else {
           const errText = await pdfUploadRes.text();
           console.error("PDF upload failed:", pdfUploadRes.status, errText);

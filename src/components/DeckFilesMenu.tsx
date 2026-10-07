@@ -10,7 +10,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { isDeckSource, pickPrimarySource, type DealSource } from "@/lib/deckSources";
-import { describeSource, downloadSourceFile, sourceDriveUrl } from "@/lib/driveLinks";
+import { describeSource, downloadSourceFile, driveFileUrl, sourceDriveUrl } from "@/lib/driveLinks";
 
 /**
  * Every deck of a deal in one place: download any version, or open its copy
@@ -23,7 +23,7 @@ export function DeckFilesMenu({
   driveFolderUrl,
 }: {
   sources: DealSource[];
-  deal?: { gdrive_file_id?: string | null } | null;
+  deal?: { gdrive_file_id?: string | null; memo_gdrive_file_id?: string | null } | null;
   /** Optional: the deal's Drive folder (not yet tracked; reserved). */
   driveFolderUrl?: string | null;
 }) {
@@ -111,6 +111,22 @@ export function DeckFilesMenu({
             </div>
           );
         })}
+        {deal?.memo_gdrive_file_id && (
+          <>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem asChild>
+              <a
+                href={driveFileUrl(deal.memo_gdrive_file_id)}
+                target="_blank"
+                rel="noopener noreferrer"
+                aria-label="Open the memo PDF in Google Drive"
+                className="text-[12px]"
+              >
+                <ExternalLink className="h-3.5 w-3.5 mr-2" /> Memo PDF in Drive
+              </a>
+            </DropdownMenuItem>
+          </>
+        )}
         {driveFolderUrl && (
           <>
             <DropdownMenuSeparator />

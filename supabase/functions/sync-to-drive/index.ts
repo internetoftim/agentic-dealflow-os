@@ -1,5 +1,6 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { getUserGoogleAccessToken } from "../_shared/google-tokens.ts";
+import { syncSharedDriveAccess } from "../_shared/share-drive-sync.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -254,6 +255,9 @@ Deno.serve(async (req) => {
         .update({ gdrive_file_id: driveFile.id, status: "memo-ready" })
         .eq("id", dealId);
     }
+
+    // Collaborators the deal is already shared with get view access to the new file.
+    await syncSharedDriveAccess(supabaseUrl, supabaseServiceKey, dealId);
 
     return new Response(
       JSON.stringify({ success: true, driveFileId: driveFile.id, driveFileName, sourceId, attach }),
