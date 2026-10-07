@@ -210,3 +210,19 @@ describe("share dialog", () => {
     confirm.mockRestore();
   });
 });
+
+describe("self-healing: the one-minute cron keeps Drive access in step", () => {
+  const mig = read("supabase/migrations/20261007100000_shared_drive_backlog.sql");
+  it("finds deals with a missing grant or a revoked collaborator still holding one, server-only", () => {
+    expect(mig).toMatch(/a\.revoked_at IS NULL\s+AND \(g\.id IS NULL/);
+    expect(mig).toMatch(/g\.status = 'failed' AND g\.updated_at < now\(\) - interval '1 hour'/);
+    expect(mig).toMatch(/a\.revoked_at IS NOT NULL AND g\.status = 'granted'/);
+    expect(mig).toMatch(/REVOKE ALL ON FUNCTION public\.shared_deals_needing_drive_sync\(int\) FROM public, anon, authenticated/);
+  });
+  it("gmail-listener reconciles them every minute, after the queue reaper", () => {
+    const gl = read("supabase/functions/gmail-listener/index.ts");
+    expect(gl).toMatch(/rpc\("shared_deals_needing_drive_sync"/);
+    expect(gl.indexOf("shared_deals_needing_drive_sync")).toBeGreaterThan(gl.indexOf("healQueues({"));
+    expect(gl).toMatch(/await syncSharedDriveAccess\(supabaseUrl, supabaseServiceKey, row\.deal_id\)/);
+  });
+});

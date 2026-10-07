@@ -2,6 +2,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { getUserGoogleAccessToken } from "../_shared/google-tokens.ts";
 import { pollReceiverAccount, type ReceiverAccount } from "../_shared/gmail-receiver.ts";
 import { healQueues } from "../_shared/queue-heal.ts";
+import { syncSharedDriveAccess } from "../_shared/share-drive-sync.ts";
 import { ingestGmailMessage } from "../_shared/gmail-ingest.ts";
 
 const corsHeaders = {
@@ -258,6 +259,19 @@ Deno.serve(async (req) => {
       if (healed.failed || healed.started) console.log(`Queue reaper: failed ${healed.failed} stale job(s), started ${healed.started} queued deal(s)`);
     } catch (e) {
       console.error("Queue reaper failed:", e);
+    }
+
+    // ---- Shared-deal Drive access. Collaborators of a shared deal get view
+    // access to its Drive files (and lose it on revoke). The browser asks for
+    // this right away; this pass guarantees it even if that call never ran.
+    try {
+      const { data: pending } = await adminClient.rpc("shared_deals_needing_drive_sync", { _limit: 5 });
+      for (const row of (pending ?? []) as Array<{ deal_id: string }>) {
+        await syncSharedDriveAccess(supabaseUrl, supabaseServiceKey, row.deal_id);
+      }
+      if (pending?.length) console.log(`Shared Drive access: reconciled ${pending.length} deal(s)`);
+    } catch (e) {
+      console.error("Shared Drive access pass failed:", e);
     }
 
     // Fetch all users with gmail_label_enabled and a valid Google token
