@@ -1,6 +1,9 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { captureSync } from "../_shared/docsend-capture-client.ts";
 import { capturedDeckPath } from "../_shared/deck-sources.ts";
+import { parseCaptureReport } from "../_shared/agent-sessions-core.ts";
+import { downloadOutput, listOutputs, retrieveSession, startCaptureSession } from "../_shared/managed-agents.ts";
+import { captureBackend } from "../_shared/agent-flags.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -17,7 +20,11 @@ type RunDocsendCaptureRequest = {
   gateEmail?: string | null;
   jobId?: string;
   maxPages?: number;
+  passcode?: string | null;
   url?: string;
+  /** Internal (agent-webhook): finish the capture produced by this Managed Agents session. */
+  completeSessionId?: string;
+  failureReason?: string | null;
 };
 
 type CaptureJobRecord = {
@@ -251,7 +258,6 @@ async function processCaptureInBackground(args: {
   url: string;
   userId: string;
 }) {
-  const adminClient = createClient(args.supabaseUrl, args.supabaseServiceKey);
   const captureResult = await captureSync({
     apiKey: args.captureServiceApiKey,
     baseUrl: args.captureServiceUrl,
@@ -259,8 +265,35 @@ async function processCaptureInBackground(args: {
     maxPages: args.maxPages,
     url: args.url,
   });
+  await finishCapture(args, {
+    pdfBytes: pdfBytesFromBase64(captureResult.pdfBase64),
+    pageCount: captureResult.pageCount,
+    previewImages: captureResult.previewImages,
+  });
+}
 
-  const pdfBytes = pdfBytesFromBase64(captureResult.pdfBase64);
+type CapturedDeck = { pdfBytes: Uint8Array; pageCount: number; previewImages: string[] };
+
+/**
+ * Everything after the PDF exists: store it, record the source, complete the
+ * job and hand off to process-deck. Shared by the Cloud Run path and the
+ * Managed Agents capture session (completed via agent-webhook).
+ */
+async function finishCapture(
+  args: {
+    attach: boolean;
+    dealId: string;
+    dealSource?: string | null;
+    jobId: string;
+    supabaseServiceKey: string;
+    supabaseUrl: string;
+    url: string;
+    userId: string;
+  },
+  captureResult: CapturedDeck,
+) {
+  const adminClient = createClient(args.supabaseUrl, args.supabaseServiceKey);
+  const pdfBytes = captureResult.pdfBytes;
   const sizeMB = `${(pdfBytes.length / (1024 * 1024)).toFixed(1)}MB`;
   // The primary capture keeps deck.pdf; an attached deck gets its own file so
   // it can never overwrite the primary.
@@ -356,10 +389,85 @@ function scheduleBackgroundTask(task: Promise<unknown>) {
 }
 
 /**
+ * Completes a capture whose Managed Agents session has gone idle. Called by
+ * agent-webhook with the service-role key: { completeSessionId, failureReason? }.
+ */
+async function completeAgentCapture(
+  supabaseUrl: string,
+  supabaseServiceKey: string,
+  sessionId: string,
+  failureReason: string | null,
+): Promise<Response> {
+  const adminClient = createClient(supabaseUrl, supabaseServiceKey);
+  const { data: job } = await adminClient
+    .from("capture_jobs")
+    .select("id, deal_id, user_id, status")
+    .eq("agent_session_id", sessionId)
+    .maybeSingle();
+  if (!job) return jsonResponse({ error: "No capture job for this session" }, 404);
+  if (job.status === "completed" || job.status === "failed") return jsonResponse({ success: true, already: job.status });
+
+  const session = await retrieveSession(sessionId);
+  const meta = (session.metadata ?? {}) as Record<string, string>;
+  const attach = meta.attach === "1";
+  const url = meta.url ?? "";
+
+  try {
+    if (failureReason) throw new Error(failureReason);
+    const outputs = await listOutputs(sessionId);
+    const reportId = outputs.get("capture.json");
+    if (!reportId) throw new Error("The capture agent finished without writing capture.json.");
+    const report = parseCaptureReport(new TextDecoder().decode(await downloadOutput(reportId)));
+    if (report.status === "failed") throw new Error(report.reason);
+    const pdfId = outputs.get("deck.pdf");
+    if (!pdfId) throw new Error("The capture agent reported success but wrote no deck.pdf.");
+
+    const previewImages: string[] = [];
+    for (const name of report.previews) {
+      const id = outputs.get(name);
+      if (id) previewImages.push(`data:image/${name.endsWith(".png") ? "png" : "jpeg"};base64,${bytesToBase64(await downloadOutput(id))}`);
+    }
+
+    await finishCapture(
+      {
+        attach,
+        dealId: job.deal_id as string,
+        dealSource: meta.deal_source ?? null,
+        jobId: job.id as string,
+        supabaseServiceKey,
+        supabaseUrl,
+        url,
+        userId: job.user_id as string,
+      },
+      { pdfBytes: await downloadOutput(pdfId), pageCount: report.page_count, previewImages },
+    );
+    return jsonResponse({ success: true, jobId: job.id, pages: report.page_count });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Capture failed";
+    if (!(error instanceof ProcessDeckHandoffError)) {
+      await markCaptureFailure(supabaseUrl, supabaseServiceKey, job.deal_id as string, job.id as string, message, attach);
+    }
+    return jsonResponse({ success: false, error: message }, 200);
+  }
+}
+
+function bytesToBase64(bytes: Uint8Array): string {
+  let binary = "";
+  for (let i = 0; i < bytes.length; i += 0x8000) binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  return btoa(binary);
+}
+
+function jsonResponse(body: unknown, status = 200) {
+  return new Response(JSON.stringify(body), { status, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+}
+
+/**
  * Run DocSend Capture — background orchestration
  *
- * Uses the existing Cloud Run /capture endpoint as a pure print service.
- * All job tracking, storage writes, and pipeline handoff stay in Supabase.
+ * By default the deck is captured by a Claude Managed Agents session
+ * (managed-agents/agents/deck-capture.md) and finished by agent-webhook.
+ * CAPTURE_BACKEND=cloud-run keeps the old Cloud Run /capture service until it
+ * is retired. All job tracking, storage writes, and pipeline handoff stay in Supabase.
  */
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
@@ -391,6 +499,10 @@ Deno.serve(async (req) => {
     const isInternalCall = bearer === supabaseServiceKey;
 
     const requestBody = (await req.json()) as RunDocsendCaptureRequest;
+    if (requestBody?.completeSessionId) {
+      if (!isInternalCall) return jsonResponse({ error: "Unauthorized" }, 401);
+      return await completeAgentCapture(supabaseUrl, supabaseServiceKey, requestBody.completeSessionId, requestBody.failureReason ?? null);
+    }
     const dealId = requestBody?.dealId?.trim();
     const url = requestBody?.url?.trim();
     const requestedMaxPages = typeof requestBody?.maxPages === "number" ? requestBody.maxPages : DEFAULT_MAX_PAGES;
@@ -462,6 +574,27 @@ Deno.serve(async (req) => {
         .from("deals")
         .update({ status: "scraping", updated_at: new Date().toISOString() })
         .eq("id", dealId);
+    }
+
+    if (captureBackend() === "agent") {
+      try {
+        const { sessionId, consoleUrl } = await startCaptureSession({
+          kind: "capture",
+          url,
+          gateEmail: gateEmail || Deno.env.get("DOC_VIEWER_GATE_EMAIL") || null,
+          passcode: requestBody?.passcode ?? null,
+          maxPages,
+          ids: { job_id: captureJob.id, deal_id: dealId, user_id: ownerId, attach: attach ? "1" : "", deal_source: deal.source, url },
+          title: `Capture ${extractSlug(url)}`,
+        });
+        await adminClient.from("capture_jobs").update({ agent_session_id: sessionId, updated_at: new Date().toISOString() }).eq("id", captureJob.id);
+        console.log(`Capture session ${sessionId} for job ${captureJob.id}: ${consoleUrl}`);
+        return jsonResponse({ success: true, dealId, jobId: captureJob.id, scheduled: true, attach, sessionId });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Could not start the capture agent";
+        await markCaptureFailure(supabaseUrl, supabaseServiceKey, dealId, captureJob.id, message, attach);
+        return jsonResponse({ error: message }, 502);
+      }
     }
 
     if (!captureServiceUrl || !captureServiceApiKey) {

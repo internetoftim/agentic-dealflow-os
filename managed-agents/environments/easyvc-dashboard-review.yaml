@@ -1,0 +1,15 @@
+# Sandbox for the dashboard simplicity reviewer. Deny-by-default egress: npm and
+# apt for installs, the GitHub MCP server for the pull request, Google Fonts so
+# screenshots render with the real typefaces. The Supabase project is deliberately
+# NOT listed - the review harness serves fixture data, never production data.
+# The Playwright hosts serve the Chromium build the harness downloads.
+name: easyvc-dashboard-review
+config:
+  type: cloud
+  networking:
+    type: limited
+    allow_package_managers: true
+    allow_mcp_servers: true
+    allowed_hosts: [github.com, fonts.googleapis.com, fonts.gstatic.com, cdn.playwright.dev, playwright.download.prss.microsoft.com]
+  packages:
+    apt: [libnss3-tools, fonts-liberation]

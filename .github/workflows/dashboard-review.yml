@@ -1,0 +1,29 @@
+name: Dashboard review
+
+# Starts a Claude Managed Agents session that reviews the dashboard for visual
+# simplicity and opens a pull request with fixes (managed-agents/README.md).
+# The session runs on Anthropic's side; this job only starts it.
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 7 * * 1" # Mondays 07:00 UTC
+
+permissions:
+  contents: read
+
+jobs:
+  start-review:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: node scripts/agents/review-dashboard.mjs
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          ANTHROPIC_WORKSPACE_ID: ${{ vars.ANTHROPIC_WORKSPACE_ID }}
+          UI_REVIEW_GITHUB_TOKEN: ${{ secrets.UI_REVIEW_GITHUB_TOKEN }}

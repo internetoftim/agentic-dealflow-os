@@ -30,3 +30,6 @@ dist-ssr
 deploy-mcp.log
 .deploy-mcp.pid
 ts-tav
+
+# UI review harness screenshots
+ui-review-output/

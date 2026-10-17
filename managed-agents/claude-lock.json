@@ -1,0 +1,63 @@
+{
+  "version": 1,
+  "origin": {
+    "base_url": "https://api.anthropic.com",
+    "organization_id": "6714c6de-13c4-40eb-a1aa-00195cec60f9",
+    "workspace_id": "wrkspc_011khitCmpfWCdQ1zWcQUq8E"
+  },
+  "resources": {
+    "./agents/dashboard-reviewer.md": {
+      "kind": "agent",
+      "id": "agent_01PysvBZDcgKKrDmFeW2iUsi",
+      "version": "2",
+      "hash": "64abf051090b145750e79afa071de339",
+      "remote_hash": "e3af039401dc33fc73ced3148d34b0cd"
+    },
+    "./agents/deal-analyst.md": {
+      "kind": "agent",
+      "id": "agent_01BPM1W8EFVPmci89WBqKRDC",
+      "version": "1",
+      "hash": "7bf1119e5a44ac71444fd660a57fd6ec",
+      "remote_hash": "ae9cdf5eefbad808e2a4f2d4a9eb512c"
+    },
+    "./agents/deck-capture.md": {
+      "kind": "agent",
+      "id": "agent_014qkke4uBqwRQn72KHC4xD1",
+      "version": "2",
+      "hash": "9a51f9b140ca0e2b57633c62ef3dfa6c",
+      "remote_hash": "5a58e63b32ede75dd0160f145c5d2b35"
+    },
+    "./agents/due-diligence.md": {
+      "kind": "agent",
+      "id": "agent_018YcnVCFhMN9mXsHivGAjpe",
+      "version": "1",
+      "hash": "42e3d3ea0c20a4e4e4c4b4cb134c0647",
+      "remote_hash": "fa53515785265f3e3fe6b6aab7387a58"
+    },
+    "./agents/market-competition.md": {
+      "kind": "agent",
+      "id": "agent_01FxLrBSxe9kpJYyKXrYWqLZ",
+      "version": "1",
+      "hash": "b61983ab5fff86656929dec2aba205b9",
+      "remote_hash": "3a61eb4c8ca1c0d27de7df93e09f1bde"
+    },
+    "./environments/easyvc-dashboard-review.yaml": {
+      "kind": "environment",
+      "id": "env_01JpwWxfgGhdNpcxbavDwxAE",
+      "hash": "289315dd5509ccf08e52d2bc29d6f3eb",
+      "remote_hash": "451ac8061a16dc4623c9f2cfa27f3ba0"
+    },
+    "./environments/easyvc-research.yaml": {
+      "kind": "environment",
+      "id": "env_01BMB3WkPZgU7HGx8Qao4Wvh",
+      "hash": "da9485ddafec0ed6038478248fecc4b3",
+      "remote_hash": "2a97757e2036b5f68edc94efe4b8df9f"
+    },
+    "./vaults/easyvc-dashboard-review.yaml": {
+      "kind": "vault",
+      "id": "vlt_011Cg7VK6gSMTMTQnxHnoAgX",
+      "hash": "6f5c66814596dbb5cd74d89d0d0fe791",
+      "remote_hash": "6f5c66814596dbb5cd74d89d0d0fe791"
+    }
+  }
+}

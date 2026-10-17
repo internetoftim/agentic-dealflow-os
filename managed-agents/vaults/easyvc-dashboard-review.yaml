@@ -1,0 +1,5 @@
+# Holds the GitHub MCP credential the dashboard reviewer uses to open pull requests.
+# The file manages the container only; add the credential with:
+#   ant beta:vaults:credentials create --vault-id <vlt_ from claude-lock.json> ...
+# (see managed-agents/README.md).
+display_name: EasyVC dashboard review
