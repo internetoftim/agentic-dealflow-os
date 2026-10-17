@@ -90,3 +90,11 @@ verify_jwt = false
 # Validates the user JWT itself (same pattern as the other functions).
 [functions.get-hf-token]
 verify_jwt = false
+
+# Managed Agents diligence: validates the caller itself (service role or the deal owner's JWT).
+[functions.run-diligence]
+verify_jwt = false
+
+# Managed Agents webhooks from Anthropic: verified by HMAC signature, not a Supabase JWT.
+[functions.agent-webhook]
+verify_jwt = false

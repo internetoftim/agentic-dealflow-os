@@ -1,0 +1,12 @@
+# Sandbox shared by deck capture and deal diligence.
+# Unrestricted egress: research reaches sites we can't list in advance, and the
+# capture agent browses DocSend / Papermark / PandaDoc viewers. No secrets are
+# mounted into these sessions - inputs arrive as files, results leave as files.
+name: easyvc-research
+config:
+  type: cloud
+  networking:
+    type: unrestricted
+  packages:
+    apt: [libnss3-tools, fonts-liberation, fonts-noto-color-emoji]
+    pip: [playwright, playwright-stealth, pillow, img2pdf, pypdf]

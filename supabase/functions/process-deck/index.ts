@@ -8,6 +8,7 @@ import { hasReadableContent, identityUpdate, isPlaceholderName } from "../_share
 import { healQueues } from "../_shared/queue-heal.ts";
 import { logPipelineRun } from "../_shared/run-log.ts";
 import { EXTRACTION_VERSION } from "../_shared/feedback-log.ts";
+import { diligenceEnabledFor } from "../_shared/agent-flags.ts";
 import { BlobReader, ZipReader, TextWriter } from "https://esm.sh/@zip.js/zip.js@2.7.34";
 import { PDFDocument } from "https://esm.sh/pdf-lib@1.17.1?bundle-deps";
 
@@ -1027,10 +1028,23 @@ Deno.serve(async (req) => {
     // --- STEP 6: Final status ---
     await setDealStatus(adminClient, dealId, "memo-ready");
 
-    // --- STEP 7: Auto-trigger deep-research ---
+    // --- STEP 7: Auto-trigger research ---
     // Populates structured fields (ask, valuation, revenue, team, key people) automatically
     // so users don't have to wait for "Generate Memo" to see metadata.
-    try {
+    // With DILIGENCE_AGENT=on, every new deck starts a Managed Agents diligence
+    // session instead of deep-research (founders, claims, market, competitors).
+    if (diligenceEnabledFor(userId)) {
+      const diligence = fetch(`${supabaseUrl}/functions/v1/run-diligence`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${supabaseServiceKey}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ dealId, trigger: "pipeline" }),
+      })
+        .then(async (res) => {
+          if (!res.ok) console.error("Diligence auto-trigger HTTP error:", res.status, await res.text().catch(() => ""));
+        })
+        .catch((e) => console.error("Diligence auto-trigger failed:", e));
+      (globalThis as any).EdgeRuntime?.waitUntil?.(diligence);
+    } else try {
       const { data: existingDeal } = await adminClient
         .from("deals")
         .select("deep_research_status")

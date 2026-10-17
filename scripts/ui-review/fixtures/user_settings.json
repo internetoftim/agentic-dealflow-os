@@ -1,0 +1,9 @@
+[
+  {
+    "user_id": "00000000-0000-4000-8000-000000000001",
+    "ai_model": "claude-opus-5-5",
+    "deep_research_provider": "tavily",
+    "memo_prompt": null,
+    "agent_mode_enabled": true
+  }
+]

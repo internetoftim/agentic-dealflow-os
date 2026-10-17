@@ -1,0 +1,15 @@
+[
+  {
+    "id": "s1",
+    "deal_id": "d0000000-0000-4000-8000-000000000001",
+    "user_id": "00000000-0000-4000-8000-000000000001",
+    "file_name": "NovaStar-SeriesA.pdf",
+    "source_type": "docsend",
+    "storage_path": "demo/novastar.pdf",
+    "is_primary": true,
+    "label": null,
+    "processing_status": "processed",
+    "preview_images": [],
+    "created_at": "2026-10-15T00:58:23.735Z"
+  }
+]

@@ -3,6 +3,8 @@
 // - OAuth 2.1 endpoints (PKCE, dynamic client registration)
 // - Bearer auth: Personal Access Token (pat_*) OR OAuth access token (oauth_*) OR Supabase JWT
 // Read tools: deals, pipeline, deck context/downloads, settings, agent activity
+// Diligence: run_diligence / ask_diligence (Agent Mode) start or continue a hosted
+// Managed Agents research team; get_diligence_run / get_diligence_report read results.
 // Write tools (Agent Mode): deal CRUD, people, memo, link ingestion, deep research,
 // memo generation, processing control, sharing, workspace settings
 
@@ -10,6 +12,7 @@ import { createClient, type SupabaseClient } from "https://esm.sh/@supabase/supa
 import { getReceiverToken, pollReceiverAccount, ingestReceiverMessage, type ReceiverAccount } from "../_shared/gmail-receiver.ts";
 import { scanForCandidates, summarize, RECEIVER_QUERY } from "../_shared/gmail-ingest.ts";
 import { authorizationServerMetadata, protectedResourceMetadata, routeMcpRequest } from "../_shared/mcp-oauth.ts";
+import { sendFollowUp } from "../_shared/managed-agents.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY")!;
@@ -224,6 +227,31 @@ const TOOLS = [
     inputSchema: { type: "object", properties: { id: { type: "string" } }, required: ["id"] },
   },
   {
+    name: "get_diligence_run",
+    description:
+      "Status of the hosted diligence run for a deal (or a specific run): starting, running, collecting, completed, failed or budget_reached, with claim-verdict counts and cost once finished. Runs take roughly 10-30 minutes; check back every few minutes rather than in a tight loop.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        deal_id: { type: "string", description: "Latest run for this deal" },
+        run_id: { type: "string", description: "A specific run (from run_diligence)" },
+      },
+    },
+  },
+  {
+    name: "get_diligence_report",
+    description:
+      "The latest completed diligence report for a deal, produced by EasyVC's hosted research agents: founder backgrounds and red flags, every deck claim with a verified / contradicted / unverifiable verdict and sources, market size (bottom-up and top-down), market signals, competitors, risks, gaps, and the memo. Cite its source URLs when you use it.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        deal_id: { type: "string" },
+        include_memo: { type: "boolean", default: false },
+      },
+      required: ["deal_id"],
+    },
+  },
+  {
     name: "list_agent_activity",
     description:
       "List recent MCP tool calls made against this workspace (the audit log shown in Settings → AI Agents).",
@@ -356,6 +384,29 @@ const WRITE_TOOLS = [
       type: "object",
       properties: { deal_id: { type: "string" } },
       required: ["deal_id"],
+    },
+  },
+  {
+    name: "run_diligence",
+    description:
+      "Start EasyVC's hosted diligence team on a deal: a lead analyst plus founder/claims and market/competitor research agents that work for 10-30 minutes and write a sourced report and memo (capped at $10 per run). Use this for full diligence - checking every deck claim, founder backgrounds, market sizing, competitor maps - instead of researching it yourself turn by turn. For a quick single fact, answer directly instead. Returns a run_id; poll get_diligence_run, then read get_diligence_report. Requires Agent Mode.",
+    inputSchema: {
+      type: "object",
+      properties: { deal_id: { type: "string" } },
+      required: ["deal_id"],
+    },
+  },
+  {
+    name: "ask_diligence",
+    description:
+      "Send a follow-up to the diligence team that researched a deal (e.g. \"dig into the CTO's last company\" or \"find three more competitors in Europe\"). It continues the same session, so the agents keep everything they already found; the updated report is saved when they finish. Only after a run has completed. Requires Agent Mode.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        deal_id: { type: "string" },
+        question: { type: "string" },
+      },
+      required: ["deal_id", "question"],
     },
   },
   {
@@ -669,6 +720,38 @@ async function runTool(name: string, args: any, userId: string) {
       const ctx = await runTool("get_deal_context", { deal_id: args?.id, max_chars: 50000 }, userId);
       return { id: args?.id, title: (deal as any).deal?.name, text: (ctx as any).text, url: `${APP_ORIGIN}/?deal=${args?.id}`, metadata: (deal as any).deal };
     }
+    case "get_diligence_run": {
+      let query = admin.from("deal_diligence_runs")
+        .select("id, deal_id, status, trigger, metrics, list_cost_cents, error, created_at, completed_at")
+        .eq("user_id", userId).order("created_at", { ascending: false }).limit(1);
+      if (args?.run_id) query = query.eq("id", String(args.run_id));
+      else if (args?.deal_id) query = query.eq("deal_id", String(args.deal_id));
+      else throw new Error("deal_id or run_id required");
+      const { data, error } = await query.maybeSingle();
+      if (error) throw new Error(error.message);
+      if (!data) return { run: null, hint: "No diligence run yet. Start one with run_diligence." };
+      return {
+        run: data,
+        hint: ["completed", "budget_reached"].includes(data.status as string)
+          ? "Read the findings with get_diligence_report."
+          : data.status === "failed" ? "The run failed; see error. run_diligence starts a new one." : "Still working; check again in a few minutes.",
+      };
+    }
+    case "get_diligence_report": {
+      const id = String(args?.deal_id ?? "");
+      if (!id) throw new Error("deal_id required");
+      const { data, error } = await admin.from("deal_diligence_runs")
+        .select("id, status, report, memo_md, metrics, completed_at, version")
+        .eq("user_id", userId).eq("deal_id", id).not("report", "is", null)
+        .order("created_at", { ascending: false }).limit(1).maybeSingle();
+      if (error) throw new Error(error.message);
+      if (!data) return { report: null, hint: "No completed diligence report for this deal. Start one with run_diligence." };
+      return {
+        run_id: data.id, status: data.status, completed_at: data.completed_at, version: data.version,
+        metrics: data.metrics, report: data.report,
+        ...(args?.include_memo ? { memo: data.memo_md } : {}),
+      };
+    }
     case "list_agent_activity": {
       const limit = Math.min(args?.limit ?? 20, 100);
       const { data, error } = await admin.from("mcp_tool_calls")
@@ -698,6 +781,8 @@ async function runTool(name: string, args: any, userId: string) {
     case "update_memo":
     case "ingest_deck_link":
     case "run_deep_research":
+    case "run_diligence":
+    case "ask_diligence":
     case "generate_memo":
     case "cancel_deal_processing":
     case "delete_deal":
@@ -862,6 +947,40 @@ async function runWriteTool(name: string, args: any, userId: string) {
       (globalThis as any).EdgeRuntime?.waitUntil?.(run);
       return { started: true, deal_id: id, hint: "Poll get_deal for deep_research_status (researching → completed/failed)." };
     }
+    case "run_diligence": {
+      const id = String(args?.deal_id ?? "");
+      if (!id) throw new Error("deal_id required");
+      await assertOwnedDeal(id, userId);
+      // Awaited (it only creates the session): the caller gets the run id or the real error.
+      const res = await fetch(`${SUPABASE_URL}/functions/v1/run-diligence`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ dealId: id, trigger: "mcp" }),
+      });
+      const out = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(out?.error ?? `run-diligence failed (${res.status})`);
+      return {
+        ...out,
+        deal_id: id,
+        hint: out.already_running
+          ? "A diligence run is already in progress for this deal; poll get_diligence_run."
+          : "Diligence started. It usually takes 10-30 minutes; poll get_diligence_run every few minutes, then read get_diligence_report.",
+      };
+    }
+    case "ask_diligence": {
+      const id = String(args?.deal_id ?? "");
+      const question = String(args?.question ?? "").trim();
+      if (!id || !question) throw new Error("deal_id and question required");
+      await assertOwnedDeal(id, userId);
+      const { data: run } = await admin.from("deal_diligence_runs")
+        .select("id, session_id, status").eq("deal_id", id).eq("user_id", userId)
+        .order("created_at", { ascending: false }).limit(1).maybeSingle();
+      if (!run?.session_id) throw new Error("No diligence run for this deal yet; start one with run_diligence.");
+      if (run.status !== "completed") throw new Error(`The latest diligence run is ${run.status}; follow-ups need a completed run.`);
+      await sendFollowUp(run.session_id as string, question.slice(0, 4000));
+      await admin.from("deal_diligence_runs").update({ status: "running", updated_at: new Date().toISOString() }).eq("id", run.id);
+      return { sent: true, run_id: run.id, hint: "The team is working on it; poll get_diligence_run, then read get_diligence_report." };
+    }
     case "generate_memo": {
       const id = String(args?.deal_id ?? "");
       if (!id) throw new Error("deal_id required");
@@ -1004,10 +1123,25 @@ const PROMPTS = [
 1. Call scan_deal_inbox${a.receiver_email ? ` with receiver_email="${a.receiver_email}"` : ""}. Do not ingest yet.
 2. Show the user a compact table: sender, subject, date, each attachment with its kind (deck / document / unsupported). Group by thread if several messages share one. Flag anything that looks like spam, a newsletter, or an internal forward.
 3. Ask which to ingest (default: all decks). Then call ingest_inbox_messages with exactly those message_ids.
-4. For every 'uploaded' deal, call run_deep_research. If the user wants memos, call generate_memo after research completes (poll get_deal for deep_research_status=completed).
+4. Research starts automatically for every 'uploaded' deal (poll get_deal for deep_research_status=completed). For full diligence on a deal the user cares about, offer run_diligence. If the user wants memos, call generate_memo after research completes.
 5. Call get_ingest_report with since_days=${a.since_days || 7} and give a short written report: new deals (with names), documents attached, duplicates (and what they duplicated), unsupported files (and their types), anything failed. Suggest next actions, e.g. "3 decks are memo-ready; want a summary?"
 
 Never re-ingest a message the report shows as already processed. If no receiver inbox is connected, offer create_receiver_invite and explain the link is for whoever controls the mailbox.`,
+  },
+  {
+    name: "deal_diligence",
+    description: "Run full diligence on a deal with EasyVC's hosted research team, then walk through the findings.",
+    arguments: [
+      { name: "deal", description: "Deal name or id", required: true },
+    ],
+    render: (a: Record<string, string>) => `Run diligence on the EasyVC deal "${a.deal ?? ""}".
+
+1. Find the deal (search_deals, or get_deal if you were given an id). If several match, ask which one.
+2. Call get_diligence_run for it. If a run is already running, skip to step 4. If a completed report exists, ask whether to use it or start fresh.
+3. Call run_diligence. Tell the user it runs in the background for about 10-30 minutes and costs at most $10.
+4. Check get_diligence_run every few minutes. Don't poll faster, and don't do the research yourself in the meantime.
+5. When it completes, call get_diligence_report with include_memo=true and summarise for an investor: recommendation, the claims that were contradicted, founder red flags, market size (both methods), the strongest competitors, and the open gaps. Link sources.
+6. Offer follow-ups through ask_diligence (it keeps the team's context), e.g. digging deeper into a founder or a competitor.`,
   },
   {
     name: "weekly_pipeline_digest",
@@ -1048,7 +1182,7 @@ async function handleMcp(req: Request): Promise<Response> {
           result: {
             protocolVersion: "2024-11-05",
             capabilities: { tools: {}, prompts: {} },
-            serverInfo: { name: "easyvc", version: "1.3.0" },
+            serverInfo: { name: "easyvc", version: "1.4.0" },
           },
         };
       }
@@ -1333,7 +1467,7 @@ Deno.serve(async (req) => {
     if (route === "info") {
       return Response.json({
         name: "easyvc-mcp",
-        version: "1.3.0",
+        version: "1.4.0",
         endpoints: {
           mcp: FUNCTION_BASE,
           oauth_metadata: `${FUNCTION_BASE}/.well-known/oauth-authorization-server`,
