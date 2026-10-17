@@ -47,12 +47,25 @@ export async function decryptToken(v: string | null | undefined): Promise<string
 }
 
 // ---------------------------------------------------------------- google
-export async function refreshGoogleAccessToken(refreshToken: string): Promise<{ access_token: string; expires_in: number } | null> {
+export type RefreshResult =
+  | { ok: true; access_token: string; expires_in: number }
+  | { ok: false; dead: boolean; reason: string };
+
+/**
+ * Is a failed refresh permanent? Google answers 400 invalid_grant when the
+ * refresh token was revoked, expired, or belongs to a removed app: no retry
+ * will ever succeed. Everything else (5xx, network, rate limit) is transient.
+ */
+export function isDeadRefreshGrant(status: number, body: string): boolean {
+  return status === 400 && /invalid_grant/i.test(body);
+}
+
+export async function refreshGoogleAccessTokenDetailed(refreshToken: string): Promise<RefreshResult> {
   const clientId = Deno.env.get("GOOGLE_CLIENT_ID");
   const clientSecret = Deno.env.get("GOOGLE_CLIENT_SECRET");
   if (!clientId || !clientSecret) {
     console.error("Missing GOOGLE_CLIENT_ID or GOOGLE_CLIENT_SECRET");
-    return null;
+    return { ok: false, dead: false, reason: "missing client credentials" };
   }
   const res = await fetch(TOKEN_ENDPOINT, {
     method: "POST",
@@ -60,11 +73,18 @@ export async function refreshGoogleAccessToken(refreshToken: string): Promise<{ 
     body: new URLSearchParams({ client_id: clientId, client_secret: clientSecret, refresh_token: refreshToken, grant_type: "refresh_token" }),
   });
   if (!res.ok) {
-    console.error("Google token refresh failed:", res.status, (await res.text()).slice(0, 200));
-    return null;
+    const text = (await res.text()).slice(0, 200);
+    console.error("Google token refresh failed:", res.status, text);
+    return { ok: false, dead: isDeadRefreshGrant(res.status, text), reason: `${res.status} ${text}` };
   }
   const data = await res.json();
-  return data.access_token ? { access_token: data.access_token, expires_in: Number(data.expires_in ?? 3600) } : null;
+  if (!data.access_token) return { ok: false, dead: false, reason: "no access_token in response" };
+  return { ok: true, access_token: data.access_token, expires_in: Number(data.expires_in ?? 3600) };
+}
+
+export async function refreshGoogleAccessToken(refreshToken: string): Promise<{ access_token: string; expires_in: number } | null> {
+  const r = await refreshGoogleAccessTokenDetailed(refreshToken);
+  return r.ok ? { access_token: r.access_token, expires_in: r.expires_in } : null;
 }
 
 /** Seconds of validity left (0 if invalid/expired), plus the granted scopes. */
@@ -95,7 +115,10 @@ export async function storeUserGoogleTokens(adminClient: any, userId: string, t:
     user_id: userId,
     google_provider_token: await encryptToken(t.access_token),
   };
-  if (t.refresh_token) row.google_provider_refresh_token = await encryptToken(t.refresh_token);
+  if (t.refresh_token) {
+    row.google_provider_refresh_token = await encryptToken(t.refresh_token);
+    row.google_connection_error = null; // a fresh grant supersedes any recorded failure
+  }
   if (t.scope !== undefined) row.google_scopes = t.scope;
   const { error } = await adminClient.from("user_settings").upsert(row, { onConflict: "user_id" });
   if (error) throw new Error(`token store failed: ${error.message}`);
@@ -123,10 +146,27 @@ export async function getUserGoogleAccessToken(adminClient: any, userId: string)
     }
   }
   if (!refresh) return null;
-  const fresh = await refreshGoogleAccessToken(refresh);
-  if (!fresh) return null;
+  const fresh = await refreshGoogleAccessTokenDetailed(refresh);
+  if (!fresh.ok) {
+    if (fresh.dead) await markUserGoogleDead(adminClient, userId, fresh.reason);
+    return null;
+  }
   await storeUserGoogleTokens(adminClient, userId, { access_token: fresh.access_token, refresh_token: refresh });
   return fresh.access_token;
+}
+
+/**
+ * Google rejected the refresh token for good (invalid_grant). Switch Gmail
+ * auto-ingest off so the cron stops retrying every minute, and record why so
+ * Settings can ask the user to reconnect. Tokens are left in place: they are
+ * replaced on reconnect, and keeping them makes the failure diagnosable.
+ */
+export async function markUserGoogleDead(adminClient: any, userId: string, reason: string): Promise<void> {
+  console.warn(`Google connection for user ${userId} is dead (${reason}); disabling Gmail auto-ingest`);
+  const { error } = await adminClient.from("user_settings")
+    .update({ gmail_label_enabled: false, google_connection_error: `invalid_grant: ${reason}`.slice(0, 300) })
+    .eq("user_id", userId);
+  if (error) console.error("could not record dead Google connection:", error.message);
 }
 
 /** Revoke at Google and wipe the stored tokens; Gmail/Drive features switch off. */
@@ -163,8 +203,17 @@ export async function getReceiverAccessToken(adminClient: any, account: { id: st
     }
   }
   if (!refresh) return null;
-  const fresh = await refreshGoogleAccessToken(refresh);
-  if (!fresh) return null;
+  const fresh = await refreshGoogleAccessTokenDetailed(refresh);
+  if (!fresh.ok) {
+    if (fresh.dead) {
+      // Same rule as user_settings: a revoked inbox is disabled, not retried forever.
+      console.warn(`Receiver ${account.id}: refresh token is dead (${fresh.reason}); disabling inbox`);
+      await adminClient.from("receiver_accounts")
+        .update({ enabled: false, last_error: "Google access was revoked — reconnect this inbox" })
+        .eq("id", account.id);
+    }
+    return null;
+  }
   await storeReceiverTokens(adminClient, account.id, fresh.access_token, refresh);
   return fresh.access_token;
 }

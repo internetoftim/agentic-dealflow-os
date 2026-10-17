@@ -1273,6 +1273,7 @@ export type Database = {
           gmail_label_enabled: boolean | null
           google_provider_refresh_token: string | null
           google_provider_token: string | null
+          google_connection_error: string | null
           google_scopes: string | null
           id: string
           intake_slug: string | null
@@ -1297,6 +1298,7 @@ export type Database = {
           gmail_label_enabled?: boolean | null
           google_provider_refresh_token?: string | null
           google_provider_token?: string | null
+          google_connection_error?: string | null
           google_scopes?: string | null
           id?: string
           intake_slug?: string | null
@@ -1321,6 +1323,7 @@ export type Database = {
           gmail_label_enabled?: boolean | null
           google_provider_refresh_token?: string | null
           google_provider_token?: string | null
+          google_connection_error?: string | null
           google_scopes?: string | null
           id?: string
           intake_slug?: string | null
