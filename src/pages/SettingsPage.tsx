@@ -50,6 +50,7 @@ export default function SettingsPage() {
   const { user , requestGmailAccess } = useAuth();
   const [gmailLabel, setGmailLabel] = useState(true);
   const [googleScopes, setGoogleScopes] = useState<string | null>(null);
+  const [googleConnectionError, setGoogleConnectionError] = useState<string | null>(null);
   const [localModelId, setLocalModelId] = useState<string | null>(null);
   const hasGmailScope = !!googleScopes && googleScopes.includes("gmail.modify");
   const [driveSync, setDriveSync] = useState(true);
@@ -73,7 +74,7 @@ export default function SettingsPage() {
     if (!user) return;
     supabase
       .from("user_settings")
-      .select("ai_model, gmail_label_enabled, drive_sync_enabled, spam_filter_enabled, deep_research_provider, naming_pattern, naming_mode, drive_folder, memo_prompt, recap_naming_pattern, intake_slug, google_scopes, local_model_id")
+      .select("ai_model, gmail_label_enabled, drive_sync_enabled, spam_filter_enabled, deep_research_provider, naming_pattern, naming_mode, drive_folder, memo_prompt, recap_naming_pattern, intake_slug, google_scopes, google_connection_error, local_model_id")
       .eq("user_id", user.id)
       .single()
       .then(({ data }) => {
@@ -81,6 +82,7 @@ export default function SettingsPage() {
           setAiModel(data.ai_model === LEGACY_LOCAL_AI_MODEL ? LOCAL_AI_MODEL : (data.ai_model ?? DEFAULT_AI_MODEL));
           setGmailLabel(data.gmail_label_enabled ?? true);
           setGoogleScopes((data as any).google_scopes ?? null);
+          setGoogleConnectionError((data as any).google_connection_error ?? null);
           setLocalModelId((data as any).local_model_id ?? null);
           setDriveSync(data.drive_sync_enabled ?? true);
           setSpamFilter(data.spam_filter_enabled ?? true);
@@ -639,11 +641,16 @@ export default function SettingsPage() {
               <p className="text-xs text-muted-foreground">
                 Listen to Gmail label <code className="rounded bg-muted px-1.5 py-0.5 text-xs">deck</code> and auto-ingest attached decks
                 {!hasGmailScope && <span className="block mt-0.5 text-[11px]">Turning this on asks Google for Gmail access (not granted at sign-in).</span>}
+                {googleConnectionError && (
+                  <span className="block mt-0.5 text-[11px] text-destructive" data-testid="google-connection-error">
+                    Google stopped accepting the saved connection, so auto-ingest was paused. Turn it on again to reconnect.
+                  </span>
+                )}
               </p>
             </div>
             <Toggle checked={gmailLabel && hasGmailScope} onChange={async (v) => {
               if (!user) return;
-              if (v && !hasGmailScope) {
+              if (v && (!hasGmailScope || googleConnectionError)) {
                 // Restricted scope: ask Google for it only now, only for this user.
                 toast.message("Gmail access is granted separately — redirecting to Google");
                 await supabase

@@ -4,6 +4,7 @@ import { pollReceiverAccount, type ReceiverAccount } from "../_shared/gmail-rece
 import { healQueues } from "../_shared/queue-heal.ts";
 import { syncSharedDriveAccess } from "../_shared/share-drive-sync.ts";
 import { ingestGmailMessage } from "../_shared/gmail-ingest.ts";
+import { claimLease, releaseLease, isServiceCaller, wantsMailPoll } from "../_shared/cron-lease.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -190,8 +191,8 @@ Deno.serve(async (req) => {
     // Lets us recover deals that got stuck in "extracting" because a previous
     // listener run awaited process-deck and was killed mid-flight. Body:
     //   { "retryDealId": "<uuid>", "resumeFrom"?: "extracting" }
+    let body: any = null;
     if (req.method === "POST") {
-      let body: any = null;
       try { body = await req.clone().json(); } catch { /* not JSON */ }
       if (body?.retryDealId) {
         const { data: deal } = await adminClient
@@ -249,6 +250,27 @@ Deno.serve(async (req) => {
       }
     }
 
+    // ---- Only the cron (service role) may start a poll. verify_jwt is off for
+    // this function, so without this check anyone could trigger Gmail polling
+    // for every user. The retryDealId path above does its own owner check.
+    if (!isServiceCaller(req.headers.get("Authorization"), supabaseServiceKey)) {
+      return new Response(JSON.stringify({ error: "unauthorized" }), {
+        status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    // ---- Overlap guard. One poll at a time: if the previous cron tick is
+    // still running (slow database, slow Gmail), this one answers "skipped"
+    // instead of stacking a second run on top of it. The lease has a TTL, so a
+    // crashed run cannot block polling for more than a few minutes.
+    if (!(await claimLease(adminClient))) {
+      console.log("gmail-listener: previous run still in progress, skipping");
+      return new Response(JSON.stringify({ success: true, skipped: true }), {
+        status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+    try {
+
     // ---- Queue reaper. This function is the project's one-minute cron, so it
     // is where the processing queue heals itself: jobs that died mid-flight are
     // failed and the next queued deal is started, instead of every later upload
@@ -272,6 +294,15 @@ Deno.serve(async (req) => {
       if (pending?.length) console.log(`Shared Drive access: reconciled ${pending.length} deal(s)`);
     } catch (e) {
       console.error("Shared Drive access pass failed:", e);
+    }
+
+    // ---- Mail polling. The cron asks for it every other minute (queue
+    // healing above runs every tick); a manual trigger always polls.
+    if (!wantsMailPoll(body)) {
+      return new Response(
+        JSON.stringify({ success: true, processed: 0, receiverProcessed: 0, mailPolled: false }),
+        { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
     }
 
     // Fetch all users with gmail_label_enabled and a valid Google token
@@ -342,6 +373,9 @@ Deno.serve(async (req) => {
       JSON.stringify({ success: true, processed: totalProcessed, receiverProcessed }),
       { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
+    } finally {
+      await releaseLease(adminClient);
+    }
   } catch (error) {
     console.error("gmail-listener error:", error);
     const message = error instanceof Error ? error.message : "Unknown error";
