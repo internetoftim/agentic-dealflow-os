@@ -16,9 +16,9 @@
     "./agents/deal-analyst.md": {
       "kind": "agent",
       "id": "agent_01BPM1W8EFVPmci89WBqKRDC",
-      "version": "1",
-      "hash": "7bf1119e5a44ac71444fd660a57fd6ec",
-      "remote_hash": "ae9cdf5eefbad808e2a4f2d4a9eb512c"
+      "version": "2",
+      "hash": "400de9a51b7caf13eeb83e5901b1c9c9",
+      "remote_hash": "a8c14384b1171072764d688ff069b777"
     },
     "./agents/deck-capture.md": {
       "kind": "agent",
@@ -30,16 +30,16 @@
     "./agents/due-diligence.md": {
       "kind": "agent",
       "id": "agent_018YcnVCFhMN9mXsHivGAjpe",
-      "version": "1",
-      "hash": "42e3d3ea0c20a4e4e4c4b4cb134c0647",
-      "remote_hash": "fa53515785265f3e3fe6b6aab7387a58"
+      "version": "2",
+      "hash": "21ec2eb2b8356ad098bdcf73b974265d",
+      "remote_hash": "4e1cf4b2b567b9fadf86af61cc5d8110"
     },
     "./agents/market-competition.md": {
       "kind": "agent",
       "id": "agent_01FxLrBSxe9kpJYyKXrYWqLZ",
-      "version": "1",
-      "hash": "b61983ab5fff86656929dec2aba205b9",
-      "remote_hash": "3a61eb4c8ca1c0d27de7df93e09f1bde"
+      "version": "2",
+      "hash": "99c462f9d709e2f4c026d0c67300e3d6",
+      "remote_hash": "fd5c9be950357ba556eb5e81b89d231b"
     },
     "./environments/easyvc-dashboard-review.yaml": {
       "kind": "environment",
@@ -50,8 +50,8 @@
     "./environments/easyvc-research.yaml": {
       "kind": "environment",
       "id": "env_01BMB3WkPZgU7HGx8Qao4Wvh",
-      "hash": "da9485ddafec0ed6038478248fecc4b3",
-      "remote_hash": "2a97757e2036b5f68edc94efe4b8df9f"
+      "hash": "384eb92721a00e9387fbdc33d14cbc6d",
+      "remote_hash": "7460dc69f5d23a29d371d2966cbfb36e"
     },
     "./vaults/easyvc-dashboard-review.yaml": {
       "kind": "vault",

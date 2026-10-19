@@ -8,5 +8,5 @@ config:
   networking:
     type: unrestricted
   packages:
-    apt: [libnss3-tools, fonts-liberation, fonts-noto-color-emoji]
+    apt: [libnss3-tools, poppler-utils, fonts-liberation, fonts-noto-color-emoji]
     pip: [playwright, playwright-stealth, pillow, img2pdf, pypdf]
