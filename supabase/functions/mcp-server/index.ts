@@ -12,7 +12,7 @@ import { createClient, type SupabaseClient } from "https://esm.sh/@supabase/supa
 import { getReceiverToken, pollReceiverAccount, ingestReceiverMessage, type ReceiverAccount } from "../_shared/gmail-receiver.ts";
 import { scanForCandidates, summarize, RECEIVER_QUERY } from "../_shared/gmail-ingest.ts";
 import { authorizationServerMetadata, protectedResourceMetadata, routeMcpRequest } from "../_shared/mcp-oauth.ts";
-import { sendFollowUp } from "../_shared/managed-agents.ts";
+import { sendFollowUp } from "../_shared/managed-agents-followup.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY")!;
